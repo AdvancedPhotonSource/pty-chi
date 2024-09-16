@@ -6,13 +6,13 @@ import torch
 import h5py
 import numpy as np
 
-from ptychotorch.data_structures import *
-from ptychotorch.io_handles import PtychographyDataset
-from ptychotorch.forward_models import Ptychography2DForwardModel
-from ptychotorch.utils import (get_suggested_object_size, set_default_complex_dtype, get_default_complex_dtype, 
+from ptychointerim.ptychotorch.data_structures import *
+from ptychointerim.ptychotorch.io_handles import PtychographyDataset
+from ptychointerim.ptychotorch.forward_models import Ptychography2DForwardModel
+from ptychointerim.ptychotorch.utils import (get_suggested_object_size, set_default_complex_dtype, get_default_complex_dtype, 
                             rescale_probe)
-from ptychotorch.reconstructors import *
-from ptychotorch.metrics import MSELossOfSqrt
+from ptychointerim.ptychotorch.reconstructors import *
+from ptychointerim.ptychotorch.metrics import MSELossOfSqrt
 
 
 def test_2d_ptycho_autodiff(generate_gold=False, debug=False):

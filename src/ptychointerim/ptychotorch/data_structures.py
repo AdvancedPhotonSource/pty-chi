@@ -7,8 +7,8 @@ from torch.nn import Module, Parameter
 import numpy as np
 from numpy import ndarray
 
-import ptychotorch.image_proc as ip
-from ptychotorch.utils import to_tensor, get_default_complex_dtype
+import ptychointerim.ptychotorch.image_proc as ip
+from ptychointerim.ptychotorch.utils import to_tensor, get_default_complex_dtype
 
 
 class ComplexTensor(Module):

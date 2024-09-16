@@ -2,9 +2,9 @@ import torch
 from torch import Tensor
 from torch.nn import ModuleList
 
-from ptychotorch.data_structures import (Variable, VariableGroup, Ptychography2DVariableGroup)
-import ptychotorch.propagation as prop
-from ptychotorch.metrics import MSELossOfSqrt
+from ptychointerim.ptychotorch.data_structures import (Variable, VariableGroup, Ptychography2DVariableGroup)
+import ptychointerim.ptychotorch.propagation as prop
+from ptychointerim.ptychotorch.metrics import MSELossOfSqrt
 
 
 class ForwardModel(torch.nn.Module):

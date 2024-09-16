@@ -4,8 +4,8 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from ptychotorch.data_structures import VariableGroup
-from ptychotorch.utils import to_numpy
+from ptychointerim.ptychotorch.data_structures import VariableGroup
+from ptychointerim.ptychotorch.utils import to_numpy
 
 
 class LossTracker:

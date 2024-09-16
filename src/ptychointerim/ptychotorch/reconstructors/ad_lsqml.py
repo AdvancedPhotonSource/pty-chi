@@ -4,11 +4,11 @@ import torch
 import tqdm
 from torch.utils.data import Dataset
 
-from ptychotorch.reconstructors import AutodiffReconstructor
-from ptychotorch.data_structures import Ptychography2DVariableGroup
-from ptychotorch.forward_models import Ptychography2DForwardModel
-from ptychotorch.metrics import MSELossOfSqrt
-import ptychotorch.propagation as prop
+from ptychointerim.ptychotorch.reconstructors import AutodiffReconstructor
+from ptychointerim.ptychotorch.data_structures import Ptychography2DVariableGroup
+from ptychointerim.ptychotorch.forward_models import Ptychography2DForwardModel
+from ptychointerim.ptychotorch.metrics import MSELossOfSqrt
+import ptychointerim.ptychotorch.propagation as prop
 
 
 class ADLSQMLReconstructor(AutodiffReconstructor):

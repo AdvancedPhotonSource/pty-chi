@@ -6,7 +6,7 @@ from torchvision.transforms import GaussianBlur
 import numpy as np
 from numpy import ndarray
 
-from ptychotorch.propagation import propagate_far_field
+from ptychointerim.ptychotorch.propagation import propagate_far_field
 
 
 default_complex_dtype = torch.complex64

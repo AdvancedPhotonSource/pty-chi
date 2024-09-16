@@ -2,9 +2,9 @@ import torch
 import tqdm
 from torch.utils.data import Dataset
 
-import ptychotorch.propagation as prop
-from ptychotorch.data_structures import Ptychography2DVariableGroup
-from ptychotorch.reconstructors.base import AnalyticalIterativeReconstructor
+import ptychointerim.ptychotorch.propagation as prop
+from ptychointerim.ptychotorch.data_structures import Ptychography2DVariableGroup
+from ptychointerim.ptychotorch.reconstructors.base import AnalyticalIterativeReconstructor
 
 
 class EPIEReconstructor(AnalyticalIterativeReconstructor):
