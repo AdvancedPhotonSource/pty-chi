@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ptychotorch"
+authors = [
+    {name = ""},
+]
+description = "ptychotorch"
+readme = "README.md"
+license = {file = "LICENSE.txt"}
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "tqdm",
+    "scikit-learn",
+    "scikit-image",
+    "torchvision",
+    "torch>=2.3",
+    "pandas",
+    "h5py",
+    "tqdm"
+]
+version = "0.0.1"
+
+[tool.setuptools.packages]
+find = {}  # Scan the project directory with the default parameters
+
