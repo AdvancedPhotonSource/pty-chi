@@ -1,7 +1,8 @@
-from typing import Optional
+from typing import Optional, Tuple
 
 import pandas as pd
 import torch
+from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from ptychointerim.ptychotorch.data_structures import VariableGroup, PtychographyVariableGroup
@@ -198,6 +199,17 @@ class AnalyticalIterativeReconstructor(IterativeReconstructor):
 
             def forward(self, *args, **kwargs):
                 return update_step_func(self, *args, **kwargs)
+            
+            def process_updates(self, *args):
+                ret = []
+                for v in args:
+                    if v is not None:
+                        v = v.unsqueeze(0)
+                        if v.is_complex():
+                            v = torch.stack([v.real, v.imag], dim=-1)
+                    ret.append(v)
+                return tuple(ret)
+    
 
         self.update_step_module = EncapsulatedUpdateStep()
         if not torch.get_default_device().type == 'cpu':
@@ -207,7 +219,7 @@ class AnalyticalIterativeReconstructor(IterativeReconstructor):
             self.update_step_module.to(torch.get_default_device())
 
     @staticmethod
-    def compute_updates(update_step_module: torch.nn.Module, *args, **kwargs) -> float:
+    def compute_updates(update_step_module: torch.nn.Module, *args, **kwargs) -> Tuple[Tuple[Tensor, ...], float]:
         """
         Calculate the update vectors of optimizable variables that should be
         applied later. 
@@ -221,12 +233,14 @@ class AnalyticalIterativeReconstructor(IterativeReconstructor):
         collect the returned update vectors, reduce them, and apply the updates in
         `apply_updates` which is called outside DataParallel. 
 
-        When DataParallel is in use, the returned update vectors will have an additional
-        dimension in the front corresponding to the number of replicas.
-
-        :return: the update vectors.
+        :return: the update vectors and the batch loss. The shape of each update vector
+            is [n_replica, ..., (2 if complex else none)]. `n_replica` is 1 if only
+            CPU is used, otherwise it is the number of GPUs. If the update vector is
+            complex, it should be returned as real tensor with its real and imaginary
+            parts concatenated at the last dimension.
         """
         raise NotImplementedError
 
     def apply_updates(self, *args, **kwargs):
         raise NotImplementedError
+    
