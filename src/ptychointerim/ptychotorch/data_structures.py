@@ -55,12 +55,10 @@ class ComplexTensor(Module):
         return self.data.shape[:-1]
     
     def set_data(self, data: Union[Tensor, ndarray]):
-        requires_grad = self.data.requires_grad
         data = to_tensor(data)
         data = torch.stack([data.real, data.imag], dim=-1)
         data = data.type(torch.get_default_dtype())
-        self.data = Parameter(data)
-        self.data.requires_grad_(requires_grad)
+        self.data.copy_(to_tensor(data))
 
 
 class Variable(Module):
@@ -163,7 +161,7 @@ class Variable(Module):
         if isinstance(self.tensor, ComplexTensor):
             self.tensor.set_data(data)
         else:
-            self.tensor = to_tensor(data)
+            self.tensor.copy_(to_tensor(data))
             
     def get_grad(self):
         if isinstance(self.tensor, ComplexTensor):
