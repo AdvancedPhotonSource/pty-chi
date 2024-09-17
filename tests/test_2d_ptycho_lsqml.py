@@ -36,6 +36,7 @@ def load_data(pos_type='nominal'):
     f_meta = h5py.File('data/2d_ptycho/metadata_250_{}Pos.hdf5'.format(pos_type), 'r')
     probe = f_meta['probe'][...]
     probe = rescale_probe(probe, patterns)
+    probe = probe[None, :, :, :]
     
     positions = np.stack([f_meta['probe_position_y_m'][...], f_meta['probe_position_x_m'][...]], axis=1)
     pixel_size_m = 8e-9

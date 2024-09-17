@@ -9,6 +9,7 @@ from numpy import ndarray
 
 import ptychointerim.ptychotorch.image_proc as ip
 from ptychointerim.ptychotorch.utils import to_tensor, get_default_complex_dtype
+import ptychointerim.ptychotorch.maths as pmath
 
 
 class ComplexTensor(Module):
@@ -185,7 +186,12 @@ class Variable(Module):
         else:
             self.tensor.grad = grad
     
-    
+
+class DummyVariable(Variable):
+    def __init__(self, *args, **kwargs):
+        super().__init__(shape=(1,), optimizable=False, *args, **kwargs)
+
+
 class Object(Variable):
     
     pixel_size_m: float = 1.0
@@ -251,30 +257,214 @@ class Probe(Variable):
     n_modes = 1
     
     def __init__(self, *args, name='probe', **kwargs):
+        """
+        Represents the probe function in a tensor of shape 
+            `(n_opr_modes, n_modes, h, w)`
+        where:
+        - n_opr_modes is the number of mutually coherent probe modes used in orthogonal
+          probe relaxation (OPR). 
+        - n_modes is the number of mutually incoherent probe modes.
+
+        :param name: name of the variable, defaults to 'probe'
+        """
         super().__init__(*args, name=name, is_complex=True, **kwargs)
-        self.n_modes = self.tensor.shape[0]
+        assert len(self.shape) == 4, 'Probe tensor must be of shape (n_opr_modes, n_modes, h, w).'
         
     def shift(self, shifts: Tensor):
-        """Generate shifted probe. 
+        """
+        Generate shifted probe. 
 
         :param shifts: A tensor of shape (2,) or (N, 2) giving the shifts in pixels.
             If a (N, 2)-shaped tensor is given, a batch of shifted probes are generated.
         """
         if shifts.ndim == 1:
-            shifted_probe = ip.fourier_shift(self.tensor.complex()[None, ...], shifts[None, :])[0]
+            probe_straightened = self.tensor.complex().view(-1, *self.shape[-2:])
+            shifted_probe = ip.fourier_shift(
+                probe_straightened, 
+                shifts[None, :].repeat([[probe_straightened.shape[0], 1, 1]])
+            )
+            shifted_probe = shifted_probe.view(*self.shape)
         else:
-            shifted_probe = ip.fourier_shift(self.tensor.complex()[None, ...].repeat(shifts.shape[0], 1, 1), shifts)
+            n_shifts = shifts.shape[0]
+            n_images_each_probe = self.shape[0] * self.shape[1]
+            probe_straightened = self.tensor.complex().view(n_images_each_probe, *self.shape[-2:])
+            probe_straightened = probe_straightened.repeat(n_shifts, 1, 1)
+            shifts = shifts.repeat_interleave(n_images_each_probe, dim=0)
+            shifted_probe = ip.fourier_shift(probe_straightened, shifts)
+            shifted_probe = shifted_probe.reshape(n_shifts, *self.shape)
         return shifted_probe
+    
+    @property
+    def n_modes(self):
+        return self.tensor.shape[1]
+    
+    @property
+    def n_opr_modes(self):
+        return self.tensor.shape[0]
+    
+    @property
+    def has_multiple_opr_modes(self):
+        return self.n_opr_modes > 1
 
     def get_mode(self, mode: int):
+        return self.tensor.complex()[:, mode]
+    
+    def get_opr_mode(self, mode: int):
         return self.tensor.complex()[mode]
+    
+    def get_mode_and_opr_mode(self, mode: int, opr_mode: int):
+        return self.tensor.complex()[opr_mode, mode]
     
     def get_spatial_shape(self):
         return self.shape[-2:]
     
-    def get_all_mode_intensity(self):
-        return torch.sum((self.tensor.complex().abs()) ** 2, dim=0)
+    def get_all_mode_intensity(
+            self, 
+            opr_mode: Optional[int] = 0, 
+            weights: Optional[Union[Tensor, Variable]] = None,
+        ) -> Tensor:
+        """
+        Get the intensity of all probe modes.
 
+        :param opr_mode: the OPR mode. If this is not None, only the intensity of the chosen
+            OPR mode is calculated. Otherwise, it calculates the intensity of the weighted sum
+            of all OPR modes. In that case, `weights` must be given.
+        :param weights: a (n_opr_modes,) tensor giving the weights of OPR modes.
+        :return: _description_
+        """
+        if isinstance(weights, OPRModeWeights):
+            weights = weights.data
+        if opr_mode is not None:
+            p = self.data[opr_mode]
+        else:
+            p = (self.data * weights[None, :, :, :]).sum(0)
+        return torch.sum((p.abs()) ** 2, dim=0)
+    
+    def get_unique_probes(self, weights: Union[Tensor, Variable], mode_to_apply: Optional[int] = None) -> Tensor:
+        """
+        Creates the unique probe for one or more scan points given the weights of eigenmodes.
+        
+        :param weights: A (n_points, n_opr_modes) or (n_opr_modes,) tensor giving the weights 
+            of the eigenmodes. 
+        :param mode_to_apply: The incoherent mode for which OPR modes should be applied. The data
+            for other modes will be set to the value of the first OPR mode. If None,
+            OPR correction will be done to all incoherent modes. 
+        :return: A (n_points, n_modes, h, w) tensor of unique probes if weights.ndim == 2, 
+            or a (n_modes, h, w) tensor if weights.ndim == 1.
+        """
+        if isinstance(weights, OPRModeWeights):
+            weights = weights.data
+            
+        p_orig = None
+        if mode_to_apply is not None:
+            p_orig = self.data.copy_()
+            p = p_orig[:, [mode_to_apply], :, :]
+        else:
+            p = self.data.copy_()
+        if weights.ndim == 1:
+            unique_probe = p * weights[:, None, None, None]
+            unique_probe.sum(0)
+        else:
+            unique_probe = p[None, ...] * weights[:, :, None, None, None]
+            unique_probe.sum(1)
+            
+        # If OPR is only applied on one incoherent mode, add in the rest of the modes.
+        if mode_to_apply is not None:
+            if weights.ndim == 1:
+                # Shape of unique_probe:     (1, h, w)
+                p_orig[0, [mode_to_apply], :, :] = unique_probe
+                unique_probe = p_orig[0, ...]
+            else:
+                # Shape of unique_probe:     (n_points, 1, h, w)
+                p_orig = p_orig[None, ...].repeat(weights.shape[0], 1, 1, 1, 1)
+                p_orig[:, 0, [mode_to_apply], :, :] = unique_probe
+                unique_probe = p_orig[:, 0, ...]
+        return unique_probe
+    
+    def constrain_opr_mode_orthogonality(self, weights: Union[Tensor, Variable]):
+        """Add the following constraints to variable probe weights
+
+        1. Remove outliars from weights
+        2. Enforce orthogonality once per epoch
+        3. Sort the variable probes by their total energy
+        4. Normalize the variable probes so the energy is contained in the weight
+        
+        Adapted from Tike (https://github.com/AdvancedPhotonSource/tike). The implementation
+        in Tike assumes a separately stored variable probe eigenmodes; here we use the
+        PtychoShelves convention and regard the second and following OPR modes as eigenmodes.
+        
+        Also, this function assumes that OPR correction is only applied to the first
+        incoherent mode when mixed state probe is used, as this is what PtychoShelves does. 
+        OPR modes of other incoherent modes are ignored, for now. 
+        """
+        if isinstance(weights, OPRModeWeights):
+            weights = weights.data
+        
+        # The main mode of the probe is the first OPR mode, while the
+        # variable part of the probe is the second and following OPR modes.
+        # The main mode should not change during orthogonalization, but the
+        # variable OPR modes should all be orthogonal to it. 
+        probe = self.data
+        
+        # Normalize variable probes
+        vnorm = pmath.mnorm(probe, dim=(-2, -1), keepdims=True)
+        probe /= vnorm
+        # Shape of weights:      (n_points, n_opr_modes). 
+        # Currently, only the first incoherent mode has OPR modes, and the
+        # stored weights are for that mode.
+        weights = weights * vnorm[:, 0, 0, 0]
+
+        # Orthogonalize variable probes. With Gram-Schmidt, the first
+        # OPR mode (i.e., the main mode) should not change during orthogonalization.
+        probe = pmath.orthogonalize_gs(
+            probe,
+            dim=(-2, -1),
+            group_dim=-4,
+        )
+
+        # Compute the energies of variable OPR modes (i.e., the second and following) 
+        # in order to sort probes by energy.
+        # Shape of power:         (n_opr_modes - 1,).
+        power = pmath.norm(weights[..., 1:], dim=0) ** 2
+        
+        # Sort the probes by energy
+        sorted = torch.argsort(-power)
+        weights[:, 1:] = weights[:, sorted + 1]
+        # Apply only to the first incoherent mode.
+        probe[1:, 0, :, :] = probe[sorted + 1, 0, :, :]
+
+        # Remove outliars from variable probe weights.
+        aevol = torch.abs(weights)
+        weights = torch.minimum(
+            aevol,
+            1.5 * torch.quantile(
+                aevol,
+                0.95,
+                dim=0,
+                keepdims=True,
+            ).type(weights.dtype),
+        ) * torch.sign(weights)
+        
+        # Update stored data.
+        self.set_data(probe)
+        return weights
+    
+    
+class OPRModeWeights(Variable):
+    def __init__(self, *args, name='opr_weights', **kwargs):
+        """
+        Weights of OPR modes for each scan point.
+
+        :param name: name of the variable, defaults to 'opr_weights'
+        """
+        super().__init__(*args, name=name, is_complex=False, **kwargs)
+        assert len(self.shape) == 2, 'OPR weights must be of shape (n_scan_points, n_opr_modes).'
+        
+        self.n_opr_modes = self.tensor.shape[1]
+        
+    def get_weights(self, indices: Union[tuple[int, ...], slice]) -> Tensor:
+        return self.data[indices]
+    
 
 class ProbePositions(Variable):
     
@@ -294,7 +484,6 @@ class ProbePositions(Variable):
         
     def get_positions_in_physical_unit(self, unit: str = 'm'):
         return self.tensor * self.pixel_size_m * self.conversion_factor_dict[unit]
-
 
 
 @dataclasses.dataclass
@@ -322,11 +511,12 @@ class PtychographyVariableGroup(VariableGroup):
     probe: Probe
 
     probe_positions: ProbePositions
+    
+    opr_mode_weights: Optional[OPRModeWeights] = dataclasses.field(default_factory=DummyVariable)
 
 
 @dataclasses.dataclass
 class Ptychography2DVariableGroup(PtychographyVariableGroup):
 
     object: Object2D
-
     

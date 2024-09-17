@@ -32,6 +32,7 @@ def test_2d_ptycho_epie(generate_gold=False, debug=False):
     probe = f_meta['probe'][...]
     probe = probe[0:1, ...]
     probe = rescale_probe(probe, patterns)
+    probe = probe[None, :, :, :]
     
     positions = np.stack([f_meta['probe_position_y_m'][...], f_meta['probe_position_x_m'][...]], axis=1)
     pixel_size_m = 8e-9

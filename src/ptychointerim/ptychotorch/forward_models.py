@@ -42,6 +42,7 @@ class Ptychography2DForwardModel(ForwardModel):
         self.object = variable_group.object
         self.probe = variable_group.probe
         self.probe_positions = variable_group.probe_positions
+        self.opr_mode_weights = variable_group.opr_mode_weights
         
         # Intermediate variables. Only used if retain_intermediate is True.
         self.intermediate_variables = {
@@ -51,9 +52,22 @@ class Ptychography2DForwardModel(ForwardModel):
             'psi_far': None
         }
         
-    def forward_real_space(self, obj_patches: Tensor) -> Tensor:
-        # Shape of psi is (n_patches, n_probe_modes, h, w)
-        psi = obj_patches[:, None, :, :] * self.probe.tensor.complex()
+    def check_inputs(self):
+        if self.probe.has_multiple_opr_modes:
+            assert self.opr_mode_weights is not None, \
+                'OPRModeWeights must be given when the probe has multiple OPR modes.'
+        
+    def forward_real_space(self, indices: Tensor, obj_patches: Tensor) -> Tensor:
+        if self.probe.has_multiple_opr_modes:
+            # Shape of probe:  (batch_size, n_modes, h, w)
+            probe = self.probe.get_unique_probes(
+                self.opr_mode_weights.get_weights(indices), mode_to_apply=0
+            )
+        else:
+            # Shape of probe:  (n_modes, h, w)
+            probe = self.probe.data
+        # Shape of psi:        (batch_size, n_probe_modes, h, w)
+        psi = obj_patches[:, None, :, :] * probe
         return psi
     
     def forward_far_field(self, psi: Tensor) -> Tensor:
@@ -79,7 +93,7 @@ class Ptychography2DForwardModel(ForwardModel):
         if self.retain_intermediates:
             self.intermediate_variables['positions'] = positions
             self.intermediate_variables['obj_patches'] = obj_patches
-            psi = self.forward_real_space(obj_patches)
+            psi = self.forward_real_space(indices, obj_patches)
             psi_far = self.forward_far_field(psi)
             
             self.intermediate_variables['psi'] = psi
@@ -92,9 +106,16 @@ class Ptychography2DForwardModel(ForwardModel):
             y = y.sum(1)
         else:
             y = 0.0
+            if self.probe.has_multiple_opr_modes:
+                # Use OPR modes only for the first incoherent mode.
+                # Shape of p:       (batch_size, n_modes, h, w)
+                p = self.probe.get_unique_probes(self.opr_mode_weights.get_weights(indices), mode_to_apply=0)
+            else:
+                # Shape of p:       (n_modes, h, w)
+                p = self.probe.get_opr_mode(0)
             for i_probe_mode in range(self.probe.n_modes):
-                p = self.probe.get_mode(i_probe_mode)
-                psi = obj_patches * p
+                p_ith_mode = p[i_probe_mode] if p.ndim == 3 else p[:, i_probe_mode]
+                psi = obj_patches * p_ith_mode
                 psi_far = prop.propagate_far_field(psi)
                 y = y + torch.abs(psi_far) ** 2
                     
@@ -226,4 +247,3 @@ class PtychographyPoissonNoiseModel(PoissonNoiseModel):
         g = 1 - y_true / (y_pred + self.eps)  # Eq. 12b
         g = g[:, None, :, :] * psi_far
         return g
-        

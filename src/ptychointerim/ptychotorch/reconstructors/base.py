@@ -4,7 +4,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from ptychointerim.ptychotorch.data_structures import VariableGroup
+from ptychointerim.ptychotorch.data_structures import VariableGroup, PtychographyVariableGroup
 from ptychointerim.ptychotorch.utils import to_numpy
 
 
@@ -99,6 +99,20 @@ class Reconstructor:
         d = self.variable_group.get_config_dict()
         d.update({'reconstructor': self.__class__.__name__})
         return d
+    
+    
+class PtychographyReconstructor(Reconstructor):
+
+    def __init__(self, 
+                 variable_group: PtychographyVariableGroup, 
+                 *args, **kwargs) -> None:
+        super().__init__(variable_group, *args, **kwargs)
+        
+    def apply_constraints(self) -> None:
+        if self.variable_group.probe.optimizable:
+            self.variable_group.probe.constrain_opr_mode_orthogonality(
+                self.variable_group.opr_mode_weights
+            )
 
 
 class IterativeReconstructor(Reconstructor):
@@ -149,7 +163,7 @@ class IterativeReconstructor(Reconstructor):
                   'n_epochs': self.n_epochs})
         return d
 
-
+    
 class AnalyticalIterativeReconstructor(IterativeReconstructor):
 
     def __init__(self,

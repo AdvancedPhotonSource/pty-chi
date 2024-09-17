@@ -30,6 +30,10 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
                 "Optimizable variable {} must have 'lr' in optimizer_params.".format(var.name)
         if self.metric_function is not None:
             raise NotImplementedError('EPIEReconstructor does not support metric function yet.')
+        if self.variable_group.probe.has_multiple_opr_modes:
+            raise NotImplementedError('EPIEReconstructor does not support multiple OPR modes yet.')
+        if self.variable_group.probe.n_modes > 1:
+            raise NotImplementedError('EPIEReconstructor does not support mixed state probe yet.')
 
     def run(self, *args, **kwargs):
         torch.no_grad()
@@ -55,8 +59,6 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
         probe = update_step_module.variable_module_dict['probe']
         probe_positions = update_step_module.variable_module_dict['probe_positions']
 
-        assert probe.n_modes == 1, "This ePIE implementation only works with a single probe mode."
-
         indices = indices.cpu()
         positions = probe_positions.tensor[indices]
 
@@ -64,7 +66,7 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
         obj_patches = object_.extract_patches(
             positions, probe.get_spatial_shape()
         )
-        p = probe.get_mode(0)
+        p = probe.get_mode_and_opr_mode(0, 0)
         psi = obj_patches * p
         psi_far = prop.propagate_far_field(psi)
         y = y + torch.abs(psi_far) ** 2
@@ -114,5 +116,5 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
             delta_p = delta_p[..., 0] + 1j * delta_p[..., 1]
             delta_p = torch.mean(delta_p, dim=0)
             delta_p = probe.optimizer_params['lr'] * delta_p
-            p_new = self.variable_group.probe.get_mode(0) + delta_p
-            self.variable_group.probe.tensor.set_data(p_new[None, :, :])
+            p_new = self.variable_group.probe.get_mode_and_opr_mode(0, 0) + delta_p
+            self.variable_group.probe.set_data(p_new[None, None, :, :])

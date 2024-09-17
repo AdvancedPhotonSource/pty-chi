@@ -1,4 +1,4 @@
-from typing import Union, Literal, Callable
+from typing import Union, Literal, Callable, Optional
 
 import torch
 from torch import Tensor
@@ -18,9 +18,28 @@ def get_suggested_object_size(positions_px, probe_shape, extra=0):
     return (int(h), int(w))
 
 
-def rescale_probe(probe: Union[ndarray, Tensor], patterns: Union[ndarray, Tensor]):
+def rescale_probe(
+        probe: Union[ndarray, Tensor], 
+        patterns: Union[ndarray, Tensor], 
+        weights: Optional[Union[ndarray, Tensor]] = None
+    ) -> None:
+    """
+    Scale probe so that the sum of intensity matches that of the diffraction patterns.
+
+    :param probe: A (n_modes, h, w) or (n_opr_modes, n_modes, h, w) tensor of the probe.
+    :param patterns: A (n, h, w) tensor of diffraction patterns. 
+    :param weights: A (n_opr_modes,) tensor of weights for each OPR mode.
+    :return: the scaled probe.
+    """
     probe_tensor = torch.tensor(probe)
-    i_probe = (torch.abs(propagate_far_field(probe_tensor)) ** 2).sum().detach().cpu().numpy()
+    
+    if probe_tensor.ndim == 3:
+        i_probe = (torch.abs(propagate_far_field(probe_tensor)) ** 2).sum().detach().cpu().numpy()
+    else:
+        weights = torch.tensor(weights)
+        probe_corrected = (probe_tensor * weights[:, None, None, None]).sum(0)
+        i_probe = (torch.abs(propagate_far_field(probe_corrected)) ** 2).sum().detach().cpu().numpy()
+    
     patterns = to_numpy(patterns)
     i_data = np.sum(np.mean(patterns, axis=0))
     factor = i_data / i_probe

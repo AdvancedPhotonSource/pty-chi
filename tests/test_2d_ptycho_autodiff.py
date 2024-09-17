@@ -31,6 +31,7 @@ def test_2d_ptycho_autodiff(generate_gold=False, debug=False):
     f_meta = h5py.File('data/2d_ptycho/metadata_250_truePos.hdf5', 'r')
     probe = f_meta['probe'][...]
     probe = rescale_probe(probe, patterns)
+    probe = probe[None, :, :, :]
     
     positions = np.stack([f_meta['probe_position_y_m'][...], f_meta['probe_position_x_m'][...]], axis=1)
     pixel_size_m = 8e-9
@@ -84,4 +85,3 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     test_2d_ptycho_autodiff(generate_gold=args.generate_gold, debug=True)
-    

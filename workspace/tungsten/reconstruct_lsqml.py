@@ -32,6 +32,7 @@ f_meta = h5py.File('data/metadata_250_nominalPos.hdf5', 'r')
 probe = f_meta['probe'][...]
 
 probe = rescale_probe(probe, patterns)
+probe = probe[None, :, :, :]
 positions = np.stack([f_meta['probe_position_y_m'][...], f_meta['probe_position_x_m'][...]], axis=1)
 pixel_size_m = 8e-9
 positions_px = positions / pixel_size_m
