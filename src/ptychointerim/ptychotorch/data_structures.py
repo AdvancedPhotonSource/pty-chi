@@ -1,4 +1,4 @@
-from typing import Optional, Union, Tuple, Type
+from typing import Optional, Union, Tuple, Type, Literal
 import dataclasses
 
 import torch
@@ -183,6 +183,9 @@ class Variable(Module):
             self.tensor.data.grad = grad
         else:
             self.tensor.grad = grad
+            
+    def post_update_hook(self, *args, **kwargs):
+        pass
     
 
 class DummyVariable(Variable):
@@ -352,19 +355,19 @@ class Probe(Variable):
         """
         if isinstance(weights, OPRModeWeights):
             weights = weights.data
-            
+        
         p_orig = None
         if mode_to_apply is not None:
-            p_orig = self.data.copy_()
+            p_orig = self.data.clone()
             p = p_orig[:, [mode_to_apply], :, :]
         else:
-            p = self.data.copy_()
+            p = self.data.clone()
         if weights.ndim == 1:
             unique_probe = p * weights[:, None, None, None]
-            unique_probe.sum(0)
+            unique_probe = unique_probe.sum(0)
         else:
             unique_probe = p[None, ...] * weights[:, :, None, None, None]
-            unique_probe.sum(1)
+            unique_probe = unique_probe.sum(1)
             
         # If OPR is only applied on one incoherent mode, add in the rest of the modes.
         if mode_to_apply is not None:
@@ -379,7 +382,7 @@ class Probe(Variable):
                 unique_probe = p_orig[:, 0, ...]
         return unique_probe
     
-    def constrain_opr_mode_orthogonality(self, weights: Union[Tensor, Variable]):
+    def constrain_opr_mode_orthogonality(self, weights: Union[Tensor, Variable], eps=1e-5):
         """Add the following constraints to variable probe weights
 
         1. Remove outliars from weights
@@ -394,6 +397,9 @@ class Probe(Variable):
         Also, this function assumes that OPR correction is only applied to the first
         incoherent mode when mixed state probe is used, as this is what PtychoShelves does. 
         OPR modes of other incoherent modes are ignored, for now. 
+        
+        :param weights: a (n_points, n_opr_modes) tensor of weights.
+        :return: normalized and sorted OPR mode weights.
         """
         if isinstance(weights, OPRModeWeights):
             weights = weights.data
@@ -404,13 +410,14 @@ class Probe(Variable):
         # variable OPR modes should all be orthogonal to it. 
         probe = self.data
         
-        # Normalize variable probes
-        vnorm = pmath.mnorm(probe, dim=(-2, -1), keepdims=True)
-        probe /= vnorm
-        # Shape of weights:      (n_points, n_opr_modes). 
-        # Currently, only the first incoherent mode has OPR modes, and the
-        # stored weights are for that mode.
-        weights = weights * vnorm[:, 0, 0, 0]
+        if False:
+            # Normalize variable probes
+            vnorm = pmath.mnorm(probe, dim=(-2, -1), keepdims=True)
+            probe /= (vnorm + eps)
+            # Shape of weights:      (n_points, n_opr_modes). 
+            # Currently, only the first incoherent mode has OPR modes, and the
+            # stored weights are for that mode.
+            weights = weights * vnorm[:, 0, 0, 0]
 
         # Orthogonalize variable probes. With Gram-Schmidt, the first
         # OPR mode (i.e., the main mode) should not change during orthogonalization.
@@ -442,9 +449,15 @@ class Probe(Variable):
                 keepdims=True,
             ).type(weights.dtype),
         ) * torch.sign(weights)
-        
+            
         # Update stored data.
         self.set_data(probe)
+        return weights
+    
+    def post_update_hook(self, weights: Union[Tensor, Variable]) -> Tensor:
+        super().post_update_hook()
+        if self.has_multiple_opr_modes:
+            weights = self.constrain_opr_mode_orthogonality(weights)
         return weights
     
     
@@ -499,7 +512,7 @@ class VariableGroup:
     
     def get_config_dict(self):
         return {var.name: var.get_config_dict() for var in self.get_all_variables()}
-
+    
 
 @dataclasses.dataclass
 class PtychographyVariableGroup(VariableGroup):

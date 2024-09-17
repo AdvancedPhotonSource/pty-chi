@@ -8,6 +8,7 @@ def trim_mean(x: torch.Tensor, fraction: float = 0.1) -> torch.Tensor:
     """
     Calculate the mean of a tensor after removing a certain percentage of the
     lowest and highest values.
+
     :param x: tensor.
     :param fraction: the fraction of trim, between 0 and 1.
     :return: the trimmed mean.
@@ -19,8 +20,8 @@ def trim_mean(x: torch.Tensor, fraction: float = 0.1) -> torch.Tensor:
         return torch.mean(x[mask])
     else:
         return torch.mean(x)
-
-
+    
+    
 def orthogonalize_gs(
     x: Tensor,
     dim: Union[int, Tuple[int, ...]] = -1,
@@ -29,6 +30,7 @@ def orthogonalize_gs(
     """
     Gram-schmidt orthogonalization for complex arrays. Adapted from
     Tike (https://github.com/AdvancedPhotonSource/tike).
+
     :param x: data to be orthogonalized.
     :param dim: The axis/axes to be orthogonalized. By default only the last axis is
         orthogonalized. If axis is a tuple, then the number of orthogonal
@@ -58,17 +60,17 @@ def orthogonalize_gs(
     return torch.moveaxis(u, 0, group_dim)
 
 
-def project(a, b, dim=None):
+def project(a, b, dim=None, eps=1e-5):
     """Return complex vector projection of a onto b for along given axis."""
-    bh = b / inner(b, b, dim=dim, keepdims=True)
+    bh = b / (inner(b, b, dim=dim, keepdims=True) + eps)
     return inner(a, b, dim=dim, keepdims=True) * bh
 
 
 def inner(x, y, dim=None, keepdims=False):
     """Return the complex inner product; the order of the operands matters."""
     return (x * y.conj()).sum(dim, keepdims=keepdims)
-
-
+    
+    
 def mnorm(x, dim=-1, keepdims=False):
     """Return the vector 2-norm of x but replace sum with mean."""
     return torch.sqrt(torch.mean((x * x.conj()).real, dim=dim, keepdims=keepdims))

@@ -13,7 +13,7 @@ from ptychotorch.data_structures import *
 from ptychotorch.io_handles import PtychographyDataset
 from ptychotorch.forward_models import Ptychography2DForwardModel
 from ptychotorch.utils import (get_suggested_object_size, set_default_complex_dtype, get_default_complex_dtype, 
-                            rescale_probe, generate_initial_object)
+                            rescale_probe, generate_initial_opr_mode_weights, add_additional_opr_probe_modes_to_probe, to_tensor)
 from ptychotorch.reconstructors import *
 from ptychotorch.metrics import MSELossOfSqrt
 
@@ -32,6 +32,8 @@ probe = f_meta['probe'][...]
 
 probe = rescale_probe(probe, patterns)
 probe = probe[None, :, :, :]
+probe = add_additional_opr_probe_modes_to_probe(to_tensor(probe), n_opr_modes_to_add=3)
+
 positions = np.stack([f_meta['probe_position_y_m'][...], f_meta['probe_position_x_m'][...]], axis=1)
 pixel_size_m = 8e-9
 positions_px = positions / pixel_size_m
@@ -58,8 +60,15 @@ probe_positions = ProbePositions(
     optimizer_params={'lr': 1e-1}
 )
 
-reconstructor = AutodiffReconstructor(
-    variable_group=Ptychography2DVariableGroup(object=object, probe=probe, probe_positions=probe_positions),
+opr_mode_weights = OPRModeWeights(
+    data=generate_initial_opr_mode_weights(len(positions), probe.shape[0]),
+    optimizable=True,
+    optimizer_class=torch.optim.Adam,
+    optimizer_params={'lr': 1e-2}
+)
+
+reconstructor = AutodiffPtychographyReconstructor(
+    variable_group=Ptychography2DVariableGroup(object=object, probe=probe, probe_positions=probe_positions, opr_mode_weights=opr_mode_weights),
     dataset=dataset,
     forward_model_class=Ptychography2DForwardModel,
     batch_size=96,
@@ -79,6 +88,8 @@ tifffile.imwrite('outputs/recon_phase_{}.tif'.format(timestamp), np.angle(recon)
 tifffile.imwrite('outputs/recon_mag_{}.tif'.format(timestamp), np.abs(recon))
 json.dump(reconstructor.get_config_dict(), open('outputs/recon_{}.json'.format(timestamp), 'w'), separators=(', ', ': '), indent=4)
 reconstructor.loss_tracker.to_csv(Path('outputs') / 'recon_{}.csv'.format(timestamp))
+np.save(Path('outputs') / 'recon_probe_{}.npy'.format(timestamp), reconstructor.variable_group.probe.tensor.complex().detach().cpu().numpy())
+print(reconstructor.variable_group.opr_mode_weights.data)
 
 pos = reconstructor.variable_group.probe_positions.tensor.detach().cpu().numpy()
 f_meta = h5py.File('data/metadata_250_truePos.hdf5', 'r')
@@ -89,4 +100,3 @@ plt.plot(pos[:, 1], pos[:, 0], marker='.', label='corrected')
 plt.plot(pos_true[:, 1], pos_true[:, 0], marker='.', label='true')
 plt.legend()
 plt.show()
-

@@ -100,20 +100,6 @@ class Reconstructor:
         d = self.variable_group.get_config_dict()
         d.update({'reconstructor': self.__class__.__name__})
         return d
-    
-    
-class PtychographyReconstructor(Reconstructor):
-
-    def __init__(self, 
-                 variable_group: PtychographyVariableGroup, 
-                 *args, **kwargs) -> None:
-        super().__init__(variable_group, *args, **kwargs)
-        
-    def apply_constraints(self) -> None:
-        if self.variable_group.probe.optimizable:
-            self.variable_group.probe.constrain_opr_mode_orthogonality(
-                self.variable_group.opr_mode_weights
-            )
 
 
 class IterativeReconstructor(Reconstructor):
@@ -163,6 +149,11 @@ class IterativeReconstructor(Reconstructor):
         d.update({'batch_size': self.batch_size, 
                   'n_epochs': self.n_epochs})
         return d
+    
+    def run_post_update_hooks(self) -> None:
+        with torch.no_grad():
+            for var in self.variable_group.get_optimizable_variables():
+                var.post_update_hook()
 
     
 class AnalyticalIterativeReconstructor(IterativeReconstructor):
@@ -243,4 +234,22 @@ class AnalyticalIterativeReconstructor(IterativeReconstructor):
 
     def apply_updates(self, *args, **kwargs):
         raise NotImplementedError
-    
+
+
+class AnalyticalIterativePtychographyReconstructor(AnalyticalIterativeReconstructor):
+
+    def __init__(self, 
+                variable_group: PtychographyVariableGroup,
+                dataset: Dataset,
+                batch_size: int = 1,
+                n_epochs: int = 100,
+                metric_function: Optional[torch.nn.Module] = None,
+                 *args, **kwargs) -> None:
+        super().__init__(
+            variable_group=variable_group, 
+            dataset=dataset, 
+            batch_size=batch_size, 
+            n_epochs=n_epochs, 
+            metric_function=metric_function, 
+            *args, **kwargs
+        )
