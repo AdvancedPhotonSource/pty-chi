@@ -6,8 +6,8 @@ import cmath
 import torch
 from torch.fft import fft2, fftfreq, fftshift, ifft2, ifftshift
 
-from .device import Device
-from .support import ComplexTensor, RealTensor
+from .ptychopack.device import Device
+from .ptychopack.support import ComplexTensor, RealTensor
 
 
 @dataclass(frozen=True)
@@ -77,7 +77,7 @@ class WavefieldPropagatorParameters:
         return FY, FX
 
 
-class WavefieldPropagator(ABC):
+class WavefieldPropagator(ABC, torch.nn.Module):
 
     @abstractmethod
     def propagate_forward(self, wavefield: ComplexTensor) -> ComplexTensor:

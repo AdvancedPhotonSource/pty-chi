@@ -8,7 +8,7 @@ import numpy
 import numpy.typing
 import torch
 
-from .propagate import FourierPropagator, WavefieldPropagator
+from ptychointerim.propagate import FourierPropagator, WavefieldPropagator
 from .support import BooleanTensor, ComplexTensor, RealTensor
 
 BooleanArray: TypeAlias = numpy.typing.NDArray[numpy.bool_]
