@@ -10,13 +10,13 @@ import matplotlib.pyplot as plt
 import tifffile
 import scipy.ndimage as ndi
 
-from ptychotorch.data_structures import *
-from ptychotorch.io_handles import PtychographyDataset
-from ptychotorch.forward_models import Ptychography2DForwardModel
-from ptychotorch.utils import (get_suggested_object_size, set_default_complex_dtype, get_default_complex_dtype, 
+from ptychointerim.ptychotorch.data_structures import *
+from ptychointerim.ptychotorch.io_handles import PtychographyDataset
+from ptychointerim.forward_models import Ptychography2DForwardModel
+from ptychointerim.ptychotorch.utils import (get_suggested_object_size, set_default_complex_dtype, get_default_complex_dtype, 
                             rescale_probe, generate_initial_object)
-from ptychotorch.reconstructors import *
-from ptychotorch.metrics import MSELossOfSqrt
+from ptychointerim.ptychotorch.reconstructors import *
+from ptychointerim.metrics import MSELossOfSqrt
 
 
 logging.basicConfig(level=logging.INFO)
