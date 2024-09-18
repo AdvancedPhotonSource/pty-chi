@@ -7,7 +7,7 @@ import h5py
 import numpy as np
 
 from ptychointerim.ptychotorch.io_handles import PtychographyDataset
-from ptychointerim.ptychotorch.forward_models import Ptychography2DForwardModel
+from ptychointerim.forward_models import Ptychography2DForwardModel
 from ptychointerim.ptychotorch.utils import rescale_probe, add_additional_opr_probe_modes_to_probe, set_default_complex_dtype, to_tensor
 
 

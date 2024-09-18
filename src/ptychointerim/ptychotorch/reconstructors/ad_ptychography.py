@@ -5,7 +5,7 @@ import tqdm
 from torch.utils.data import Dataset
 
 from ptychointerim.ptychotorch.data_structures import PtychographyVariableGroup
-from ptychointerim.ptychotorch.forward_models import ForwardModel
+from ptychointerim.forward_models import ForwardModel
 from ptychointerim.ptychotorch.reconstructors.ad_general import AutodiffReconstructor
 
 

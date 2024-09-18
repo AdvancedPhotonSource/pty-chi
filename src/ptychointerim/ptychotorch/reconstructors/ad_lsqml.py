@@ -6,7 +6,7 @@ from torch.utils.data import Dataset
 
 from ptychointerim.ptychotorch.reconstructors import AutodiffReconstructor
 from ptychointerim.ptychotorch.data_structures import Ptychography2DVariableGroup
-from ptychointerim.ptychotorch.forward_models import Ptychography2DForwardModel
+from ptychointerim.forward_models import Ptychography2DForwardModel
 from ptychointerim.ptychotorch.metrics import MSELossOfSqrt
 import ptychointerim.ptychotorch.propagation as prop
 

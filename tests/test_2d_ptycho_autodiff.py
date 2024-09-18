@@ -6,7 +6,7 @@ import numpy as np
 
 from ptychointerim.ptychotorch.data_structures import *
 from ptychointerim.ptychotorch.io_handles import PtychographyDataset
-from ptychointerim.ptychotorch.forward_models import Ptychography2DForwardModel
+from ptychointerim.forward_models import Ptychography2DForwardModel
 from ptychointerim.ptychotorch.utils import (get_suggested_object_size, set_default_complex_dtype, get_default_complex_dtype, 
                                              rescale_probe, add_additional_opr_probe_modes_to_probe, generate_initial_opr_mode_weights)
 from ptychointerim.ptychotorch.reconstructors import *

@@ -9,7 +9,7 @@ from numpy import ndarray
 
 import ptychointerim.ptychotorch.image_proc as ip
 from ptychointerim.ptychotorch.utils import to_tensor, get_default_complex_dtype
-import ptychointerim.ptychotorch.maths as pmath
+import ptychointerim.maths as pmath
 
 
 class ComplexTensor(Module):
