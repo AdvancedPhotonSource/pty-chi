@@ -7,7 +7,7 @@ from torch.nn import Module, Parameter
 import numpy as np
 from numpy import ndarray
 
-import ptychointerim.ptychotorch.image_proc as ip
+import ptychointerim.image_proc as ip
 from ptychointerim.ptychotorch.utils import to_tensor, get_default_complex_dtype
 import ptychointerim.maths as pmath
 

@@ -8,9 +8,9 @@ from torch.utils.data import Dataset
 from ptychointerim.ptychotorch.reconstructors.base import AnalyticalIterativeReconstructor, LossTracker
 from ptychointerim.ptychotorch.data_structures import Ptychography2DVariableGroup
 from ptychointerim.forward_models import Ptychography2DForwardModel, PtychographyGaussianNoiseModel, PtychographyPoissonNoiseModel
-from ptychointerim.ptychotorch.metrics import MSELossOfSqrt
+from ptychointerim.metrics import MSELossOfSqrt
 import ptychointerim.ptychotorch.propagation as prop
-from ptychointerim.ptychotorch.image_proc import place_patches_fourier_shift, extract_patches_fourier_shift, gaussian_gradient
+from ptychointerim.image_proc import place_patches_fourier_shift, extract_patches_fourier_shift, gaussian_gradient
 from ptychointerim.ptychotorch.utils import chunked_processing
 import ptychointerim.maths as pmath
 

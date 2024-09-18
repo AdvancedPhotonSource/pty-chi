@@ -10,7 +10,7 @@ from ptychointerim.forward_models import Ptychography2DForwardModel
 from ptychointerim.ptychotorch.utils import (get_suggested_object_size, set_default_complex_dtype, get_default_complex_dtype, 
                                              rescale_probe, add_additional_opr_probe_modes_to_probe, generate_initial_opr_mode_weights)
 from ptychointerim.ptychotorch.reconstructors import *
-from ptychointerim.ptychotorch.metrics import MSELossOfSqrt
+from ptychointerim.metrics import MSELossOfSqrt
 
 import test_utils as tutils
 

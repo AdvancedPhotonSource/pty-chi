@@ -5,7 +5,7 @@ from torch.utils.data import Dataset
 import ptychointerim.ptychotorch.propagation as prop
 from ptychointerim.ptychotorch.data_structures import Ptychography2DVariableGroup
 from ptychointerim.ptychotorch.reconstructors.base import AnalyticalIterativeReconstructor
-from ptychointerim.ptychotorch.image_proc import place_patches_fourier_shift
+from ptychointerim.image_proc import place_patches_fourier_shift
 
 
 class EPIEReconstructor(AnalyticalIterativeReconstructor):

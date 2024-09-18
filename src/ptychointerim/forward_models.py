@@ -4,7 +4,7 @@ from torch.nn import ModuleList
 
 from ptychointerim.ptychotorch.data_structures import (Variable, VariableGroup, Ptychography2DVariableGroup)
 import ptychointerim.ptychotorch.propagation as prop
-from ptychointerim.ptychotorch.metrics import MSELossOfSqrt
+from ptychointerim.metrics import MSELossOfSqrt
 
 
 class ForwardModel(torch.nn.Module):
