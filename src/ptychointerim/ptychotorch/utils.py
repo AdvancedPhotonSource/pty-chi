@@ -100,11 +100,11 @@ def generate_gaussian_random_image(shape: tuple[int, ...], loc: float = 0.9, sig
     
 
 def to_tensor(data: Union[ndarray, Tensor], device=None, dtype=None) -> Tensor:
-    if isinstance(data, (np.ndarray, list, tuple)):
-        data = torch.tensor(data)
-            
     if device is None:
         device = torch.get_default_device()
+    if isinstance(data, (np.ndarray, list, tuple)):
+        data = torch.tensor(data, device=device)
+            
     if dtype is None:
         if data.dtype.is_complex:
             dtype = get_default_complex_dtype()
