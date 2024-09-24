@@ -5,7 +5,7 @@ from torch.utils.data import Dataset
 import ptychointerim.ptychotorch.propagation as prop
 from ptychointerim.ptychotorch.data_structures import Ptychography2DVariableGroup
 from ptychointerim.ptychotorch.reconstructors.base import AnalyticalIterativeReconstructor
-from ptychointerim.image_proc import place_patches_fourier_shift
+from ptychointerim.image_proc import place_patches_fourier_shift, find_cross_corr_peak, extract_patches_fourier_shift
 
 
 class EPIEReconstructor(AnalyticalIterativeReconstructor):
@@ -43,18 +43,46 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
                 input_data = [x.to(torch.get_default_device()) for x in batch_data[:-1]]
                 y_true = batch_data[-1].to(torch.get_default_device())
 
-                (delta_o, delta_p), batch_loss = self.update_step_module(*input_data, y_true)
-                self.apply_updates(delta_o, delta_p)
+                (delta_o, delta_p), batch_loss = self.update_step_module(*input_data, y_true, i_epoch)
+                self.apply_updates(delta_o, delta_p, input_data)
                 batch_loss = torch.mean(batch_loss)
 
                 self.loss_tracker.update_batch_loss_with_value(batch_loss.item())
             self.loss_tracker.conclude_epoch(epoch=i_epoch)
             self.loss_tracker.print_latest()
 
+
+    @staticmethod
+    def update_probe_positions(obj_patches, updated_obj_patches, indices, probe_positions, probe):
+
+        delta_pos = None
+        if probe_positions.optimizable:
+            positions = probe_positions.data
+
+            # Initialize updates
+            delta_pos = torch.zeros_like(probe_positions.data)
+
+            probe_thresh = probe.data.abs().max() * 0.1
+            probe_mask = probe.data[0, 0].abs() > probe_thresh
+
+            for i in range(len(positions[indices])):
+                _, delta_pos[indices[i]] = find_cross_corr_peak(
+                    updated_obj_patches[i] * probe_mask,
+                    obj_patches[i] * probe_mask,
+                    scale=20000, real_space_width=.01
+                )
+                delta_pos[indices[i]] *= -1
+                
+        if delta_pos is not None:
+            probe_positions.set_grad(-delta_pos)
+            probe_positions.optimizer.step()
+    
+
     @staticmethod
     def compute_updates(update_step_module: torch.nn.Module,
                         indices: torch.Tensor,
-                        y_true: torch.Tensor
+                        y_true: torch.Tensor,
+                        i_epoch
         ) -> tuple[torch.Tensor, ...]:
         """
         Calculates the updates of the whole object, the probe, and other variables.
@@ -83,6 +111,11 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
         if object_.optimizable:
             delta_o_patches = p.conj() / (torch.abs(p) ** 2).max()
             delta_o_patches = delta_o_patches * (psi_prime - psi)
+            # Update the position before updating the object
+            if probe_positions.optimizable and i_epoch > 0:
+                updated_obj_patches = obj_patches + delta_o_patches * object_.optimizer_params['lr']
+                EPIEReconstructor.update_probe_positions(obj_patches, updated_obj_patches, indices, probe_positions, probe)
+                positions = probe_positions.tensor[indices]
             delta_o = place_patches_fourier_shift(torch.zeros_like(object_.data), positions + object_.center_pixel, delta_o_patches, op='add')
 
         delta_p_all_modes = None
@@ -105,7 +138,7 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
         batch_loss = torch.mean((torch.sqrt(y) - torch.sqrt(y_true)) ** 2)
         return (delta_o, delta_p_all_modes), torch.atleast_1d(batch_loss)
 
-    def apply_updates(self, delta_o, delta_p, *args, **kwargs):
+    def apply_updates(self, delta_o, delta_p, indices, *args, **kwargs):
         """
         Apply updates to optimizable parameters given the updates calculated by self.compute_updates.
 
@@ -126,4 +159,3 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
             delta_p = delta_p.mean(0)
             probe.set_grad(-delta_p)
             probe.optimizer.step()
-    

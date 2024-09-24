@@ -187,6 +187,39 @@ def convolve2d(image: Tensor,
     return result
     
 
+def find_cross_corr_peak(f, g, scale, x0=0, y0=0, real_space_width=3, dtype=torch.complex128):
+    # Find the shift applied to g that maximizes the cross-correlation
+    # of f and g
+
+    dtype_real = torch.tensor(1+1j, dtype=dtype).real.dtype
+
+    M, N = f.shape
+    u = torch.fft.fftfreq(M, 1, dtype=dtype_real)[:, None]
+    v = torch.fft.fftfreq(N, 1, dtype=dtype_real)[:, None]
+    
+    F = torch.fft.fft2(f.to(dtype))
+    G = torch.fft.fft2(g.to(dtype))
+
+    FG = F*G.conj()
+
+    num_pts = int(real_space_width*scale/2) * 2 + 1
+    span = torch.linspace(-real_space_width/2, real_space_width/2, num_pts, dtype=dtype_real)
+
+    x = x0 + span[:, None]
+    y = y0 + span[:, None]
+
+    # Do inverse FFT using matrix multiplication
+    y_exp = torch.exp(2j * torch.pi * torch.matmul(v, y.transpose(1, 0))).to(dtype)
+    tmp = torch.matmul(FG, y_exp)
+    x_exp = torch.exp(2j * torch.pi * torch.matmul(x, u.transpose(1, 0))).to(dtype)
+    corr = torch.matmul(x_exp, tmp)
+
+    max_idx = torch.tensor(torch.unravel_index(torch.argmax(corr.abs()), corr.shape))
+    est_shift = torch.tensor([x[max_idx[0]] , y[max_idx[1]]])
+
+    return corr, est_shift
+    
+    
 if __name__ == '__main__':
     img = torch.zeros(10, 10)
     img[5:, 5:] = 1
