@@ -23,7 +23,6 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
             batch_size=batch_size,
             n_epochs=n_epochs,
             *args, **kwargs)
-        self.check_inputs()
 
     def check_inputs(self, *args, **kwargs):
         for var in self.variable_group.get_optimizable_variables():

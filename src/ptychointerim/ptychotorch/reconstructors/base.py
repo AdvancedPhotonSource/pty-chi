@@ -92,9 +92,13 @@ class Reconstructor:
     def __init__(self, variable_group: VariableGroup):
         self.loss_tracker = LossTracker()
         self.variable_group = variable_group
+                
+    def check_inputs(self, *args, **kwargs):
+        pass
 
     def build(self) -> None:
-        pass
+        self.check_inputs()
+
 
     def get_config_dict(self) -> dict:
         d = self.variable_group.get_config_dict()

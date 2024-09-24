@@ -33,23 +33,14 @@ probe = f_meta['probe'][...]
 
 probe = rescale_probe(probe, patterns)
 probe = probe[None, :, :, :]
+probe = add_additional_opr_probe_modes_to_probe(to_tensor(probe), n_opr_modes_to_add=3)
+
 positions = np.stack([f_meta['probe_position_y_m'][...], f_meta['probe_position_x_m'][...]], axis=1)
 pixel_size_m = 8e-9
 positions_px = positions / pixel_size_m
 
-initial_object_mag = tifffile.imread('outputs/autodiff_reproducing_epie_size128/recon_mag_20240905150009.tif')
-initial_object_phase = tifffile.imread('outputs/autodiff_reproducing_epie_size128/recon_phase_20240905150009.tif')
-initial_object = initial_object_mag * np.exp(1j * initial_object_phase)
-target_shape = get_suggested_object_size(positions_px, probe.shape[-2:], extra=100)
-initial_object = ndi.zoom(initial_object, (target_shape[0] / initial_object.shape[0], target_shape[1] / initial_object.shape[1]))
-initial_object = to_tensor(initial_object)
-
-###
-initial_object = torch.ones(target_shape, dtype=get_default_complex_dtype())
-###
-
 object = Object2D(
-    data=initial_object, 
+    data=torch.ones(get_suggested_object_size(positions_px, probe.shape[-2:], extra=100), dtype=get_default_complex_dtype()), 
     pixel_size_m=pixel_size_m,
     optimizable=True,
     optimizer_class=torch.optim.SGD,
@@ -70,12 +61,20 @@ probe_positions = ProbePositions(
     optimizer_params={'lr': 1e-1}
 )
 
+opr_mode_weights = OPRModeWeights(
+    data=generate_initial_opr_mode_weights(len(positions_px), probe.shape[0], eigenmode_weight=0.1),
+    optimizable=True,
+    optimizer_class=torch.optim.SGD,
+    optimizer_params={'lr': 1}
+)
+
 reconstructor = LSQMLReconstructor(
-    variable_group=Ptychography2DVariableGroup(object=object, probe=probe, probe_positions=probe_positions),
+    variable_group=Ptychography2DVariableGroup(object=object, probe=probe, probe_positions=probe_positions, opr_mode_weights=opr_mode_weights),
     dataset=dataset,
-    batch_size=48,
+    batch_size=44,
     n_epochs=64,
     noise_model='gaussian',
+    metric_function=MSELossOfSqrt(),
 )
 reconstructor.build()
 reconstructor.run()
@@ -90,6 +89,9 @@ tifffile.imwrite('outputs/recon_phase_{}.tif'.format(timestamp), np.angle(recon)
 tifffile.imwrite('outputs/recon_mag_{}.tif'.format(timestamp), np.abs(recon))
 json.dump(reconstructor.get_config_dict(), open('outputs/recon_{}.json'.format(timestamp), 'w'), separators=(', ', ': '), indent=4)
 reconstructor.loss_tracker.to_csv(Path('outputs') / 'recon_{}.csv'.format(timestamp))
+np.save(Path('outputs') / 'recon_probe_{}.npy'.format(timestamp), reconstructor.variable_group.probe.tensor.complex().detach().cpu().numpy())
+reconstructor.variable_group.probe.save_tiff(Path('outputs') / 'recon_probe_{}'.format(timestamp))
+np.savetxt(Path('outputs') / 'recon_opr_weights_{}.txt'.format(timestamp), reconstructor.variable_group.opr_mode_weights.data.detach().cpu().numpy())
 
 pos = reconstructor.variable_group.probe_positions.tensor.detach().cpu().numpy()
 f_meta = h5py.File('data/metadata_250_truePos.hdf5', 'r')
@@ -100,4 +102,3 @@ plt.plot(pos[:, 1], pos[:, 0], marker='.', label='corrected')
 plt.plot(pos_true[:, 1], pos_true[:, 0], marker='.', label='true')
 plt.legend()
 plt.show()
-

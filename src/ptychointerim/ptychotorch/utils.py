@@ -74,16 +74,17 @@ def add_additional_opr_probe_modes_to_probe(probe: Tensor, n_opr_modes_to_add: i
     return probe
 
 
-def generate_initial_opr_mode_weights(n_points: int, n_opr_modes: int) -> Tensor:
+def generate_initial_opr_mode_weights(n_points: int, n_opr_modes: int, eigenmode_weight: float = 0.0) -> Tensor:
     """
     Generate initial weights for OPR modes, where the weights of the main OPR mode are set to 1,
     and the weights of eigenmodes are set to 0.
-
+    
     :param n_points: number of scan points. 
     :param n_opr_modes: number of OPR modes.
+    :param eigenmode_weight: initial weight for eigenmodes.
     :return: a (n_points, n_opr_modes) tensor of weights.
     """
-    return torch.cat([torch.ones([n_points, 1]), torch.zeros([n_points, n_opr_modes - 1])], dim=1)
+    return torch.cat([torch.ones([n_points, 1]), torch.full([n_points, n_opr_modes - 1], eigenmode_weight)], dim=1)
 
 
 def generate_gaussian_random_image(shape: tuple[int, ...], loc: float = 0.9, sigma: float = 0.1, 
