@@ -7,7 +7,7 @@ import numpy as np
 from numpy import ndarray
 
 from ptychointerim.ptychotorch.propagation import propagate_far_field
-import ptychotorch.maths as pmath
+import ptychointerim.maths as pmath
 
 
 default_complex_dtype = torch.complex64
