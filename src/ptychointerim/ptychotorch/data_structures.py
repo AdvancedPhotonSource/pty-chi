@@ -519,7 +519,8 @@ class OPRModeWeights(Variable):
     # TODO: update_relaxation is only used for LSQML. We should create dataclasses
     # to contain additional options for Variable classes, and subclass them for specific
     # reconstruction algorithms - for example, OPRModeWeightsOptions -> LSQMLOPRModeWeightsOptions.
-    def __init__(self, *args, name='opr_weights', update_relaxation=0.1, **kwargs):
+    def __init__(self, *args, name='opr_weights', update_relaxation=0.1, optimize_eigenmode_weights=True, 
+                 optimize_intensity_variation=False, **kwargs):
         """
         Weights of OPR modes for each scan point.
 
@@ -529,8 +530,16 @@ class OPRModeWeights(Variable):
         """
         super().__init__(*args, name=name, is_complex=False, **kwargs)
         assert len(self.shape) == 2, 'OPR weights must be of shape (n_scan_points, n_opr_modes).'
+        if self.optimizable:
+            assert (optimize_eigenmode_weights or optimize_intensity_variation), \
+                'When OPRModeWeights is optimizable, at least one of optimize_eigenmode_weights ' \
+                'and optimize_intensity_variation should be set to True.'
         
         self.update_relaxation = update_relaxation
+        # TODO: AD optimizes both eigenmode weights and intensity variation when self.optimizable is True.
+        # They should be separately controllable. 
+        self.optimize_eigenmode_weights = optimize_eigenmode_weights
+        self.optimize_intensity_variation = optimize_intensity_variation
         
         self.n_opr_modes = self.tensor.shape[1]
         
@@ -604,4 +613,3 @@ class PtychographyVariableGroup(VariableGroup):
 class Ptychography2DVariableGroup(PtychographyVariableGroup):
 
     object: Object2D
-    

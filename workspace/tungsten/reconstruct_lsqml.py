@@ -14,7 +14,8 @@ from ptychointerim.ptychotorch.data_structures import *
 from ptychointerim.ptychotorch.io_handles import PtychographyDataset
 from ptychointerim.forward_models import Ptychography2DForwardModel
 from ptychointerim.ptychotorch.utils import (get_suggested_object_size, set_default_complex_dtype, get_default_complex_dtype, 
-                            rescale_probe, generate_initial_object)
+                                            rescale_probe, add_additional_opr_probe_modes_to_probe, generate_initial_opr_mode_weights, 
+                                            to_tensor)
 from ptychointerim.ptychotorch.reconstructors import *
 from ptychointerim.metrics import MSELossOfSqrt
 
@@ -64,8 +65,8 @@ probe_positions = ProbePositions(
 opr_mode_weights = OPRModeWeights(
     data=generate_initial_opr_mode_weights(len(positions_px), probe.shape[0], eigenmode_weight=0.1),
     optimizable=True,
-    optimizer_class=torch.optim.SGD,
-    optimizer_params={'lr': 1}
+    optimize_intensity_variation=True,
+    optimize_eigenmode_weights=True
 )
 
 reconstructor = LSQMLReconstructor(

@@ -175,8 +175,13 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
         if self.variable_group.object.optimizable:
             self._apply_object_update(alpha_o_i, delta_o_hat)
             
-        if self.variable_group.probe.has_multiple_opr_modes and self.variable_group.opr_mode_weights.optimizable:
+        if self.variable_group.probe.has_multiple_opr_modes and self.variable_group.opr_mode_weights.optimizable and \
+                self.variable_group.opr_mode_weights.optimize_eigenmode_weights:
             self.update_opr_probe_modes_and_weights(indices, chi, delta_p_i, delta_p_hat, obj_patches)
+            
+        if self.variable_group.opr_mode_weights.optimizable and self.variable_group.opr_mode_weights.optimize_intensity_variation:
+            delta_weights_int = self._calculate_intensity_variation_update_direction(indices, chi, obj_patches)
+            self._apply_variable_intensity_updates(delta_weights_int)
         
     def calculate_object_and_probe_update_step_sizes(self, indices, chi, obj_patches, delta_o_i, delta_p_i, gamma=1e-5):
         """
@@ -450,6 +455,27 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
         weights_i = weights_i + relax_v * weight_update
                 
         return eigenmode_i, weights_i
+    
+    def _calculate_intensity_variation_update_direction(self, indcies, chi, obj_patches):
+        """
+        Update variable intensity scaler - i.e., the OPR mode weight corresponding to the main mode.
+        
+        This implementation is adapted from PtychoShelves code (update_variable_probe.m) and has some
+        differences from Eq. 31 of Odstrcil (2018).
+        """
+        mean_probe = self.variable_group.probe.get_mode_and_opr_mode(mode=0, opr_mode=0)
+        op = obj_patches * mean_probe
+        num = torch.real(op.conj() * chi[:, 0, ...])
+        denom = op.abs() ** 2
+        delta_weights_int_i = torch.sum(num, dim=(-2, -1)) / torch.sum(denom, dim=(-2, -1))
+        # Pad it to the same shape as opr_mode_weights.
+        delta_weights_int = torch.zeros_like(self.variable_group.opr_mode_weights.data)
+        delta_weights_int[indcies, 0] = delta_weights_int_i
+        return delta_weights_int
+        
+    def _apply_variable_intensity_updates(self, delta_weights_int):
+        weights = self.variable_group.opr_mode_weights
+        weights.set_data(weights.data + 0.1 * delta_weights_int)
     
     def prepare_data(self, *args, **kwargs):
         self.variable_group.probe.normalize_eigenmodes()
