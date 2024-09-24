@@ -112,7 +112,7 @@ class Variable(Module):
         if self.is_complex:
             return self.tensor.complex()
         else:
-            return self.tensor
+            return self.tensor.clone()
             
     def build_optimizer(self):
         if self.optimizable and self.optimizer_class is None:
