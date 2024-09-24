@@ -49,7 +49,7 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
         self.noise_model = {
             'gaussian': PtychographyGaussianNoiseModel, 
             'poisson': PtychographyPoissonNoiseModel
-            }[noise_model](**noise_model_params)
+            }[noise_model](**noise_model_params, valid_pixel_mask=self.dataset.valid_pixel_mask.clone())
         
         self.alpha_psi_far = 0.5
         self.alpha_psi_far_all_points = None
@@ -68,10 +68,14 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
     def build(self) -> None:
         super().build()
         self.build_cached_variables()
+        self.build_noise_model()
         
     def build_loss_tracker(self):
         f = self.noise_model.nll if self.metric_function is None else self.metric_function
         self.loss_tracker = LossTracker(metric_function=f)
+        
+    def build_noise_model(self):
+        self.noise_model = self.noise_model.to(torch.get_default_device())
         
     def build_cached_variables(self):
         self.alpha_psi_far_all_points = torch.full(

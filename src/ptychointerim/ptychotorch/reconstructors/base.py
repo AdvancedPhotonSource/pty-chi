@@ -144,6 +144,7 @@ class IterativeReconstructor(Reconstructor):
                                      batch_size=self.batch_size,
                                      generator=torch.Generator(device=torch.get_default_device()),
                                      shuffle=True)
+        self.dataset.move_attributes_to_device(torch.get_default_device())
 
     def build_loss_tracker(self):
         self.loss_tracker = LossTracker(metric_function=self.metric_function)

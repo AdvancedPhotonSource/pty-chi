@@ -1,3 +1,4 @@
+from typing import Optional
 import torch
 from torch import Tensor
 from torch.nn import ModuleList
@@ -174,10 +175,11 @@ class Ptychography2DForwardModel(ForwardModel):
 
 
 class NoiseModel(torch.nn.Module):
-    def __init__(self, eps=1e-6) -> None:
+    def __init__(self, eps=1e-6, valid_pixel_mask: Optional[Tensor] = None) -> None:
         super().__init__()
         self.eps = eps
         self.noise_statistics = None
+        self.valid_pixel_mask = valid_pixel_mask
         
     def nll(self, y_pred: Tensor, y_true: Tensor) -> Tensor:
         """
@@ -194,8 +196,8 @@ class NoiseModel(torch.nn.Module):
         raise NotImplementedError
         
 class GaussianNoiseModel(NoiseModel):
-    def __init__(self, sigma: float = 0.5, eps: float = 1e-6) -> None:
-        super().__init__(eps=eps)
+    def __init__(self, sigma: float = 0.5, eps: float = 1e-6, *args, **kwargs) -> None:
+        super().__init__(eps=eps, *args, **kwargs)
         self.noise_statistics = 'gaussian'
         self.sigma = sigma
         self.loss_function = MSELossOfSqrt()
@@ -208,8 +210,8 @@ class GaussianNoiseModel(NoiseModel):
     
     
 class PtychographyGaussianNoiseModel(GaussianNoiseModel):
-    def __init__(self, sigma: float = 0.5, eps: float = 1e-6) -> None:
-        super().__init__(sigma=sigma, eps=eps)
+    def __init__(self, sigma: float = 0.5, eps: float = 1e-6, *args, **kwargs) -> None:
+        super().__init__(sigma=sigma, eps=eps, *args, **kwargs)
     
     def backward_to_psi_far(self, y_pred, y_true, psi_far):
         """
@@ -218,14 +220,16 @@ class PtychographyGaussianNoiseModel(GaussianNoiseModel):
         # Shape of g:       (batch_size, h, w)
         # Shape of psi_far: (batch_size, n_probe_modes, h, w)
         g = (1 - torch.sqrt(y_true / (y_pred + self.eps) + self.eps)) # Eq. 12b
+        if self.valid_pixel_mask is not None:
+            g[:, torch.logical_not(self.valid_pixel_mask)] = 0
         w = 1 / (2 * self.sigma) ** 2
         g = 2 * w * g[:, None, :, :] * psi_far
         return g
         
         
 class PoissonNoiseModel(NoiseModel):
-    def __init__(self, eps: float = 1e-6) -> None:
-        super().__init__(eps=eps)
+    def __init__(self, eps: float = 1e-6, *args, **kwargs) -> None:
+        super().__init__(eps=eps, *args, **kwargs)
         self.noise_statistics = 'poisson'
         self.loss_function = torch.nn.PoissonNLLLoss(log_input=False)
 
@@ -237,13 +241,16 @@ class PoissonNoiseModel(NoiseModel):
     
 
 class PtychographyPoissonNoiseModel(PoissonNoiseModel):
-    def __init__(self, eps: float = 1e-6) -> None:
-        super().__init__(eps=eps)
+    def __init__(self, eps: float = 1e-6, *args, **kwargs) -> None:
+        super().__init__(eps=eps, *args, **kwargs)
         
     def backward_to_psi_far(self, y_pred: Tensor, y_true: Tensor, psi_far: Tensor):
         """
         Compute the gradient of the NLL with respect to far field wavefront.
         """
         g = 1 - y_true / (y_pred + self.eps)  # Eq. 12b
+        if self.valid_pixel_mask is not None:
+            g[:, torch.logical_not(self.valid_pixel_mask)] = 0
         g = g[:, None, :, :] * psi_far
         return g
+    
