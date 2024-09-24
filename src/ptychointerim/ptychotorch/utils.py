@@ -7,6 +7,7 @@ import numpy as np
 from numpy import ndarray
 
 from ptychointerim.ptychotorch.propagation import propagate_far_field
+import ptychotorch.maths as pmath
 
 
 default_complex_dtype = torch.complex64
@@ -60,7 +61,7 @@ def generate_initial_object(shape: tuple[int, ...], method: Literal['random'] = 
     return obj
 
 
-def add_additional_opr_probe_modes_to_probe(probe: Tensor, n_opr_modes_to_add: int) -> Tensor:
+def add_additional_opr_probe_modes_to_probe(probe: Tensor, n_opr_modes_to_add: int, normalize: bool = True) -> Tensor:
     assert probe.ndim == 4
     n_modes = probe.shape[1]
     opr_modes = torch.empty([n_opr_modes_to_add, n_modes, probe.shape[-2], probe.shape[-1]], dtype=get_default_complex_dtype())
@@ -69,6 +70,8 @@ def add_additional_opr_probe_modes_to_probe(probe: Tensor, n_opr_modes_to_add: i
             mag = generate_gaussian_random_image(probe.shape[-2:], loc=0.01, sigma=0.01, smoothing=3.0).clamp(0.0, 1.0)
             phase = generate_gaussian_random_image(probe.shape[-2:], loc=0.0, sigma=0.05, smoothing=3.0).clamp(-torch.pi, torch.pi)
             opr_mode = mag * torch.exp(1j * phase)
+            if normalize:
+                opr_mode = opr_mode / pmath.mnorm(opr_mode, dim=(-2, -1))
             opr_modes[i, j, ...] = opr_mode
     probe = torch.cat([probe, opr_modes], dim=0)
     return probe
