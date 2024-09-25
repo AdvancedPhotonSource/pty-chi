@@ -83,6 +83,10 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
             fill_value=0.5
         )
         
+    def prepare_data(self, *args, **kwargs):
+        self.variable_group.probe.normalize_eigenmodes()
+        logging.info('Probe eigenmodes normalized.')
+        
     def get_psi_far_step_size(self, y_pred, y_true, indices, eps=1e-5):
         if isinstance(self.noise_model, PtychographyGaussianNoiseModel):
             alpha = torch.tensor(0.5, device=y_pred.device)  # Eq. 16
@@ -480,32 +484,21 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
     def _apply_variable_intensity_updates(self, delta_weights_int):
         weights = self.variable_group.opr_mode_weights
         weights.set_data(weights.data + 0.1 * delta_weights_int)
-    
-    def prepare_data(self, *args, **kwargs):
-        self.variable_group.probe.normalize_eigenmodes()
-        logging.info('Probe eigenmodes normalized.')
         
-    def run(self, *args, **kwargs):
-        with torch.no_grad():
-            self.prepare_data()
-            for i_epoch in tqdm.trange(self.n_epochs):
-                
-                # Update preconditioner at the start of each epoch
-                self.update_preconditioners()
-                
-                for batch_data in self.dataloader:
-                    input_data = [x.to(torch.get_default_device()) for x in batch_data[:-1]]
-                    indices = input_data[0]
-                    y_true = batch_data[-1].to(torch.get_default_device())
-
-                    y_pred = self.forward_model(*input_data)
+    def run_pre_run_hooks(self) -> None:
+        self.prepare_data()
+        
+    def run_pre_epoch_hooks(self) -> None:
+        self.update_preconditioners()
+        
+    def run_minibatch(self, input_data, y_true, *args, **kwargs) -> None:
+        indices = input_data[0]
+        y_pred = self.forward_model(*input_data)
                     
-                    psi_opt = self.run_reciprocal_space_step(y_pred, y_true, indices)
-                    self.run_real_space_step(psi_opt, indices)
-                    
-                    self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
-                self.loss_tracker.conclude_epoch(epoch=i_epoch)
-                self.loss_tracker.print_latest()
+        psi_opt = self.run_reciprocal_space_step(y_pred, y_true, indices)
+        self.run_real_space_step(psi_opt, indices)
+        
+        self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
             
     def get_config_dict(self) -> dict:
         d = super().get_config_dict()

@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import tqdm
 from torch.utils.data import Dataset
@@ -34,21 +36,12 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
             raise NotImplementedError('EPIEReconstructor does not support multiple OPR modes yet.')
         if self.variable_group.probe.n_modes > 1:
             raise NotImplementedError('EPIEReconstructor does not support mixed state probe yet.')
-
-    def run(self, *args, **kwargs):
-        torch.no_grad()
-        for i_epoch in tqdm.trange(self.n_epochs):
-            for batch_data in self.dataloader:
-                input_data = [x.to(torch.get_default_device()) for x in batch_data[:-1]]
-                y_true = batch_data[-1].to(torch.get_default_device())
-
-                (delta_o, delta_p), batch_loss = self.update_step_module(*input_data, y_true, self.dataset.valid_pixel_mask)
-                self.apply_updates(delta_o, delta_p)
-                batch_loss = torch.mean(batch_loss)
-
-                self.loss_tracker.update_batch_loss_with_value(batch_loss.item())
-            self.loss_tracker.conclude_epoch(epoch=i_epoch)
-            self.loss_tracker.print_latest()
+        
+    def run_minibatch(self, input_data, y_true, *args, **kwargs):
+        (delta_o, delta_p), batch_loss = self.update_step_module(*input_data, y_true, self.dataset.valid_pixel_mask)
+        self.apply_updates(delta_o, delta_p)
+        batch_loss = torch.mean(batch_loss)
+        self.loss_tracker.update_batch_loss_with_value(batch_loss.item())
 
     @staticmethod
     def compute_updates(update_step_module: torch.nn.Module,
