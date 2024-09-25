@@ -43,8 +43,8 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
                 input_data = [x.to(torch.get_default_device()) for x in batch_data[:-1]]
                 y_true = batch_data[-1].to(torch.get_default_device())
 
-                (delta_o, delta_p), batch_loss = self.update_step_module(*input_data, y_true, i_epoch)
-                self.apply_updates(delta_o, delta_p, input_data)
+                (delta_o, delta_p, delta_pos), batch_loss = self.update_step_module(*input_data, y_true)
+                self.apply_updates(delta_o, delta_p, delta_pos)
                 batch_loss = torch.mean(batch_loss)
 
                 self.loss_tracker.update_batch_loss_with_value(batch_loss.item())
@@ -53,36 +53,42 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
 
 
     @staticmethod
-    def update_probe_positions(obj_patches, updated_obj_patches, indices, probe_positions, probe):
+    def compute_positions_cross_correlation_update(obj_patches: torch.Tensor, 
+                                                   updated_obj_patches: torch.Tensor, 
+                                                   indices: torch.Tensor, 
+                                                   positions: torch.Tensor,
+                                                   probe: torch.Tensor):
+        """
+        Use cross-correlation position correction to compute an update to the probe positions.
 
-        delta_pos = None
-        if probe_positions.optimizable:
-            positions = probe_positions.data
+        Based on the paper:
+        - Translation position determination in ptychographic coherent diffraction imaging (2013) - Fucai Zhang
 
-            # Initialize updates
-            delta_pos = torch.zeros_like(probe_positions.data)
+        :param obj_patches: A (batch_size, h, w) patches of the object.
+        :param updated_obj_patches: A (batch_size, h, w) patches of the object with the new updates applied.
+        :param indices: A (batch_size) tensor specifying the position index that each object patch corresponds to.
+        :param positions: A (n_positions, 2) tensor of all measurement positions.
+        :param probe: A (h, w) tensor of the probe.
+        """
 
-            probe_thresh = probe.data.abs().max() * 0.1
-            probe_mask = probe.data[0, 0].abs() > probe_thresh
+        delta_pos = torch.zeros_like(positions)
 
-            for i in range(len(positions[indices])):
-                _, delta_pos[indices[i]] = find_cross_corr_peak(
-                    updated_obj_patches[i] * probe_mask,
-                    obj_patches[i] * probe_mask,
-                    scale=20000, real_space_width=.01
-                )
-                delta_pos[indices[i]] *= -1
+        probe_thresh = probe.abs().max() * 0.1
+        probe_mask = probe.abs() > probe_thresh
+
+        for i in range(len(positions[indices])):
+            delta_pos[indices[i]] = -find_cross_corr_peak(
+                updated_obj_patches[i] * probe_mask,
+                obj_patches[i] * probe_mask,
+                scale=20000, real_space_width=.01
+            )
+
+        return delta_pos
                 
-        if delta_pos is not None:
-            probe_positions.set_grad(-delta_pos)
-            probe_positions.optimizer.step()
-    
-
     @staticmethod
     def compute_updates(update_step_module: torch.nn.Module,
                         indices: torch.Tensor,
-                        y_true: torch.Tensor,
-                        i_epoch
+                        y_true: torch.Tensor
         ) -> tuple[torch.Tensor, ...]:
         """
         Calculates the updates of the whole object, the probe, and other variables.
@@ -111,12 +117,13 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
         if object_.optimizable:
             delta_o_patches = p.conj() / (torch.abs(p) ** 2).max()
             delta_o_patches = delta_o_patches * (psi_prime - psi)
-            # Update the position before updating the object
-            if probe_positions.optimizable and i_epoch > 0:
-                updated_obj_patches = obj_patches + delta_o_patches * object_.optimizer_params['lr']
-                EPIEReconstructor.update_probe_positions(obj_patches, updated_obj_patches, indices, probe_positions, probe)
-                positions = probe_positions.tensor[indices]
+            delta_pos = None
             delta_o = place_patches_fourier_shift(torch.zeros_like(object_.data), positions + object_.center_pixel, delta_o_patches, op='add')
+
+        if probe_positions.optimizable:
+            updated_obj_patches = obj_patches + delta_o_patches * object_.optimizer_params['lr'] # Need to make more general
+            delta_pos = EPIEReconstructor.compute_positions_cross_correlation_update(
+                obj_patches, updated_obj_patches, indices, probe_positions.data, probe.data[0, 0]) # Need the proper way to combine probe into a 2 dimensional tensor
 
         delta_p_all_modes = None
         if probe.optimizable:
@@ -136,17 +143,19 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
         delta_o, delta_p_all_modes = update_step_module.process_updates(delta_o, delta_p_all_modes)
 
         batch_loss = torch.mean((torch.sqrt(y) - torch.sqrt(y_true)) ** 2)
-        return (delta_o, delta_p_all_modes), torch.atleast_1d(batch_loss)
+        return (delta_o, delta_p_all_modes, delta_pos), torch.atleast_1d(batch_loss)
 
-    def apply_updates(self, delta_o, delta_p, indices, *args, **kwargs):
+    def apply_updates(self, delta_o, delta_p, delta_pos, *args, **kwargs):
         """
         Apply updates to optimizable parameters given the updates calculated by self.compute_updates.
 
         :param delta_o: A (n_replica, h, w, 2) tensor of object update vector.
         :param delta_p: A (n_replicate, n_opr_modes, n_modes, h, w, 2) tensor of probe update vector.
+        :param delta_pos: A (n_positions, 2) tensor of probe position vectors.
         """
         object_ = self.variable_group.object
         probe = self.variable_group.probe
+        probe_positions = self.variable_group.probe_positions
 
         if delta_o is not None:
             delta_o = delta_o[..., 0] + 1j * delta_o[..., 1]
@@ -159,3 +168,7 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
             delta_p = delta_p.mean(0)
             probe.set_grad(-delta_p)
             probe.optimizer.step()
+
+        if delta_pos is not None:
+            probe_positions.set_grad(-delta_pos)
+            probe_positions.optimizer.step()
