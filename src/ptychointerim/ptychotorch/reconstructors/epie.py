@@ -23,7 +23,6 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
             batch_size=batch_size,
             n_epochs=n_epochs,
             *args, **kwargs)
-        self.check_inputs()
 
     def check_inputs(self, *args, **kwargs):
         for var in self.variable_group.get_optimizable_variables():
@@ -43,7 +42,7 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
                 input_data = [x.to(torch.get_default_device()) for x in batch_data[:-1]]
                 y_true = batch_data[-1].to(torch.get_default_device())
 
-                (delta_o, delta_p, delta_pos), batch_loss = self.update_step_module(*input_data, y_true)
+                (delta_o, delta_p, delta_pos), batch_loss = self.update_step_module(*input_data, y_true, self.dataset.valid_pixel_mask)
                 self.apply_updates(delta_o, delta_p, delta_pos)
                 batch_loss = torch.mean(batch_loss)
 
@@ -88,7 +87,8 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
     @staticmethod
     def compute_updates(update_step_module: torch.nn.Module,
                         indices: torch.Tensor,
-                        y_true: torch.Tensor
+                        y_true: torch.Tensor,
+                        valid_pixel_mask: torch.Tensor
         ) -> tuple[torch.Tensor, ...]:
         """
         Calculates the updates of the whole object, the probe, and other variables.
@@ -111,6 +111,8 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
         y = y + torch.abs(psi_far) ** 2
 
         psi_prime = psi_far / torch.abs(psi_far) * torch.sqrt(y_true + 1e-7)
+        # Do not swap magnitude for bad pixels.
+        psi_prime = torch.where(valid_pixel_mask.repeat(psi_prime.shape[0], 1, 1), psi_prime, psi_far)
         psi_prime = prop.back_propagate_far_field(psi_prime)
 
         delta_o_patches = None
@@ -120,10 +122,11 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
             delta_pos = None
             delta_o = place_patches_fourier_shift(torch.zeros_like(object_.data), positions + object_.center_pixel, delta_o_patches, op='add')
 
+        delta_pos = None
         if probe_positions.optimizable:
-            updated_obj_patches = obj_patches + delta_o_patches * object_.optimizer_params['lr'] # Need to make more general
+            updated_obj_patches = obj_patches + delta_o_patches * object_.optimizer_params['lr']
             delta_pos = EPIEReconstructor.compute_positions_cross_correlation_update(
-                obj_patches, updated_obj_patches, indices, probe_positions.data, probe.data[0, 0]) # Need the proper way to combine probe into a 2 dimensional tensor
+                obj_patches, updated_obj_patches, indices, probe_positions.data, probe.data[0, 0])
 
         delta_p_all_modes = None
         if probe.optimizable:

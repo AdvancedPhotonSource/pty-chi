@@ -92,9 +92,13 @@ class Reconstructor:
     def __init__(self, variable_group: VariableGroup):
         self.loss_tracker = LossTracker()
         self.variable_group = variable_group
+                
+    def check_inputs(self, *args, **kwargs):
+        pass
 
     def build(self) -> None:
-        pass
+        self.check_inputs()
+
 
     def get_config_dict(self) -> dict:
         d = self.variable_group.get_config_dict()
@@ -140,6 +144,7 @@ class IterativeReconstructor(Reconstructor):
                                      batch_size=self.batch_size,
                                      generator=torch.Generator(device=torch.get_default_device()),
                                      shuffle=True)
+        self.dataset.move_attributes_to_device(torch.get_default_device())
 
     def build_loss_tracker(self):
         self.loss_tracker = LossTracker(metric_function=self.metric_function)

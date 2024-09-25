@@ -7,6 +7,7 @@ import numpy as np
 from numpy import ndarray
 
 from ptychointerim.ptychotorch.propagation import propagate_far_field
+import ptychointerim.maths as pmath
 
 
 default_complex_dtype = torch.complex64
@@ -60,7 +61,7 @@ def generate_initial_object(shape: tuple[int, ...], method: Literal['random'] = 
     return obj
 
 
-def add_additional_opr_probe_modes_to_probe(probe: Tensor, n_opr_modes_to_add: int) -> Tensor:
+def add_additional_opr_probe_modes_to_probe(probe: Tensor, n_opr_modes_to_add: int, normalize: bool = True) -> Tensor:
     assert probe.ndim == 4
     n_modes = probe.shape[1]
     opr_modes = torch.empty([n_opr_modes_to_add, n_modes, probe.shape[-2], probe.shape[-1]], dtype=get_default_complex_dtype())
@@ -69,21 +70,24 @@ def add_additional_opr_probe_modes_to_probe(probe: Tensor, n_opr_modes_to_add: i
             mag = generate_gaussian_random_image(probe.shape[-2:], loc=0.01, sigma=0.01, smoothing=3.0).clamp(0.0, 1.0)
             phase = generate_gaussian_random_image(probe.shape[-2:], loc=0.0, sigma=0.05, smoothing=3.0).clamp(-torch.pi, torch.pi)
             opr_mode = mag * torch.exp(1j * phase)
+            if normalize:
+                opr_mode = opr_mode / pmath.mnorm(opr_mode, dim=(-2, -1))
             opr_modes[i, j, ...] = opr_mode
     probe = torch.cat([probe, opr_modes], dim=0)
     return probe
 
 
-def generate_initial_opr_mode_weights(n_points: int, n_opr_modes: int) -> Tensor:
+def generate_initial_opr_mode_weights(n_points: int, n_opr_modes: int, eigenmode_weight: float = 0.0) -> Tensor:
     """
     Generate initial weights for OPR modes, where the weights of the main OPR mode are set to 1,
     and the weights of eigenmodes are set to 0.
-
+    
     :param n_points: number of scan points. 
     :param n_opr_modes: number of OPR modes.
+    :param eigenmode_weight: initial weight for eigenmodes.
     :return: a (n_points, n_opr_modes) tensor of weights.
     """
-    return torch.cat([torch.ones([n_points, 1]), torch.zeros([n_points, n_opr_modes - 1])], dim=1)
+    return torch.cat([torch.ones([n_points, 1]), torch.full([n_points, n_opr_modes - 1], eigenmode_weight)], dim=1)
 
 
 def generate_gaussian_random_image(shape: tuple[int, ...], loc: float = 0.9, sigma: float = 0.1, 
@@ -96,11 +100,11 @@ def generate_gaussian_random_image(shape: tuple[int, ...], loc: float = 0.9, sig
     
 
 def to_tensor(data: Union[ndarray, Tensor], device=None, dtype=None) -> Tensor:
-    if isinstance(data, (np.ndarray, list, tuple)):
-        data = torch.tensor(data)
-            
     if device is None:
         device = torch.get_default_device()
+    if isinstance(data, (np.ndarray, list, tuple)):
+        data = torch.tensor(data, device=device)
+            
     if dtype is None:
         if data.dtype.is_complex:
             dtype = get_default_complex_dtype()

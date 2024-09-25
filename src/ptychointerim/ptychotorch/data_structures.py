@@ -1,11 +1,13 @@
 from typing import Optional, Union, Tuple, Type, Literal
 import dataclasses
+import os
 
 import torch
 from torch import Tensor
 from torch.nn import Module, Parameter
 import numpy as np
 from numpy import ndarray
+import tifffile
 
 import ptychointerim.image_proc as ip
 from ptychointerim.ptychotorch.utils import to_tensor, get_default_complex_dtype
@@ -112,11 +114,11 @@ class Variable(Module):
         if self.is_complex:
             return self.tensor.complex()
         else:
-            return self.tensor
+            return self.tensor.clone()
             
     def build_optimizer(self):
         if self.optimizable and self.optimizer_class is None:
-            raise ValueError("optimizer_class must be specified if optimizable is True.")
+            raise ValueError("Variable {} is optimizable but no optimizer is specified.".format(self.name))
         if self.optimizable:
             if isinstance(self.tensor, ComplexTensor):
                 self.optimizer = self.optimizer_class([self.tensor.data], **self.optimizer_params)
@@ -257,7 +259,10 @@ class Probe(Variable):
     
     n_modes = 1
     
-    def __init__(self, *args, name='probe', **kwargs):
+    # TODO: eigenmode_update_relaxation is only used for LSQML. We should create dataclasses
+    # to contain additional options for Variable classes, and subclass them for specific
+    # reconstruction algorithms - for example, ProbeOptions -> LSQMLProbeOptions.
+    def __init__(self, *args, name='probe', eigenmode_update_relaxation=0.1, **kwargs):
         """
         Represents the probe function in a tensor of shape 
             `(n_opr_modes, n_modes, h, w)`
@@ -266,10 +271,14 @@ class Probe(Variable):
           probe relaxation (OPR). 
         - n_modes is the number of mutually incoherent probe modes.
 
-        :param name: name of the variable, defaults to 'probe'
+        :param name: name of the variable, defaults to 'probe'.
+        :param eigenmode_update_relaxation: relaxation factor, or effectively the step size, 
+            for eigenmode update in LSQML.
         """
         super().__init__(*args, name=name, is_complex=True, **kwargs)
         assert len(self.shape) == 4, 'Probe tensor must be of shape (n_opr_modes, n_modes, h, w).'
+        
+        self.eigenmode_update_relaxation = eigenmode_update_relaxation
         
     def shift(self, shifts: Tensor):
         """
@@ -460,18 +469,88 @@ class Probe(Variable):
             weights = self.constrain_opr_mode_orthogonality(weights)
         return weights
     
+    def normalize_eigenmodes(self):
+        """
+        Normalize all eigenmodes (the second and following OPR modes) such that each of them
+        has a squared norm equal to the number of pixels in the probe.
+        """
+        if not self.has_multiple_opr_modes:
+            return
+        eigen_modes = self.data[1:, ...]
+        for i_opr_mode in range(eigen_modes.shape[0]):
+            for i_mode in range(eigen_modes.shape[1]):
+                eigen_modes[i_opr_mode, i_mode, :, :] /= (
+                    pmath.mnorm(eigen_modes[i_opr_mode, i_mode, :, :], dim=(-2, -1)) + 1e-8
+                )
+                
+        new_data = self.data
+        new_data[1:, ...] = eigen_modes
+        self.set_data(new_data)
+    
+    def save_tiff(self, path: str):
+        """
+        Save the probe's magnitude and phase as 2 TIFF files. Each file contains
+        an array of tiles, where the rows correspond to incoherent probe modes
+        and columns correspond to OPR modes.
+
+        :param path: path to save. "_phase" and "_mag" will be appended to the filename.
+        """
+        fname = os.path.splitext(path)[0]
+        mag_img = np.empty([self.shape[3] * self.shape[1], self.shape[2] * self.shape[0]])
+        phase_img = np.empty([self.shape[3] * self.shape[1], self.shape[2] * self.shape[0]])
+        data = self.data
+        for i_mode in range(self.shape[1]):
+            for i_opr_mode in range(self.shape[0]):
+                mag_img[
+                    i_mode * self.shape[3]:(i_mode + 1) * self.shape[3], 
+                    i_opr_mode * self.shape[2]:(i_opr_mode + 1) * self.shape[2]
+                    ] = data[i_opr_mode, i_mode, :, :].abs().detach().cpu().numpy()
+                phase_img[
+                    i_mode * self.shape[3]:(i_mode + 1) * self.shape[3], 
+                    i_opr_mode * self.shape[2]:(i_opr_mode + 1) * self.shape[2]
+                    ] = torch.angle(data[i_opr_mode, i_mode, :, :]).detach().cpu().numpy()
+        tifffile.imsave(fname + '_mag.tif', mag_img)
+        tifffile.imsave(fname + '_phase.tif', phase_img)
+                
+    
     
 class OPRModeWeights(Variable):
-    def __init__(self, *args, name='opr_weights', **kwargs):
+    
+    # TODO: update_relaxation is only used for LSQML. We should create dataclasses
+    # to contain additional options for Variable classes, and subclass them for specific
+    # reconstruction algorithms - for example, OPRModeWeightsOptions -> LSQMLOPRModeWeightsOptions.
+    def __init__(self, *args, name='opr_weights', update_relaxation=0.1, optimize_eigenmode_weights=True, 
+                 optimize_intensity_variation=False, **kwargs):
         """
         Weights of OPR modes for each scan point.
 
-        :param name: name of the variable, defaults to 'opr_weights'
+        :param name: name of the variable.
+        :param update_relaxation: relaxation factor, or effectively the step size, for 
+            the update step in LSQML.
         """
         super().__init__(*args, name=name, is_complex=False, **kwargs)
         assert len(self.shape) == 2, 'OPR weights must be of shape (n_scan_points, n_opr_modes).'
+        if self.optimizable:
+            assert (optimize_eigenmode_weights or optimize_intensity_variation), \
+                'When OPRModeWeights is optimizable, at least one of optimize_eigenmode_weights ' \
+                'and optimize_intensity_variation should be set to True.'
+        
+        self.update_relaxation = update_relaxation
+        # TODO: AD optimizes both eigenmode weights and intensity variation when self.optimizable is True.
+        # They should be separately controllable. 
+        self.optimize_eigenmode_weights = optimize_eigenmode_weights
+        self.optimize_intensity_variation = optimize_intensity_variation
         
         self.n_opr_modes = self.tensor.shape[1]
+        
+    def build_optimizer(self):
+        if self.optimizer_class is None:
+            return
+        if self.optimizable:
+            if isinstance(self.tensor, ComplexTensor):
+                self.optimizer = self.optimizer_class([self.tensor.data], **self.optimizer_params)
+            else:
+                self.optimizer = self.optimizer_class([self.tensor], **self.optimizer_params)
         
     def get_weights(self, indices: Union[tuple[int, ...], slice]) -> Tensor:
         return self.data[indices]
@@ -524,10 +603,13 @@ class PtychographyVariableGroup(VariableGroup):
     probe_positions: ProbePositions
     
     opr_mode_weights: Optional[OPRModeWeights] = dataclasses.field(default_factory=DummyVariable)
+    
+    def __post_init__(self):
+        if self.probe.has_multiple_opr_modes and self.opr_mode_weights is None:
+            raise ValueError('OPRModeWeights must be provided when the probe has multiple OPR modes.')
 
 
 @dataclasses.dataclass
 class Ptychography2DVariableGroup(PtychographyVariableGroup):
 
     object: Object2D
-    

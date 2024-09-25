@@ -1,6 +1,7 @@
 local_only_tests = [
     'test_2d_ptycho_autodiff_lynx215.py',
-    'test_2d_ptycho_lsqml_lynx215.py'
+    'test_2d_ptycho_lsqml_lynx215.py',
+    'test_2d_ptycho_lsqml_lynx9020.py'
 ]
 
 

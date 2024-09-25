@@ -6,7 +6,7 @@ import tqdm
 from torch.utils.data import Dataset
 
 from ptychointerim.ptychotorch.reconstructors.base import AnalyticalIterativeReconstructor, LossTracker
-from ptychointerim.ptychotorch.data_structures import Ptychography2DVariableGroup
+from ptychointerim.ptychotorch.data_structures import Ptychography2DVariableGroup, DummyVariable
 from ptychointerim.forward_models import Ptychography2DForwardModel, PtychographyGaussianNoiseModel, PtychographyPoissonNoiseModel
 from ptychointerim.metrics import MSELossOfSqrt
 import ptychointerim.ptychotorch.propagation as prop
@@ -49,18 +49,33 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
         self.noise_model = {
             'gaussian': PtychographyGaussianNoiseModel, 
             'poisson': PtychographyPoissonNoiseModel
-            }[noise_model](**noise_model_params)
+            }[noise_model](**noise_model_params, valid_pixel_mask=self.dataset.valid_pixel_mask.clone())
         
         self.alpha_psi_far = 0.5
         self.alpha_psi_far_all_points = None
+                
+    def check_inputs(self, *args, **kwargs):
+        if self.variable_group.opr_mode_weights.optimizer is not None:
+            logging.warning('Selecting optimizer for OPRModeWeights is not supported for '
+                            'LSQMLReconstructor and will be disregarded.')
+        if not isinstance(self.variable_group.opr_mode_weights, DummyVariable):
+            if self.variable_group.opr_mode_weights.data[:, 1:].abs().max() < 1e-5:
+                raise ValueError(
+                    'Weights of eigenmodes (the second and following OPR modes) in LSQMLReconstructor '
+                    'should not be all zero, which can cause numerical instability!'
+                )
         
     def build(self) -> None:
         super().build()
         self.build_cached_variables()
+        self.build_noise_model()
         
     def build_loss_tracker(self):
         f = self.noise_model.nll if self.metric_function is None else self.metric_function
         self.loss_tracker = LossTracker(metric_function=f)
+        
+    def build_noise_model(self):
+        self.noise_model = self.noise_model.to(torch.get_default_device())
         
     def build_cached_variables(self):
         self.alpha_psi_far_all_points = torch.full(
@@ -163,6 +178,14 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
             
         if self.variable_group.object.optimizable:
             self._apply_object_update(alpha_o_i, delta_o_hat)
+            
+        if self.variable_group.probe.has_multiple_opr_modes and self.variable_group.opr_mode_weights.optimizable and \
+                self.variable_group.opr_mode_weights.optimize_eigenmode_weights:
+            self.update_opr_probe_modes_and_weights(indices, chi, delta_p_i, delta_p_hat, obj_patches)
+            
+        if self.variable_group.opr_mode_weights.optimizable and self.variable_group.opr_mode_weights.optimize_intensity_variation:
+            delta_weights_int = self._calculate_intensity_variation_update_direction(indices, chi, obj_patches)
+            self._apply_variable_intensity_updates(delta_weights_int)
         
     def calculate_object_and_probe_update_step_sizes(self, indices, chi, obj_patches, delta_o_i, delta_p_i, gamma=1e-5):
         """
@@ -258,7 +281,7 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
         # Shape of probe:        (n_probe_modes, h, w)
         if self.variable_group.probe.has_multiple_opr_modes:
             probe = self.variable_group.probe.get_unique_probes(
-                weights=self.variable_group.opt_mode_weights.get_weights(indices),
+                weights=self.variable_group.opr_mode_weights.get_weights(indices),
                 mode_to_apply=0
             )
         else:
@@ -312,10 +335,11 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
         # Shape of probe:          (n_probe_modes, h, w)
         # Shape of obj_patches:    (batch_size, h, w)
         if self.variable_group.probe.has_multiple_opr_modes:
+            # Shape of probe_m0:   (batch_size, h, w)
             probe_m0 = self.variable_group.probe.get_unique_probes(
-                weights=self.variable_group.opt_mode_weights.get_weights(indices),
+                weights=self.variable_group.opr_mode_weights.get_weights(indices),
                 mode_to_apply=0
-            )[0]
+            )[:, 0]
         else:
             probe_m0 = self.variable_group.probe.get_mode_and_opr_mode(0, 0)
         chi_m0 = chi[:, 0, :, :]
@@ -369,27 +393,119 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
         coord_ramp = torch.fft.fftfreq(probe.shape[-1])
         delta_p_x = torch.ifft2(2 * torch.pi * coord_ramp[None, :] * 1j * f_probe)
         
-    def run(self, *args, **kwargs):
-        for i_epoch in tqdm.trange(self.n_epochs):
+    def update_opr_probe_modes_and_weights(self, indices, chi, delta_p_i, delta_p_hat, obj_patches):
+        """
+        Update the eigenmodes of the first incoherent mode of the probe, and update the OPR mode weights.
+        
+        This implementation is adapted from PtychoShelves code (update_variable_probe.m) and has some
+        differences from Eq. 31 of Odstrcil (2018).
+        """
+        probe = self.variable_group.probe.data
+        weights = self.variable_group.opr_mode_weights.data
+        
+        batch_size = len(delta_p_i)
+        n_points_total = self.variable_group.probe_positions.shape[0]
+        # FIXME: reduced relax_u/v by a factor of 10 for stability, but PtychoShelves works without this.
+        relax_u = min(0.1, batch_size / n_points_total) * self.variable_group.probe.eigenmode_update_relaxation
+        relax_v = self.variable_group.opr_mode_weights.update_relaxation
+        # Shape of delta_p_i:       (batch_size, n_probe_modes, h, w)
+        # Shape of delta_p_hat:     (n_probe_modes, h, w)
+        # Just use the first incoherent mode.
+        delta_p_i = delta_p_i[:, 0, :, :]
+        delta_p_hat = delta_p_hat[0, :, :]
+        residue_update = delta_p_i - delta_p_hat
+        
+        # Start from the second OPR mode which is the first after the main mode - i.e., the first eigenmode. 
+        for i_opr_mode in range(1, self.variable_group.probe.n_opr_modes):
+            # Just take the first incoherent mode.
+            eigenmode_i = self.variable_group.probe.get_mode_and_opr_mode(mode=0, opr_mode=i_opr_mode)
+            weights_i = self.variable_group.opr_mode_weights.get_weights(indices)[:, i_opr_mode]
+            eigenmode_i, weights_i = self._update_first_eigenmode_and_weight(
+                residue_update, eigenmode_i, weights_i, relax_u, relax_v, obj_patches, chi)
             
-            # Update preconditioner at the start of each epoch
-            with torch.no_grad():
-                self.update_preconditioners()
+            # Project residue on this eigenmode, then subtract it.
+            residue_update = residue_update - pmath.project(residue_update, eigenmode_i) * eigenmode_i
             
-            for batch_data in self.dataloader:
-                input_data = [x.to(torch.get_default_device()) for x in batch_data[:-1]]
-                indices = input_data[0]
-                y_true = batch_data[-1].to(torch.get_default_device())
+            probe[i_opr_mode, 0, :, :] = eigenmode_i
+            weights[indices, i_opr_mode] = weights_i
+        
+        self.variable_group.probe.set_data(probe)
+        self.variable_group.opr_mode_weights.set_data(weights)
+            
+    def _update_first_eigenmode_and_weight(self, residue_update, eigenmode_i, weights_i, relax_u, relax_v, obj_patches, chi, eps=1e-5):
+        # Shape of residue_update:          (batch_size, h, w)
+        # Shape of eigenmode_i:             (h, w)
+        # Shape of weights_i:               (batch_size,)
+        
+        # Update eigenmode.
+        # Shape of proj:                    (batch_size, h, w)
+        # FIXME: What happens when weights is zero!?
+        proj = ((residue_update.conj() * eigenmode_i).real + weights_i[:, None, None]) / pmath.norm(weights_i) ** 2
 
-                with torch.no_grad():
+        # Shape of eigenmode_update:        (h, w)
+        eigenmode_update = torch.mean(residue_update * torch.mean(proj, dim=(-2, -1), keepdim=True), dim=0)
+        eigenmode_i = eigenmode_i + relax_u * eigenmode_update / (pmath.mnorm(eigenmode_update.view(-1)) + eps)
+        eigenmode_i = eigenmode_i / pmath.mnorm(eigenmode_i.view(-1) + eps)
+        
+        # Update weights using Eq. 23a.
+        # Shape of psi:                     (batch_size, h, w)
+        psi = eigenmode_i * obj_patches
+        # The denominator can get smaller and smaller as eigenmode_i goes down. 
+        # Weight update needs to be clamped. 
+        denom = torch.mean((torch.abs(psi) ** 2), dim=(-2, -1))
+        num = torch.mean((chi[:, 0, :, :] * psi.conj()).real, dim=(-2, -1))
+        weight_update = num / (denom + 0.1 * torch.mean(denom))
+        weight_update = weight_update.clamp(max=10)
+        weights_i = weights_i + relax_v * weight_update
+                
+        return eigenmode_i, weights_i
+    
+    def _calculate_intensity_variation_update_direction(self, indcies, chi, obj_patches):
+        """
+        Update variable intensity scaler - i.e., the OPR mode weight corresponding to the main mode.
+        
+        This implementation is adapted from PtychoShelves code (update_variable_probe.m) and has some
+        differences from Eq. 31 of Odstrcil (2018).
+        """
+        mean_probe = self.variable_group.probe.get_mode_and_opr_mode(mode=0, opr_mode=0)
+        op = obj_patches * mean_probe
+        num = torch.real(op.conj() * chi[:, 0, ...])
+        denom = op.abs() ** 2
+        delta_weights_int_i = torch.sum(num, dim=(-2, -1)) / torch.sum(denom, dim=(-2, -1))
+        # Pad it to the same shape as opr_mode_weights.
+        delta_weights_int = torch.zeros_like(self.variable_group.opr_mode_weights.data)
+        delta_weights_int[indcies, 0] = delta_weights_int_i
+        return delta_weights_int
+        
+    def _apply_variable_intensity_updates(self, delta_weights_int):
+        weights = self.variable_group.opr_mode_weights
+        weights.set_data(weights.data + 0.1 * delta_weights_int)
+    
+    def prepare_data(self, *args, **kwargs):
+        self.variable_group.probe.normalize_eigenmodes()
+        logging.info('Probe eigenmodes normalized.')
+        
+    def run(self, *args, **kwargs):
+        with torch.no_grad():
+            self.prepare_data()
+            for i_epoch in tqdm.trange(self.n_epochs):
+                
+                # Update preconditioner at the start of each epoch
+                self.update_preconditioners()
+                
+                for batch_data in self.dataloader:
+                    input_data = [x.to(torch.get_default_device()) for x in batch_data[:-1]]
+                    indices = input_data[0]
+                    y_true = batch_data[-1].to(torch.get_default_device())
+
                     y_pred = self.forward_model(*input_data)
                     
                     psi_opt = self.run_reciprocal_space_step(y_pred, y_true, indices)
                     self.run_real_space_step(psi_opt, indices)
                     
                     self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
-            self.loss_tracker.conclude_epoch(epoch=i_epoch)
-            self.loss_tracker.print_latest()
+                self.loss_tracker.conclude_epoch(epoch=i_epoch)
+                self.loss_tracker.print_latest()
             
     def get_config_dict(self) -> dict:
         d = super().get_config_dict()

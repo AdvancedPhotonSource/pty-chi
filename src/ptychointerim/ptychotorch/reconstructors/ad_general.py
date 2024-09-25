@@ -4,7 +4,7 @@ import torch
 import tqdm
 from torch.utils.data import Dataset
 
-from ptychointerim.ptychotorch.data_structures import VariableGroup
+from ptychointerim.ptychotorch.data_structures import VariableGroup, DummyVariable
 from ptychointerim.forward_models import ForwardModel
 from ptychointerim.ptychotorch.reconstructors.base import IterativeReconstructor, LossTracker
 
@@ -34,13 +34,6 @@ class AutodiffReconstructor(IterativeReconstructor):
         self.forward_model_params = forward_model_params if forward_model_params is not None else {}
         self.forward_model = None
         self.loss_function = loss_function
-
-        self.check_inputs()
-
-    def check_inputs(self, *args, **kwargs):
-        for var in self.variable_group.get_optimizable_variables():
-            assert var.optimizer is not None, \
-                "Variable {} is optimizable but no optimizer is specified".format(var.name)
 
     def build(self) -> None:
         super().build()
@@ -80,7 +73,8 @@ class AutodiffReconstructor(IterativeReconstructor):
 
     def step_all_optimizers(self):
         for var in self.variable_group.get_optimizable_variables():
-            var.optimizer.step()
+            if var.optimizer is not None:
+                var.optimizer.step()
 
     def get_forward_model(self) -> ForwardModel:
         if isinstance(self.forward_model, torch.nn.DataParallel):
