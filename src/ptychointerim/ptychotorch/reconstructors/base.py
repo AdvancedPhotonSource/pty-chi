@@ -4,6 +4,7 @@ import pandas as pd
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
+import tqdm
 
 from ptychointerim.ptychotorch.data_structures import VariableGroup, PtychographyVariableGroup
 from ptychointerim.ptychotorch.utils import to_numpy
@@ -133,11 +134,13 @@ class IterativeReconstructor(Reconstructor):
         self.n_epochs = n_epochs
         self.dataloader = None
         self.metric_function = metric_function
+        self.epoch_counter = 0
 
     def build(self) -> None:
         super().build()
         self.build_dataloader()
         self.build_loss_tracker()
+        self.build_counter()
 
     def build_dataloader(self):
         self.dataloader = DataLoader(self.dataset,
@@ -148,17 +151,47 @@ class IterativeReconstructor(Reconstructor):
 
     def build_loss_tracker(self):
         self.loss_tracker = LossTracker(metric_function=self.metric_function)
+        
+    def build_counter(self):
+        self.epoch_counter = 0
 
     def get_config_dict(self) -> dict:
         d = super().get_config_dict()
         d.update({'batch_size': self.batch_size, 
                   'n_epochs': self.n_epochs})
         return d
+                
+    def run_minibatch(self, input_data, y_true, *args, **kwargs) -> None:
+        """
+        Process batch, update variables, calculate loss, and update loss tracker.
+        """
+        raise NotImplementedError
+    
+    def run_pre_run_hooks(self) -> None:
+        pass
+    
+    def run_pre_epoch_hooks(self) -> None:
+        pass
     
     def run_post_update_hooks(self) -> None:
-        with torch.no_grad():
-            for var in self.variable_group.get_optimizable_variables():
-                var.post_update_hook()
+        pass
+                
+    def run(self, n_epochs: Optional[int] = None, *args, **kwargs):
+        self.run_pre_run_hooks()
+        n_epochs = n_epochs if n_epochs is not None else self.n_epochs
+        for i_epoch in tqdm.trange(n_epochs):
+            self.run_pre_epoch_hooks()
+            for batch_data in self.dataloader:
+                input_data = [x.to(torch.get_default_device()) for x in batch_data[:-1]]
+                y_true = batch_data[-1].to(torch.get_default_device())
+
+                self.run_minibatch(input_data, y_true)
+                
+                self.run_post_update_hooks()
+            self.loss_tracker.conclude_epoch(epoch=i_epoch)
+            self.loss_tracker.print_latest()
+            
+            self.epoch_counter += 1
 
     
 class AnalyticalIterativeReconstructor(IterativeReconstructor):
@@ -239,6 +272,10 @@ class AnalyticalIterativeReconstructor(IterativeReconstructor):
 
     def apply_updates(self, *args, **kwargs):
         raise NotImplementedError
+    
+    def run(self, n_epochs: Optional[int] = None, *args, **kwargs):
+        with torch.no_grad():
+            return super().run(n_epochs=n_epochs, *args, **kwargs)
 
 
 class AnalyticalIterativePtychographyReconstructor(AnalyticalIterativeReconstructor):

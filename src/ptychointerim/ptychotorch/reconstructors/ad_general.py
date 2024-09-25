@@ -51,26 +51,19 @@ class AutodiffReconstructor(IterativeReconstructor):
         if not torch.get_default_device().type == 'cpu':
             self.forward_model = torch.nn.DataParallel(self.forward_model)
             self.forward_model.to(torch.get_default_device())
+            
+    def run_minibatch(self, input_data, y_true, *args, **kwargs):
+        y_pred = self.forward_model(*input_data)
+        batch_loss = self.loss_function(y_pred, y_true)
 
-    def run(self, *args, **kwargs):
-        for i_epoch in tqdm.trange(self.n_epochs):
-            for batch_data in self.dataloader:
-                input_data = [x.to(torch.get_default_device()) for x in batch_data[:-1]]
-                y_true = batch_data[-1].to(torch.get_default_device())
-
-                y_pred = self.forward_model(*input_data)
-                batch_loss = self.loss_function(y_pred, y_true)
-
-                batch_loss.backward()
-                self.get_forward_model().post_differentiation_hook(*input_data, y_true)
-                self.step_all_optimizers()
-                self.forward_model.zero_grad()
-                self.run_post_update_hooks()
-
-                self.loss_tracker.update_batch_loss(y_pred=y_pred, y_true=y_true, loss=batch_loss.item())
-            self.loss_tracker.conclude_epoch(epoch=i_epoch)
-            self.loss_tracker.print_latest()
-
+        batch_loss.backward()
+        self.get_forward_model().post_differentiation_hook(*input_data, y_true)
+        self.step_all_optimizers()
+        self.forward_model.zero_grad()
+        self.run_post_update_hooks()
+        
+        self.loss_tracker.update_batch_loss(y_pred=y_pred, y_true=y_true, loss=batch_loss.item())
+            
     def step_all_optimizers(self):
         for var in self.variable_group.get_optimizable_variables():
             if var.optimizer is not None:
