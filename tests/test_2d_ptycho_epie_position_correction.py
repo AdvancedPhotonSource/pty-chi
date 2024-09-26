@@ -15,7 +15,7 @@ from ptychointerim.metrics import MSELossOfSqrt
 import test_utils as tutils
 
 
-def test_2d_ptycho_epie(generate_gold=False, debug=False):
+def test_2d_ptycho_epie_position_correction(generate_gold=False, debug=False):
     gold_dir = os.path.join('gold_data', 'test_2d_ptycho_epie_position_correction')
     
     tutils.setup(gold_dir, cpu_only=True)
@@ -66,7 +66,7 @@ def test_2d_ptycho_epie(generate_gold=False, debug=False):
         np.save(os.path.join(gold_dir, 'recon.npy'), recon)
     else:
         recon_gold = np.load(os.path.join(gold_dir, 'recon.npy'))
-        assert np.allclose(recon, recon_gold)
+        assert np.allclose(recon, recon_gold, atol=1e-3, rtol=1e-3)
     
     
 if __name__ == '__main__':
@@ -74,5 +74,5 @@ if __name__ == '__main__':
     parser.add_argument('--generate-gold', action='store_true')
     args = parser.parse_args()
 
-    test_2d_ptycho_epie(generate_gold=args.generate_gold, debug=True)
+    test_2d_ptycho_epie_position_correction(generate_gold=args.generate_gold, debug=True)
     

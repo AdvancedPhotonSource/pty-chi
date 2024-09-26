@@ -213,6 +213,9 @@ def find_cross_corr_peak(f: Tensor,
     The position correction will "walk off" if complex64 is used.
     """
 
+    f = torch.fft.ifftshift(f)
+    g = torch.fft.ifftshift(g)
+
     dtype_real = torch.tensor(1+1j, dtype=dtype).real.dtype
 
     M, N = f.shape
