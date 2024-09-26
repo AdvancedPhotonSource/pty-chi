@@ -5,7 +5,7 @@ import torch
 import numpy as np
 
 from ptychointerim.interface import PtychographyJob
-import ptychointerim.configs as configs
+from ptychointerim.configs import LSQMLConfig, AutodiffPtychographyConfig
 import ptychointerim.ptychotorch.utils as utils
 
 import test_utils as tutils
@@ -47,58 +47,40 @@ def test_2d_ptycho_interface_lsqml(pytestconfig, generate_gold=False, debug=Fals
     )
     positions_m = positions_px * pixel_size_m
     
-    data_config = configs.PtychographyDataConfig(
-        data=data
-    )
+    config = LSQMLConfig()
+    config.data_config.data = data
     
-    object_config = configs.ObjectConfig(
-        initial_guess=object_init,
-        pixel_size_m=pixel_size_m,
-        optimizable=True,
-        optimizer='sgd',
-        step_size=1
-    )
+    config.object_config.initial_guess = object_init
+    config.object_config.pixel_size_m = pixel_size_m
+    config.object_config.optimizable = True
+    config.object_config.optimizer = 'sgd'
+    config.object_config.step_size = 1
     
-    probe_config = configs.ProbeConfig(
-        initial_guess=probe,
-        optimizable=True,
-        optimizer='sgd',
-        step_size=1
-    )
+    config.probe_config.initial_guess = probe
+    config.probe_config.optimizable = True
+    config.probe_config.optimizer = 'sgd'
+    config.probe_config.step_size = 1
     
-    position_config = configs.ProbePositionConfig(
-        position_x_m=positions_m[:, 1],
-        position_y_m=positions_m[:, 0],
-        pixel_size_m=pixel_size_m,
-        update_magnitude_limit=1.0,
-        optimizable=True,
-        optimizer='adam',
-        step_size=1e-1
-    )
+    config.probe_position_config.position_x_m = positions_m[:, 1]
+    config.probe_position_config.position_y_m = positions_m[:, 0]
+    config.probe_position_config.pixel_size_m = pixel_size_m
+    config.probe_position_config.update_magnitude_limit = 1.0
+    config.probe_position_config.optimizable = True
+    config.probe_position_config.optimizer = 'adam'
+    config.probe_position_config.step_size = 1e-1
     
-    opr_mode_weight_config = configs.OPRModeWeightsConfig(
-        initial_eigenmode_weights=0.1,
-        optimize_intensity_variation=True,
-        optimizable=True
-    )
+    config.opr_mode_weight_config.initial_eigenmode_weights = 0.1
+    config.opr_mode_weight_config.optimize_intensity_variation = True
+    config.opr_mode_weight_config.optimizable = True
     
-    reconstructor_config = configs.LSQMLReconstructorConfig(
-        num_epochs=64,
-        batch_size=40,
-        default_device='gpu',
-        gpu_indices=[0],
-        metric_function='mse_sqrt',
-        log_level='info'
-    )
+    config.reconstructor_config.num_epochs = 64
+    config.reconstructor_config.batch_size = 40
+    config.reconstructor_config.default_device = 'gpu'
+    config.reconstructor_config.gpu_indices = [0]
+    config.reconstructor_config.metric_function = 'mse_sqrt'
+    config.reconstructor_config.log_level = 'info'
     
-    job = PtychographyJob(
-        data_config=data_config,
-        object_config=object_config,
-        probe_config=probe_config,
-        position_config=position_config,
-        opr_mode_weight_config=opr_mode_weight_config,
-        reconstructor_config=reconstructor_config
-    )
+    job = PtychographyJob(config)
     job.build()
     job.run()
     # This should be equivalent to:
@@ -133,61 +115,42 @@ def test_2d_ptycho_interface_ad(pytestconfig, generate_gold=False, debug=False, 
     )
     positions_m = positions_px * pixel_size_m
     
-    data_config = configs.PtychographyDataConfig(
-        data=data
-    )
+    config = AutodiffPtychographyConfig()
+    config.data_config.data = data
     
-    object_config = configs.ObjectConfig(
-        initial_guess=object_init,
-        pixel_size_m=pixel_size_m,
-        optimizable=True,
-        optimizer='sgd',
-        step_size=1e-1
-    )
+    config.object_config.initial_guess = object_init
+    config.object_config.pixel_size_m = pixel_size_m
+    config.object_config.optimizable = True
+    config.object_config.optimizer = 'sgd'
+    config.object_config.step_size = 1e-1
     
-    probe_config = configs.ProbeConfig(
-        initial_guess=probe,
-        optimizable=True,
-        optimizer='sgd',
-        step_size=1e-1
-    )
+    config.probe_config.initial_guess = probe
+    config.probe_config.optimizable = True
+    config.probe_config.optimizer = 'sgd'
+    config.probe_config.step_size = 1e-1
     
-    position_config = configs.ProbePositionConfig(
-        position_x_m=positions_m[:, 1],
-        position_y_m=positions_m[:, 0],
-        pixel_size_m=pixel_size_m,
-        update_magnitude_limit=1.0,
-        optimizable=True,
-        optimizer='adam',
-        step_size=1e-1
-    )
+    config.probe_position_config.position_x_m = positions_m[:, 1]
+    config.probe_position_config.position_y_m = positions_m[:, 0]
+    config.probe_position_config.pixel_size_m = pixel_size_m
+    config.probe_position_config.update_magnitude_limit = 1.0
+    config.probe_position_config.optimizable = True
+    config.probe_position_config.optimizer = 'adam'
+    config.probe_position_config.step_size = 1e-1
     
-    opr_mode_weight_config = configs.OPRModeWeightsConfig(
-        initial_eigenmode_weights=0.1,
-        optimize_intensity_variation=True,
-        optimizable=True,
-        optimizer='adam',
-        step_size=1e-2
-    )
+    config.opr_mode_weight_config.initial_eigenmode_weights = 0.1
+    config.opr_mode_weight_config.optimize_intensity_variation = True
+    config.opr_mode_weight_config.optimizable = True
+    config.opr_mode_weight_config.optimizer = 'adam'
+    config.opr_mode_weight_config.step_size = 1e-2
     
-    reconstructor_config = configs.AutodiffPtychographyReconstructorConfig(
-        num_epochs=64,
-        batch_size=96,
-        default_device='gpu',
-        gpu_indices=[0],
-        metric_function='mse_sqrt',
-        loss_function='mse_sqrt',
-        log_level='info'
-    )
+    config.reconstructor_config.num_epochs = 64
+    config.reconstructor_config.batch_size = 96
+    config.reconstructor_config.default_device = 'gpu'
+    config.reconstructor_config.gpu_indices = [0]
+    config.reconstructor_config.metric_function = 'mse_sqrt'
+    config.reconstructor_config.log_level = 'info'
     
-    job = PtychographyJob(
-        data_config=data_config,
-        object_config=object_config,
-        probe_config=probe_config,
-        position_config=position_config,
-        opr_mode_weight_config=opr_mode_weight_config,
-        reconstructor_config=reconstructor_config
-    )
+    job = PtychographyJob(config)
     job.build()
     job.run()
     # This should be equivalent to:

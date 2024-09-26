@@ -72,21 +72,16 @@ class Job:
 class PtychographyJob(Job):
     
     def __init__(self,
-                 data_config: configs.PtychographyDataConfig,
-                 object_config: configs.ObjectConfig,
-                 probe_config: configs.ProbeConfig,
-                 position_config: configs.ProbePositionConfig,
-                 opr_mode_weight_config: configs.OPRModeWeightsConfig,
-                 reconstructor_config: configs.ReconstructorConfig, 
+                 config: configs.PtychographyJobConfig,
                  *args, **kwargs
     ) -> None:
         super().__init__(*args, **kwargs)
-        self.data_config = data_config
-        self.object_config = object_config
-        self.probe_config = probe_config
-        self.position_config = position_config
-        self.opr_mode_weight_config = opr_mode_weight_config
-        self.reconstructor_config = reconstructor_config
+        self.data_config = config.data_config
+        self.object_config = config.object_config
+        self.probe_config = config.probe_config
+        self.position_config = config.probe_position_config
+        self.opr_mode_weight_config = config.opr_mode_weight_config
+        self.reconstructor_config = config.reconstructor_config
         
         self.dataset = None
         self.object = None
@@ -139,7 +134,8 @@ class PtychographyJob(Job):
             pixel_size_m=self.object_config.pixel_size_m,
             optimizable=self.object_config.optimizable,
             optimizer_class=get_optimizer_class(self.object_config.optimizer),
-            optimizer_params={'lr': self.object_config.step_size}
+            optimizer_params={'lr': self.object_config.step_size},
+            **self.object_config.uninherited_fields()
         )
         
     def build_probe(self):
@@ -149,7 +145,7 @@ class PtychographyJob(Job):
             optimizable=self.probe_config.optimizable,
             optimizer_class=get_optimizer_class(self.probe_config.optimizer),
             optimizer_params={'lr': self.probe_config.step_size},
-            eigenmode_update_relaxation=self.probe_config.eigenmode_update_relaxation
+            **self.probe_config.uninherited_fields()
         )
         
     def build_probe_positions(self):
@@ -162,7 +158,8 @@ class PtychographyJob(Job):
             data=data,
             optimizable=self.position_config.optimizable,
             optimizer_class=get_optimizer_class(self.position_config.optimizer),
-            optimizer_params={'lr': self.position_config.step_size}
+            optimizer_params={'lr': self.position_config.step_size},
+            **self.position_config.uninherited_fields()
         )
         
     def build_opr_mode_weights(self):
@@ -177,7 +174,7 @@ class PtychographyJob(Job):
                     eigenmode_weight=self.opr_mode_weight_config.initial_eigenmode_weights),
                 optimizable=self.opr_mode_weight_config.optimizable,
                 optimize_intensity_variation=self.opr_mode_weight_config.optimize_intensity_variation,
-                update_relaxation=self.opr_mode_weight_config.eigenmode_weight_update_relaxation
+                **self.opr_mode_weight_config.uninherited_fields()
             )
             
     def build_reconstructor(self):
@@ -190,20 +187,18 @@ class PtychographyJob(Job):
         
         reconstructor_class = get_reconstructor_class(self.reconstructor_config.__class__)
         
-        # TODO: reconstructors should take ReconstructorConfig directly so that we don't need this.
         reconstructor_kwargs = {
             'variable_group': var_group,
             'dataset': self.dataset,
             'batch_size': self.reconstructor_config.batch_size,
             'n_epochs': self.reconstructor_config.num_epochs,
-            'metric_function': get_loss_function(self.reconstructor_config.metric_function)
+            'metric_function': get_loss_function(self.reconstructor_config.metric_function),
+            **self.reconstructor_config.uninherited_fields()
         }
+        # Special treatments.
         if reconstructor_class == AutodiffPtychographyReconstructor:
             reconstructor_kwargs['forward_model_class'] = Ptychography2DForwardModel
             reconstructor_kwargs['loss_function'] = get_loss_function(self.reconstructor_config.loss_function)
-        elif reconstructor_class == LSQMLReconstructor:
-            reconstructor_kwargs['noise_model'] = self.reconstructor_config.noise_model
-            reconstructor_kwargs['noise_model_params'] = self.reconstructor_config.noise_model_params
         
         self.reconstructor = reconstructor_class(**reconstructor_kwargs)
         self.reconstructor.build()
@@ -215,16 +210,7 @@ class PtychographyJob(Job):
         self.reconstructor.run(n_epochs=n_epochs)
         
     def get_data(self, name: Literal['object', 'probe', 'probe_positions', 'opr_mode_weights']) -> Tensor:
-        if name == 'object':
-            return self.object.data.detach()
-        elif name == 'probe':
-            return self.probe.data.detach()
-        elif name == 'probe_positions':
-            return self.probe_positions.data.detach()
-        elif name == 'opr_mode_weights':
-            return self.opr_mode_weights.data.detach()
-        else:
-            raise ValueError(f'Unknown data name: {name}')
+        return getattr(self, name).data.detach()
         
     def get_data_to_cpu(self, 
                         name: Literal['object', 'probe', 'probe_positions', 'opr_mode_weights'], 
