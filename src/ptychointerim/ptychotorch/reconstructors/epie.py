@@ -9,6 +9,7 @@ from ptychointerim.ptychotorch.data_structures import Ptychography2DVariableGrou
 from ptychointerim.ptychotorch.reconstructors.base import AnalyticalIterativeReconstructor
 from ptychointerim.image_proc import place_patches_fourier_shift
 from ptychointerim.position_correction import compute_positions_cross_correlation_update
+from ptychointerim.forward_models import Ptychography2DForwardModel
 
 
 class EPIEReconstructor(AnalyticalIterativeReconstructor):
@@ -26,6 +27,7 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
             batch_size=batch_size,
             n_epochs=n_epochs,
             *args, **kwargs)
+        self.forward_model = Ptychography2DForwardModel(variable_group, retain_intermediates=True)
 
     def check_inputs(self, *args, **kwargs):
         for var in self.variable_group.get_optimizable_variables():
@@ -37,13 +39,13 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
             raise NotImplementedError('EPIEReconstructor does not support multiple OPR modes yet.')
         
     def run_minibatch(self, input_data, y_true, *args, **kwargs):
-        (delta_o, delta_p, delta_pos), batch_loss = self.compute_updates(*input_data, y_true, self.dataset.valid_pixel_mask)
+        (delta_o, delta_p, delta_pos), batch_loss = self.compute_updates(
+            *input_data, y_true, self.dataset.valid_pixel_mask)
         self.apply_updates(delta_o, delta_p, delta_pos)
         batch_loss = torch.mean(batch_loss)
         self.loss_tracker.update_batch_loss_with_value(batch_loss.item())
 
-    @staticmethod
-    def compute_updates(update_step_module: torch.nn.Module,
+    def compute_updates(self,
                         indices: torch.Tensor,
                         y_true: torch.Tensor,
                         valid_pixel_mask: torch.Tensor
@@ -52,9 +54,9 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
         Calculates the updates of the whole object, the probe, and other variables.
         This function is called in self.update_step_module.forward. 
         """
-        object_ = update_step_module.variable_module_dict['object']
-        probe = update_step_module.variable_module_dict['probe']
-        probe_positions = update_step_module.variable_module_dict['probe_positions']
+        object_ = self.variable_group.object
+        probe = self.variable_group.probe
+        probe_positions = self.variable_group.probe_positions
 
         indices = indices.cpu()
         positions = probe_positions.tensor[indices]
@@ -108,12 +110,6 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
             delta_p = delta_p[:, None] * (psi_prime - psi)
             delta_p = delta_p.mean(0)
             delta_p_all_modes = delta_p[None, :, :]
-            
-        # DataParallel would split the real and imaginary parts of delta_o
-        # and store them in an additional dimension at the end. To keep things consistent,
-        # we do the splitting manually for cases without DataParallel. 
-        # Also, add a new dimension in the front for DataParallel to concantenate multi-device outputs.
-        delta_o, delta_p_all_modes = update_step_module.process_updates(delta_o, delta_p_all_modes)
 
         batch_loss = torch.mean((torch.sqrt(y) - torch.sqrt(y_true)) ** 2)
         return (delta_o, delta_p_all_modes, delta_pos), torch.atleast_1d(batch_loss)
@@ -131,14 +127,10 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
         probe_positions = self.variable_group.probe_positions
 
         if delta_o is not None:
-            delta_o = delta_o[..., 0] + 1j * delta_o[..., 1]
-            delta_o = delta_o.sum(0)
             object_.set_grad(-delta_o)
             object_.optimizer.step()
             
         if delta_p is not None:
-            delta_p = delta_p[..., 0] + 1j * delta_p[..., 1]
-            delta_p = delta_p.mean(0)
             probe.set_grad(-delta_p)
             probe.optimizer.step()
 
