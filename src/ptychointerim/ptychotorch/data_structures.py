@@ -257,8 +257,6 @@ class Object2D(Object):
         
 class Probe(Variable):
     
-    n_modes = 1
-    
     # TODO: eigenmode_update_relaxation is only used for LSQML. We should create dataclasses
     # to contain additional options for Variable classes, and subclass them for specific
     # reconstruction algorithms - for example, ProbeOptions -> LSQMLProbeOptions.

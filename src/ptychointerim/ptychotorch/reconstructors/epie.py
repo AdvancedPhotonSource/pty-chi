@@ -35,11 +35,9 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
             raise NotImplementedError('EPIEReconstructor does not support metric function yet.')
         if self.variable_group.probe.has_multiple_opr_modes:
             raise NotImplementedError('EPIEReconstructor does not support multiple OPR modes yet.')
-        if self.variable_group.probe.n_modes > 1:
-            raise NotImplementedError('EPIEReconstructor does not support mixed state probe yet.')
         
     def run_minibatch(self, input_data, y_true, *args, **kwargs):
-        (delta_o, delta_p, delta_pos), batch_loss = self.update_step_module(*input_data, y_true, self.dataset.valid_pixel_mask)
+        (delta_o, delta_p, delta_pos), batch_loss = self.compute_updates(*input_data, y_true, self.dataset.valid_pixel_mask)
         self.apply_updates(delta_o, delta_p, delta_pos)
         batch_loss = torch.mean(batch_loss)
         self.loss_tracker.update_batch_loss_with_value(batch_loss.item())
@@ -65,25 +63,41 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
         obj_patches = object_.extract_patches(
             positions, probe.get_spatial_shape()
         )
-        p = probe.get_mode_and_opr_mode(0, 0)
-        psi = obj_patches * p
-        psi_far = prop.propagate_far_field(psi)
-        y = y + torch.abs(psi_far) ** 2
 
-        psi_prime = psi_far / torch.abs(psi_far) * torch.sqrt(y_true + 1e-7)
-        # Do not swap magnitude for bad pixels.
-        psi_prime = torch.where(valid_pixel_mask.repeat(psi_prime.shape[0], 1, 1), psi_prime, psi_far)
-        psi_prime = prop.back_propagate_far_field(psi_prime)
+        p = torch.zeros_like(probe.get_opr_mode(0))
+        psi_array_shape = (len(obj_patches), probe.n_modes, *obj_patches.shape[1:])
+        psi = torch.zeros(psi_array_shape, dtype=obj_patches.dtype)
+        psi_far = torch.zeros(psi_array_shape, dtype=obj_patches.dtype)
+        psi_prime = torch.zeros(psi_array_shape, dtype=obj_patches.dtype)
 
-        delta_o_patches = None
+        I_total = (torch.abs(probe.get_opr_mode(0)) ** 2).sum()
+        def compute_psi_variables(p, y):
+            psi = obj_patches * p
+            psi_far = prop.propagate_far_field(psi)
+            y = y + torch.abs(psi_far) ** 2
+
+            # Scaling factor to account for distribution of power among probe modes.
+            A = ( (torch.abs(p) ** 2).sum() / I_total ) ** 0.5
+            psi_prime = psi_far / torch.abs(psi_far) * torch.sqrt(y_true + 1e-7) * A
+            # Do not swap magnitude for bad pixels.
+            psi_prime = torch.where(valid_pixel_mask.repeat(psi_prime.shape[0], 1, 1), psi_prime, psi_far)
+            psi_prime = prop.back_propagate_far_field(psi_prime)
+
+            return psi, psi_far, psi_prime, y
+        
+        for mode in range(probe.n_modes):
+            p[mode] = probe.get_mode_and_opr_mode(mode, 0)
+            psi[:, mode], psi_far[:, mode], psi_prime[:, mode], y = compute_psi_variables(p[mode], y)
+
+        delta_o = None
         if object_.optimizable:
-            delta_o_patches = p.conj() / (torch.abs(p) ** 2).max()
+            delta_o_patches = p.conj() / (torch.abs(p) ** 2).sum(0).max()
             delta_o_patches = delta_o_patches * (psi_prime - psi)
-            delta_pos = None
+            delta_o_patches = delta_o_patches.sum(axis=1)
             delta_o = place_patches_fourier_shift(torch.zeros_like(object_.data), positions + object_.center_pixel, delta_o_patches, op='add')
 
         delta_pos = None
-        if probe_positions.optimizable:
+        if probe_positions.optimizable and object_.optimizable:
             updated_obj_patches = obj_patches + delta_o_patches * object_.optimizer_params['lr']
             delta_pos = compute_positions_cross_correlation_update(
                 obj_patches, updated_obj_patches, indices, probe_positions.data, probe.data[0, 0])
@@ -91,13 +105,9 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
         delta_p_all_modes = None
         if probe.optimizable:
             delta_p = obj_patches.conj() / (torch.abs(obj_patches) ** 2).max(-1).values.max(-1).values.view(-1, 1, 1)
-            delta_p = delta_p * (psi_prime - psi)
+            delta_p = delta_p[:, None] * (psi_prime - psi)
             delta_p = delta_p.mean(0)
-            delta_p_all_modes = delta_p[None, None, :, :]
-            delta_p_all_modes = torch.nn.functional.pad(
-                delta_p_all_modes, 
-                (0, 0, 0, 0, 0, probe.n_modes - delta_p_all_modes.shape[1], 0, probe.n_opr_modes - delta_p_all_modes.shape[0])
-            )
+            delta_p_all_modes = delta_p[None, :, :]
             
         # DataParallel would split the real and imaginary parts of delta_o
         # and store them in an additional dimension at the end. To keep things consistent,
