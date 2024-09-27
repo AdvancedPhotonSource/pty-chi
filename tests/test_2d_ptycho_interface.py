@@ -4,8 +4,8 @@ import os
 import torch
 import numpy as np
 
-from ptychointerim.interface import PtychographyJob
-from ptychointerim.configs import LSQMLConfig, AutodiffPtychographyConfig
+from ptychointerim.api.task import PtychographyJob
+from ptychointerim.api import LSQMLOptions, AutodiffPtychographyOptions
 import ptychointerim.ptychotorch.utils as utils
 
 import test_utils as tutils
@@ -47,40 +47,40 @@ def test_2d_ptycho_interface_lsqml(pytestconfig, generate_gold=False, debug=Fals
     )
     positions_m = positions_px * pixel_size_m
     
-    config = LSQMLConfig()
-    config.data_config.data = data
+    options = LSQMLOptions()
+    options.data_options.data = data
     
-    config.object_config.initial_guess = object_init
-    config.object_config.pixel_size_m = pixel_size_m
-    config.object_config.optimizable = True
-    config.object_config.optimizer = 'sgd'
-    config.object_config.step_size = 1
+    options.object_options.initial_guess = object_init
+    options.object_options.pixel_size_m = pixel_size_m
+    options.object_options.optimizable = True
+    options.object_options.optimizer = 'sgd'
+    options.object_options.step_size = 1
     
-    config.probe_config.initial_guess = probe
-    config.probe_config.optimizable = True
-    config.probe_config.optimizer = 'sgd'
-    config.probe_config.step_size = 1
+    options.probe_options.initial_guess = probe
+    options.probe_options.optimizable = True
+    options.probe_options.optimizer = 'sgd'
+    options.probe_options.step_size = 1
     
-    config.probe_position_config.position_x_m = positions_m[:, 1]
-    config.probe_position_config.position_y_m = positions_m[:, 0]
-    config.probe_position_config.pixel_size_m = pixel_size_m
-    config.probe_position_config.update_magnitude_limit = 1.0
-    config.probe_position_config.optimizable = True
-    config.probe_position_config.optimizer = 'adam'
-    config.probe_position_config.step_size = 1e-1
+    options.probe_position_options.position_x_m = positions_m[:, 1]
+    options.probe_position_options.position_y_m = positions_m[:, 0]
+    options.probe_position_options.pixel_size_m = pixel_size_m
+    options.probe_position_options.update_magnitude_limit = 1.0
+    options.probe_position_options.optimizable = True
+    options.probe_position_options.optimizer = 'adam'
+    options.probe_position_options.step_size = 1e-1
     
-    config.opr_mode_weight_config.initial_eigenmode_weights = 0.1
-    config.opr_mode_weight_config.optimize_intensity_variation = True
-    config.opr_mode_weight_config.optimizable = True
+    options.opr_mode_weight_options.initial_eigenmode_weights = 0.1
+    options.opr_mode_weight_options.optimize_intensity_variation = True
+    options.opr_mode_weight_options.optimizable = True
     
-    config.reconstructor_config.num_epochs = 64
-    config.reconstructor_config.batch_size = 40
-    config.reconstructor_config.default_device = 'gpu'
-    config.reconstructor_config.gpu_indices = [0]
-    config.reconstructor_config.metric_function = 'mse_sqrt'
-    config.reconstructor_config.log_level = 'info'
+    options.reconstructor_options.num_epochs = 16
+    options.reconstructor_options.batch_size = 40
+    options.reconstructor_options.default_device = 'gpu'
+    options.reconstructor_options.gpu_indices = [0]
+    options.reconstructor_options.metric_function = 'mse_sqrt'
+    options.reconstructor_options.log_level = 'info'
     
-    job = PtychographyJob(config)
+    job = PtychographyJob(options)
     job.build()
     job.run()
     # This should be equivalent to:
@@ -115,40 +115,40 @@ def test_2d_ptycho_interface_ad(pytestconfig, generate_gold=False, debug=False, 
     )
     positions_m = positions_px * pixel_size_m
     
-    config = AutodiffPtychographyConfig()
-    config.data_config.data = data
+    config = AutodiffPtychographyOptions()
+    config.data_options.data = data
     
-    config.object_config.initial_guess = object_init
-    config.object_config.pixel_size_m = pixel_size_m
-    config.object_config.optimizable = True
-    config.object_config.optimizer = 'sgd'
-    config.object_config.step_size = 1e-1
+    config.object_options.initial_guess = object_init
+    config.object_options.pixel_size_m = pixel_size_m
+    config.object_options.optimizable = True
+    config.object_options.optimizer = 'sgd'
+    config.object_options.step_size = 1e-1
     
-    config.probe_config.initial_guess = probe
-    config.probe_config.optimizable = True
-    config.probe_config.optimizer = 'sgd'
-    config.probe_config.step_size = 1e-1
+    config.probe_options.initial_guess = probe
+    config.probe_options.optimizable = True
+    config.probe_options.optimizer = 'sgd'
+    config.probe_options.step_size = 1e-1
     
-    config.probe_position_config.position_x_m = positions_m[:, 1]
-    config.probe_position_config.position_y_m = positions_m[:, 0]
-    config.probe_position_config.pixel_size_m = pixel_size_m
-    config.probe_position_config.update_magnitude_limit = 1.0
-    config.probe_position_config.optimizable = True
-    config.probe_position_config.optimizer = 'adam'
-    config.probe_position_config.step_size = 1e-1
+    config.probe_position_options.position_x_m = positions_m[:, 1]
+    config.probe_position_options.position_y_m = positions_m[:, 0]
+    config.probe_position_options.pixel_size_m = pixel_size_m
+    config.probe_position_options.update_magnitude_limit = 1.0
+    config.probe_position_options.optimizable = True
+    config.probe_position_options.optimizer = 'adam'
+    config.probe_position_options.step_size = 1e-1
     
-    config.opr_mode_weight_config.initial_eigenmode_weights = 0.1
-    config.opr_mode_weight_config.optimize_intensity_variation = True
-    config.opr_mode_weight_config.optimizable = True
-    config.opr_mode_weight_config.optimizer = 'adam'
-    config.opr_mode_weight_config.step_size = 1e-2
+    config.opr_mode_weight_options.initial_eigenmode_weights = 0.1
+    config.opr_mode_weight_options.optimize_intensity_variation = True
+    config.opr_mode_weight_options.optimizable = True
+    config.opr_mode_weight_options.optimizer = 'adam'
+    config.opr_mode_weight_options.step_size = 1e-2
     
-    config.reconstructor_config.num_epochs = 64
-    config.reconstructor_config.batch_size = 96
-    config.reconstructor_config.default_device = 'gpu'
-    config.reconstructor_config.gpu_indices = [0]
-    config.reconstructor_config.metric_function = 'mse_sqrt'
-    config.reconstructor_config.log_level = 'info'
+    config.reconstructor_options.num_epochs = 16
+    config.reconstructor_options.batch_size = 96
+    config.reconstructor_options.default_device = 'gpu'
+    config.reconstructor_options.gpu_indices = [0]
+    config.reconstructor_options.metric_function = 'mse_sqrt'
+    config.reconstructor_options.log_level = 'info'
     
     job = PtychographyJob(config)
     job.build()
