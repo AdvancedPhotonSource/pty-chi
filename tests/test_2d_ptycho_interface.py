@@ -75,8 +75,8 @@ def test_2d_ptycho_interface_lsqml(pytestconfig, generate_gold=False, debug=Fals
     
     options.reconstructor_options.num_epochs = 16
     options.reconstructor_options.batch_size = 40
-    options.reconstructor_options.default_device = 'gpu'
-    options.reconstructor_options.gpu_indices = [0]
+    options.reconstructor_options.default_device = 'cpu'
+    # options.reconstructor_options.gpu_indices = [0]
     options.reconstructor_options.metric_function = 'mse_sqrt'
     options.reconstructor_options.log_level = 'info'
     
@@ -145,8 +145,8 @@ def test_2d_ptycho_interface_ad(pytestconfig, generate_gold=False, debug=False, 
     
     config.reconstructor_options.num_epochs = 16
     config.reconstructor_options.batch_size = 96
-    config.reconstructor_options.default_device = 'gpu'
-    config.reconstructor_options.gpu_indices = [0]
+    config.reconstructor_options.default_device = 'cpu'
+    # config.reconstructor_options.gpu_indices = [0]
     config.reconstructor_options.metric_function = 'mse_sqrt'
     config.reconstructor_options.log_level = 'info'
     
