@@ -1,4 +1,4 @@
-from typing import Optional, Literal, Union
+from typing import Optional, Literal, Union, Sequence
 import dataclasses
 from dataclasses import field
 import json
@@ -11,70 +11,6 @@ import ptychointerim.api
 
 @dataclasses.dataclass
 class Options:
-    
-    @staticmethod
-    def is_jsonable(x):
-        try:
-            json.dumps(x)
-            return True
-        except (TypeError, OverflowError):
-            return False
-
-    def get_serializable_dict(self):
-        d = {}
-        for key in self.__dict__.keys():
-            v = self.__dict__[key]
-            v = self.object_to_string(key, v)
-            d[key] = v
-        d['_options_class'] = self.__class__.__name__
-        return d
-
-    def deserizalize_dict(self, d):
-        for key in d.keys():
-            v = self.string_to_object(key, d[key])
-            if not isinstance(v, self.SkipKey):
-                self.__dict__[key] = v
-
-    def dump_to_json(self, filename):
-        try:
-            f = open(filename, 'w')
-            d = self.get_serializable_dict()
-            json.dump(d, f, indent=4, separators=(',', ': '))
-            f.close()
-        except:
-            print('Failed to dump json.')
-
-    def load_from_json(self, filename, namespace=None):
-        """
-        This function only overwrites entries contained in the JSON file. Unspecified entries are unaffected.
-        """
-        if namespace is not None:
-            for key in namespace.keys():
-                globals()[key] = namespace[key]
-        f = open(filename, 'r')
-        d = json.load(f)
-        self.deserizalize_dict(d)
-        f.close()
-
-    def object_to_string(self, v):
-        if isinstance(v, Options):
-            return v.get_serializable_dict()
-        elif isinstance(v, (Tensor, ndarray)):
-            if v.ndim == 0:
-                return str(v.item())
-            return '<array>'
-        else:
-            return str(v)
-        
-    def string_to_object(self, v):
-        if isinstance(v, dict):
-            try:
-                cls = getattr(ptychointerim.api, v['_options_class'])
-            except AttributeError:
-                cls = Options
-            return cls(**v)
-        else:
-            return v
         
     def uninherited_fields(self) -> dict:
         """
@@ -218,8 +154,8 @@ class ReconstructorOptions(Options):
     default_device: Literal['cpu', 'gpu'] = 'gpu'
     """The default device to use for computation."""
     
-    gpu_indices: Optional[list[int]] = None
-    """The GPU indices to use for computation. If None, use all available GPUs."""
+    gpu_indices: Sequence[int] = ()
+    """The GPU indices to use for computation. If empty, use all available GPUs."""
     
     default_dtype: Literal['float32', 'float64'] = 'float32'
     """The default data type to use for computation."""

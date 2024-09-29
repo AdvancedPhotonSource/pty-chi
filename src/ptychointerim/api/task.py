@@ -115,7 +115,7 @@ class PtychographyJob(Job):
     def build_default_device(self):
         dmap = {'cpu': 'cpu', 'gpu': 'cuda'}
         torch.set_default_device(dmap[self.reconstructor_options.default_device])
-        if self.reconstructor_options.gpu_indices is not None:
+        if len(self.reconstructor_options.gpu_indices) > 0:
             os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, self.reconstructor_options.gpu_indices))
         
     def build_default_dtype(self):
