@@ -71,7 +71,7 @@ def test_2d_ptycho_interface_lsqml(pytestconfig, generate_gold=False, debug=Fals
     options.probe_position_options.optimizer = api.Optimizers.ADAM
     options.probe_position_options.step_size = 1e-1
     
-    options.opr_mode_weight_options.initial_eigenmode_weights = 0.1
+    options.opr_mode_weight_options.initial_weights = 0.1
     options.opr_mode_weight_options.optimize_intensity_variation = True
     options.opr_mode_weight_options.optimizable = True
     
@@ -139,7 +139,7 @@ def test_2d_ptycho_interface_ad(pytestconfig, generate_gold=False, debug=False, 
     options.probe_position_options.optimizer = api.Optimizers.ADAM
     options.probe_position_options.step_size = 1e-1
     
-    options.opr_mode_weight_options.initial_eigenmode_weights = 0.1
+    options.opr_mode_weight_options.initial_weights = 0.1
     options.opr_mode_weight_options.optimize_intensity_variation = True
     options.opr_mode_weight_options.optimizable = True
     options.opr_mode_weight_options.optimizer = api.Optimizers.ADAM

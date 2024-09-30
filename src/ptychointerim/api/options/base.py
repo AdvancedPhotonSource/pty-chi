@@ -109,11 +109,15 @@ class ProbePositionOptions(ParameterOptions):
 @dataclasses.dataclass
 class OPRModeWeightsOptions(ParameterOptions):
     
-    initial_eigenmode_weights: Union[list[float], float] = 0.1
+    initial_weights: Union[ndarray, Tensor, list[float], float] = 0.1
     """
-    The initial weight(s) of the eigenmode(s). If it is a scaler, the weights of
-    all eigenmodes (i.e., the second and following OPR modes) are set to this value.
-    If it is a list, the length should be the number of eigenmodes.
+    The initial weight(s) of the eigenmode(s). Acceptable values include the following:
+    - a (n_scan_points, n_opr_modes) tensor or array of initial weights for every point.
+    - a (n_opr_modes,) tensor, array, or list of floats that gives the weights of each
+        OPR mode for all scan points.
+    - a scaler, which sets the weights of all eigenmodes 
+        (i.e., the second and following OPR modes) to the same value. The weight of the main
+        OPR mode is set to 1 in this case.
     """
     
     optimize_intensity_variation: bool = False
