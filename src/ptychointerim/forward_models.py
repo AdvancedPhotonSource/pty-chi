@@ -13,7 +13,8 @@ class ForwardModel(torch.nn.Module):
     def __init__(self, variable_group: VariableGroup, *args, **kwargs) -> None:
         super().__init__()
         
-        assert isinstance(variable_group, VariableGroup)
+        if not isinstance(variable_group, VariableGroup):
+            raise TypeError(f"variable_group must be a VariableGroup, not {type(variable_group)}")
         
         self.variable_group = variable_group
         self.optimizable_variables: ModuleList[Variable] = ModuleList()
@@ -55,8 +56,8 @@ class Ptychography2DForwardModel(ForwardModel):
         
     def check_inputs(self):
         if self.probe.has_multiple_opr_modes:
-            assert self.opr_mode_weights is not None, \
-                'OPRModeWeights must be given when the probe has multiple OPR modes.'
+            if self.opr_mode_weights is None:
+                raise ValueError('OPRModeWeights must be given when the probe has multiple OPR modes.')
         
     def forward_real_space(self, indices: Tensor, obj_patches: Tensor) -> Tensor:
         if self.probe.has_multiple_opr_modes:

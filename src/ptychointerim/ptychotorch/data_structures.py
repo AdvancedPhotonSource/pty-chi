@@ -79,7 +79,8 @@ class Variable(Module):
                  optimizer_params: Optional[dict] = None,
                  *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        assert shape is not None or data is not None
+        if shape is None and data is None:
+            raise ValueError("Either shape or data must be specified.")
         self.optimizable = optimizable
         self.name = name
         self.optimizer_class = optimizer_class
@@ -276,7 +277,8 @@ class Probe(Variable):
             for eigenmode update in LSQML.
         """
         super().__init__(*args, name=name, is_complex=True, **kwargs)
-        assert len(self.shape) == 4, 'Probe tensor must be of shape (n_opr_modes, n_modes, h, w).'
+        if len(self.shape) != 4:
+            raise ValueError('Probe tensor must be of shape (n_opr_modes, n_modes, h, w).')
         
         self.eigenmode_update_relaxation = eigenmode_update_relaxation
         
@@ -529,11 +531,13 @@ class OPRModeWeights(Variable):
             the update step in LSQML.
         """
         super().__init__(*args, name=name, is_complex=False, **kwargs)
-        assert len(self.shape) == 2, 'OPR weights must be of shape (n_scan_points, n_opr_modes).'
+        if len(self.shape) != 2:
+            raise ValueError('OPR weights must be of shape (n_scan_points, n_opr_modes).')
         if self.optimizable:
-            assert (optimize_eigenmode_weights or optimize_intensity_variation), \
-                'When OPRModeWeights is optimizable, at least one of optimize_eigenmode_weights ' \
-                'and optimize_intensity_variation should be set to True.'
+            if not (optimize_eigenmode_weights or optimize_intensity_variation):
+                raise ValueError('When OPRModeWeights is optimizable, at least 1 of '
+                                 'optimize_eigenmode_weights and optimize_intensity_variation '
+                                 'should be set to True.')
         
         self.update_relaxation = update_relaxation
         # TODO: AD optimizes both eigenmode weights and intensity variation when self.optimizable is True.

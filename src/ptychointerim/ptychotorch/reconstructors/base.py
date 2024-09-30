@@ -53,9 +53,10 @@ class LossTracker:
         data_provided = y_pred is not None and y_true is not None
         loss_provided = loss is not None
         if self.always_compute_loss:
-            assert data_provided, "Always_compute_loss requires (y_pred, y_true) to be provided."
-        assert (data_provided or loss_provided), \
-            "One of (y_pred, y_true) and (loss,) must be provided."
+            if not data_provided:
+                raise ValueError("Always_compute_loss requires (y_pred, y_true) to be provided.")
+        if not (data_provided or loss_provided):
+            raise ValueError("One of (y_pred, y_true) and (loss,) must be provided.")
             
         if loss_provided and not self.always_compute_loss:
             self.update_batch_loss_with_value(loss)
@@ -63,8 +64,8 @@ class LossTracker:
             self.update_batch_loss_with_metric_function(y_pred, y_true)
         
     def update_batch_loss_with_metric_function(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> None:
-        assert self.metric_function is not None, \
-            "update_batch_loss_with_metric_function requires a metric function."
+        if self.metric_function is None:
+            raise ValueError("update_batch_loss_with_metric_function requires a metric function.")
         batch_loss = self.metric_function(y_pred, y_true)
         batch_loss = to_numpy(batch_loss)
         self.epoch_loss = self.epoch_loss + batch_loss

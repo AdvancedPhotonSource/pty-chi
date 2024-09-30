@@ -86,8 +86,8 @@ class ProbeOptions(ParameterOptions):
     """A (n_opr_modes, n_modes, h, w) complex tensor of the probe initial guess."""
     
     def check(self):
-        assert self.initial_guess is not None and self.initial_guess.ndim == 4, \
-            'Probe initial_guess must be a (n_opr_modes, n_modes, h, w) tensor.'
+        if not (self.initial_guess is not None and self.initial_guess.ndim == 4):
+            raise ValueError('Probe initial_guess must be a (n_opr_modes, n_modes, h, w) tensor.')
     
 
 @dataclasses.dataclass
@@ -138,8 +138,10 @@ class OPRModeWeightsOptions(ParameterOptions):
     
     def check(self):
         if self.optimizable:
-            assert self.optimize_intensity_variation or self.optimize_eigenmode_weights, \
-                'At least 1 of optimize_intensity_variation and optimize_eigenmode_weights should be True.'
+            if not (self.optimize_intensity_variation or self.optimize_eigenmode_weights):
+                raise ValueError('When OPRModeWeights is optimizable, at least 1 of '
+                                 'optimize_intensity_variation and optimize_eigenmode_weights '
+                                 'should be set to True.')
 
     
 @dataclasses.dataclass
