@@ -19,25 +19,31 @@ from ptychointerim.ptychotorch.reconstructors import *
 from ptychointerim.metrics import MSELossOfSqrt
 
 
-class Job:
+class Task:
     
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, options: api.TaskOptions, *args, **kwargs) -> None:
         pass
     
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_value, exc_tb) -> None:
+        torch.cuda.empty_cache()
+    
 
-class PtychographyJob(Job):
+class PtychographyTask(Task):
     
     def __init__(self,
-                 config: api.PtychographyTaskOptions,
+                 options: api.PtychographyTaskOptions,
                  *args, **kwargs
     ) -> None:
-        super().__init__(*args, **kwargs)
-        self.data_options = config.data_options
-        self.object_options = config.object_options
-        self.probe_options = config.probe_options
-        self.position_options = config.probe_position_options
-        self.opr_mode_weight_options = config.opr_mode_weight_options
-        self.reconstructor_options = config.reconstructor_options
+        super().__init__(options, *args, **kwargs)
+        self.data_options = options.data_options
+        self.object_options = options.object_options
+        self.probe_options = options.probe_options
+        self.position_options = options.probe_position_options
+        self.opr_mode_weight_options = options.opr_mode_weight_options
+        self.reconstructor_options = options.reconstructor_options
         
         self.dataset = None
         self.object = None
@@ -174,4 +180,14 @@ class PtychographyJob(Job):
         if as_numpy:
             data = data.numpy()
         return data
+    
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        del self.object
+        del self.probe
+        del self.probe_positions
+        del self.opr_mode_weights
+        del self.reconstructor
+        del self.dataset
+        
+        super().__exit__(exc_type, exc_value, exc_tb)
         
