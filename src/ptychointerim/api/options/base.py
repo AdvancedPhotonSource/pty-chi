@@ -1,12 +1,13 @@
-from typing import Optional, Literal, Union, Sequence
+from typing import Optional, Literal, Union, Sequence, Any
 import dataclasses
 from dataclasses import field
 import json
+import logging
 
 from torch import Tensor
 from numpy import ndarray
 
-import ptychointerim.api
+import ptychointerim.api.enums as enums
 
 
 @dataclasses.dataclass
@@ -36,7 +37,7 @@ class ParameterOptions(Options):
     Whether the parameter is optimizable.
     """
     
-    optimizer: Optional[Literal['sgd', 'adam']] = 'sgd'
+    optimizer: enums.Optimizers = enums.Optimizers.SGD
     """
     Name of the optimizer.
     """
@@ -151,7 +152,7 @@ class ReconstructorOptions(Options):
     batch_size: int = 1
     """The number of data to process in each minibatch."""
     
-    default_device: Literal['cpu', 'gpu'] = 'gpu'
+    default_device: enums.Devices = enums.Devices.GPU
     """The default device to use for computation."""
     
     gpu_indices: Sequence[int] = ()
@@ -163,15 +164,18 @@ class ReconstructorOptions(Options):
     random_seed: Optional[int] = None
     """The random seed to use for reproducibility. If None, no seed will be set."""
     
-    metric_function: Optional[Literal['mse_sqrt', 'poisson', 'mse']] = None
+    metric_function: Optional[enums.LossFunctions] = None
     """
     The function that computes the tracked cost. Different from the `loss_function` 
     argument in some reconstructors, this function is only used for cost tracking
     and is not involved in the reconstruction math.
     """
     
-    log_level: Literal['debug', 'info', 'warning', 'error', 'critical'] = 'info'
+    log_level: int | str = logging.INFO
     """The log level to use for logging."""
+    
+    def get_reconstructor_type(self) -> enums.Reconstructors:
+        return enums.Reconstructors.base
     
 
 @dataclasses.dataclass

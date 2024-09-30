@@ -7,15 +7,14 @@ from torch import Tensor
 from numpy import ndarray
 
 from .base import *
+import ptychointerim.api.enums as enums
 
 
 @dataclasses.dataclass
 class PIEPtychographyReconstructorOptions(ReconstructorOptions):
-    
-    loss_function: Literal['mse_sqrt', 'poisson', 'mse'] = 'mse_sqrt'
-    """
-    The loss function.
-    """
+        
+    def get_reconstructor_type(self) -> enums.Reconstructors:
+        return enums.Reconstructors.PIE
     
 
 @dataclasses.dataclass

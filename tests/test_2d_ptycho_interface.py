@@ -1,9 +1,11 @@
 import argparse
 import os
+import logging
 
 import torch
 import numpy as np
 
+import ptychointerim.api as api
 from ptychointerim.api.task import PtychographyJob
 from ptychointerim.api import LSQMLOptions, AutodiffPtychographyOptions
 import ptychointerim.ptychotorch.utils as utils
@@ -53,7 +55,7 @@ def test_2d_ptycho_interface_lsqml(pytestconfig, generate_gold=False, debug=Fals
     options.object_options.initial_guess = object_init
     options.object_options.pixel_size_m = pixel_size_m
     options.object_options.optimizable = True
-    options.object_options.optimizer = 'sgd'
+    options.object_options.optimizer = api.Optimizers.SGD
     options.object_options.step_size = 1
     
     options.probe_options.initial_guess = probe
@@ -66,7 +68,7 @@ def test_2d_ptycho_interface_lsqml(pytestconfig, generate_gold=False, debug=Fals
     options.probe_position_options.pixel_size_m = pixel_size_m
     options.probe_position_options.update_magnitude_limit = 1.0
     options.probe_position_options.optimizable = True
-    options.probe_position_options.optimizer = 'adam'
+    options.probe_position_options.optimizer = api.Optimizers.ADAM
     options.probe_position_options.step_size = 1e-1
     
     options.opr_mode_weight_options.initial_eigenmode_weights = 0.1
@@ -75,10 +77,10 @@ def test_2d_ptycho_interface_lsqml(pytestconfig, generate_gold=False, debug=Fals
     
     options.reconstructor_options.num_epochs = 16
     options.reconstructor_options.batch_size = 40
-    options.reconstructor_options.default_device = 'cpu'
+    options.reconstructor_options.default_device = api.Devices.CPU
     # options.reconstructor_options.gpu_indices = [0]
-    options.reconstructor_options.metric_function = 'mse_sqrt'
-    options.reconstructor_options.log_level = 'info'
+    options.reconstructor_options.metric_function = api.LossFunctions.MSE_SQRT
+    options.reconstructor_options.log_level = logging.INFO
     
     job = PtychographyJob(options)
     job.build()
@@ -89,7 +91,7 @@ def test_2d_ptycho_interface_lsqml(pytestconfig, generate_gold=False, debug=Fals
     
     recon = job.get_data_to_cpu(name='object')
     
-    if debug:
+    if debug and not generate_gold:
         import matplotlib.pyplot as plt
         fig, ax = plt.subplots(1, 2)
         ax[0].imshow(abs(recon))       
@@ -121,12 +123,12 @@ def test_2d_ptycho_interface_ad(pytestconfig, generate_gold=False, debug=False, 
     config.object_options.initial_guess = object_init
     config.object_options.pixel_size_m = pixel_size_m
     config.object_options.optimizable = True
-    config.object_options.optimizer = 'sgd'
+    config.object_options.optimizer = api.Optimizers.SGD
     config.object_options.step_size = 1e-1
     
     config.probe_options.initial_guess = probe
     config.probe_options.optimizable = True
-    config.probe_options.optimizer = 'sgd'
+    config.probe_options.optimizer = api.Optimizers.SGD
     config.probe_options.step_size = 1e-1
     
     config.probe_position_options.position_x_m = positions_m[:, 1]
@@ -134,21 +136,21 @@ def test_2d_ptycho_interface_ad(pytestconfig, generate_gold=False, debug=False, 
     config.probe_position_options.pixel_size_m = pixel_size_m
     config.probe_position_options.update_magnitude_limit = 1.0
     config.probe_position_options.optimizable = True
-    config.probe_position_options.optimizer = 'adam'
+    config.probe_position_options.optimizer = api.Optimizers.ADAM
     config.probe_position_options.step_size = 1e-1
     
     config.opr_mode_weight_options.initial_eigenmode_weights = 0.1
     config.opr_mode_weight_options.optimize_intensity_variation = True
     config.opr_mode_weight_options.optimizable = True
-    config.opr_mode_weight_options.optimizer = 'adam'
+    config.opr_mode_weight_options.optimizer = api.Optimizers.ADAM
     config.opr_mode_weight_options.step_size = 1e-2
     
     config.reconstructor_options.num_epochs = 16
     config.reconstructor_options.batch_size = 96
-    config.reconstructor_options.default_device = 'cpu'
+    config.reconstructor_options.default_device = api.Devices.CPU
     # config.reconstructor_options.gpu_indices = [0]
-    config.reconstructor_options.metric_function = 'mse_sqrt'
-    config.reconstructor_options.log_level = 'info'
+    config.reconstructor_options.metric_function = api.LossFunctions.MSE_SQRT
+    config.reconstructor_options.log_level = logging.INFO
     
     job = PtychographyJob(config)
     job.build()
@@ -159,7 +161,7 @@ def test_2d_ptycho_interface_ad(pytestconfig, generate_gold=False, debug=False, 
     
     recon = job.get_data_to_cpu(name='object')
     
-    if debug:
+    if debug and not generate_gold:
         import matplotlib.pyplot as plt
         fig, ax = plt.subplots(1, 2)
         ax[0].imshow(abs(recon))       

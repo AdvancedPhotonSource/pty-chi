@@ -51,7 +51,7 @@ def test_2d_ptycho_lsqml(pytestconfig, generate_gold=False, debug=False, high_to
         optimizer_class=torch.optim.SGD,
         optimizer_params={'lr': 1}
     )
-
+    
     probe = Probe(
         data=probe,
         optimizable=True,
@@ -123,7 +123,7 @@ def test_2d_ptycho_lsqml_poscorr(pytestconfig, generate_gold=False, debug=False,
 
     recon = reconstructor.variable_group.object.tensor.complex().detach().cpu().numpy()
     
-    if debug:
+    if debug and not generate_gold:
         import matplotlib.pyplot as plt
         pos = reconstructor.variable_group.probe_positions.tensor.detach().cpu().numpy()
         pos_true = tutils.load_tungsten_data(pos_type='true')[3]

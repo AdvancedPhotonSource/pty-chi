@@ -56,7 +56,7 @@ def test_2d_ptycho_epie(generate_gold=False, debug=False):
 
     recon = reconstructor.variable_group.object.tensor.complex().detach().cpu().numpy()
     
-    if debug:
+    if debug and not generate_gold:
         import matplotlib.pyplot as plt
         fig, ax = plt.subplots(1, 2)
         ax[0].imshow(np.abs(recon))

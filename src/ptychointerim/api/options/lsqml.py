@@ -7,12 +7,16 @@ from torch import Tensor
 from numpy import ndarray
 
 from .base import *
+import ptychointerim.api.enums as enums
 
 
 @dataclasses.dataclass
 class LSQMLReconstructorOptions(ReconstructorOptions):
-
-    noise_model: Literal['gaussian', 'poisson'] = 'gaussian'
+    
+    noise_model: enums.NoiseModels = enums.NoiseModels.GAUSSIAN
+    """
+    The noise model to use.
+    """
     
     noise_model_params: Optional[dict] = None
     """
@@ -24,6 +28,9 @@ class LSQMLReconstructorOptions(ReconstructorOptions):
     Poisson noise model:
         (None)
     """
+    
+    def get_reconstructor_type(self) -> enums.Reconstructors:
+        return enums.Reconstructors.LSQML
     
 
 @dataclasses.dataclass

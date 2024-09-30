@@ -9,6 +9,7 @@ from torch import Tensor
 from numpy import ndarray
 
 import ptychointerim.api as api
+import ptychointerim.api.enums as enums
 from ptychointerim.ptychotorch.data_structures import *
 from ptychointerim.ptychotorch.io_handles import PtychographyDataset
 from ptychointerim.forward_models import Ptychography2DForwardModel
@@ -16,51 +17,6 @@ from ptychointerim.ptychotorch.utils import to_tensor
 import ptychointerim.ptychotorch.utils as utils
 from ptychointerim.ptychotorch.reconstructors import *
 from ptychointerim.metrics import MSELossOfSqrt
-
-
-def get_optimizer_class(optimizer_name: str):
-    if optimizer_name == 'adam':
-        return torch.optim.Adam
-    elif optimizer_name == 'sgd':
-        return torch.optim.SGD
-    elif optimizer_name == 'rmsprop':
-        return torch.optim.RMSprop
-    elif optimizer_name == 'adagrad':
-        return torch.optim.Adagrad
-    elif optimizer_name == 'adadelta':
-        return torch.optim.Adadelta
-    elif optimizer_name == 'lbfgs':
-        return torch.optim.LBFGS
-    elif optimizer_name == 'asgd':
-        return torch.optim.ASGD
-    elif optimizer_name == 'sparse_adam':
-        return torch.optim.SparseAdam
-    elif optimizer_name == 'adamax':
-        return torch.optim.Adamax
-    elif optimizer_name == 'radam':
-        return torch.optim.RAdam
-    elif optimizer_name == 'adamw':
-        return torch.optim.AdamW
-    else:
-        raise ValueError(f'Unknown optimizer: {optimizer_name}')
-    
-
-def get_loss_function(loss_name: str):
-    if loss_name == 'mse':
-        return torch.nn.MSELoss()
-    elif loss_name == 'poisson':
-        return torch.nn.PoissonNLLLoss()
-    elif loss_name == 'mse_sqrt':
-        return MSELossOfSqrt()
-    
-    
-def get_reconstructor_class(config_class: Type[api.Options]):
-    if config_class is api.LSQMLReconstructorOptions:
-        return LSQMLReconstructor
-    elif config_class is api.AutodiffPtychographyReconstructorOptions:
-        return AutodiffPtychographyReconstructor
-    elif config_class is api.PIEReconstructorConfig:
-        return EPIEReconstructor
 
 
 class Job:
@@ -109,20 +65,16 @@ class PtychographyJob(Job):
             random.seed(self.reconstructor_options.random_seed)
             
     def build_logger(self):
-        ldict = {'error': logging.ERROR, 'warning': logging.WARNING, 'info': logging.INFO, 'debug': logging.DEBUG}
-        logging.basicConfig(level=ldict[self.reconstructor_options.log_level])
+        logging.basicConfig(level=self.reconstructor_options.log_level)
     
     def build_default_device(self):
-        dmap = {'cpu': 'cpu', 'gpu': 'cuda'}
-        torch.set_default_device(dmap[self.reconstructor_options.default_device])
+        torch.set_default_device(enums.device_dict[self.reconstructor_options.default_device])
         if len(self.reconstructor_options.gpu_indices) > 0:
             os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, self.reconstructor_options.gpu_indices))
         
     def build_default_dtype(self):
-        dmap = {'float32': torch.float32, 'float64': torch.float64}
-        cdmap = {'float32': torch.complex64, 'float64': torch.complex128}
-        torch.set_default_dtype(dmap[self.reconstructor_options.default_dtype])
-        utils.set_default_complex_dtype(cdmap[self.reconstructor_options.default_dtype])
+        torch.set_default_dtype(enums.dtype_dict[self.reconstructor_options.default_dtype])
+        utils.set_default_complex_dtype(enums.complex_dtype_dict[self.reconstructor_options.default_dtype])
         
     def build_data(self):
         self.dataset = PtychographyDataset(self.data_options.data)
@@ -133,7 +85,7 @@ class PtychographyJob(Job):
             data=data, 
             pixel_size_m=self.object_options.pixel_size_m,
             optimizable=self.object_options.optimizable,
-            optimizer_class=get_optimizer_class(self.object_options.optimizer),
+            optimizer_class=enums.optimizer_dict[self.object_options.optimizer],
             optimizer_params={'lr': self.object_options.step_size},
             **self.object_options.uninherited_fields()
         )
@@ -143,7 +95,7 @@ class PtychographyJob(Job):
         self.probe = Probe(
             data=data, 
             optimizable=self.probe_options.optimizable,
-            optimizer_class=get_optimizer_class(self.probe_options.optimizer),
+            optimizer_class=enums.optimizer_dict[self.probe_options.optimizer],
             optimizer_params={'lr': self.probe_options.step_size},
             **self.probe_options.uninherited_fields()
         )
@@ -157,7 +109,7 @@ class PtychographyJob(Job):
         self.probe_positions = ProbePositions(
             data=data,
             optimizable=self.position_options.optimizable,
-            optimizer_class=get_optimizer_class(self.position_options.optimizer),
+            optimizer_class=enums.optimizer_dict[self.position_options.optimizer],
             optimizer_params={'lr': self.position_options.step_size},
             **self.position_options.uninherited_fields()
         )
@@ -173,6 +125,8 @@ class PtychographyJob(Job):
                     n_opr_modes=n_opr_modes, 
                     eigenmode_weight=self.opr_mode_weight_options.initial_eigenmode_weights),
                 optimizable=self.opr_mode_weight_options.optimizable,
+                optimizer_class=enums.optimizer_dict[self.opr_mode_weight_options.optimizer],
+                optimizer_params={'lr': self.opr_mode_weight_options.step_size},
                 optimize_intensity_variation=self.opr_mode_weight_options.optimize_intensity_variation,
                 **self.opr_mode_weight_options.uninherited_fields()
             )
@@ -185,20 +139,21 @@ class PtychographyJob(Job):
             opr_mode_weights=self.opr_mode_weights
         )
         
-        reconstructor_class = get_reconstructor_class(self.reconstructor_options.__class__)
+        reconstructor_class = enums.reconstructor_dict[self.reconstructor_options.get_reconstructor_type()]
         
         reconstructor_kwargs = {
             'variable_group': var_group,
             'dataset': self.dataset,
             'batch_size': self.reconstructor_options.batch_size,
             'n_epochs': self.reconstructor_options.num_epochs,
-            'metric_function': get_loss_function(self.reconstructor_options.metric_function),
+            'metric_function': enums.loss_function_dict[self.reconstructor_options.metric_function](),
             **self.reconstructor_options.uninherited_fields()
         }
-        # Special treatments.
+        # Special handling. We should change the expected input type of the reconstructor so that no conversion
+        # needs to be done here. 
         if reconstructor_class == AutodiffPtychographyReconstructor:
             reconstructor_kwargs['forward_model_class'] = Ptychography2DForwardModel
-            reconstructor_kwargs['loss_function'] = get_loss_function(self.reconstructor_options.loss_function)
+            reconstructor_kwargs['loss_function'] = enums.loss_function_dict[self.reconstructor_options.loss_function]()
         
         self.reconstructor = reconstructor_class(**reconstructor_kwargs)
         self.reconstructor.build()
