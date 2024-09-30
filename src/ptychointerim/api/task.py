@@ -1,4 +1,5 @@
-from typing import Optional, Literal, Union
+from typing import Optional, Literal, Union, overload
+from types import TracebackType
 import random
 import logging
 import os
@@ -24,10 +25,20 @@ class Task:
     def __init__(self, options: api.TaskOptions, *args, **kwargs) -> None:
         pass
     
-    def __enter__(self):
+    def __enter__(self) -> 'Task':
         return self
     
-    def __exit__(self, exc_type, exc_value, exc_tb) -> None:
+    @overload
+    def __exit__(self, exception_type: None, exception_value: None, traceback: None) -> None:
+        ...
+ 
+    @overload
+    def __exit__(self, exception_type: type[BaseException], exception_value: BaseException,
+                 traceback: TracebackType) -> None:
+        ...
+    
+    def __exit__(self, exception_type: type[BaseException] | None,
+                 exception_value: BaseException | None, traceback: TracebackType | None) -> None:
         torch.cuda.empty_cache()
     
 
