@@ -3,7 +3,7 @@ import torch
 from torch import Tensor
 from torch.nn import ModuleList
 
-from ptychointerim.ptychotorch.data_structures import (Variable, VariableGroup, Ptychography2DVariableGroup)
+from ptychointerim.ptychotorch.data_structures import (ReconstructParameter, VariableGroup, Ptychography2DVariableGroup)
 import ptychointerim.ptychotorch.propagation as prop
 from ptychointerim.metrics import MSELossOfSqrt
 
@@ -17,7 +17,7 @@ class ForwardModel(torch.nn.Module):
             raise TypeError(f"variable_group must be a VariableGroup, not {type(variable_group)}")
         
         self.variable_group = variable_group
-        self.optimizable_variables: ModuleList[Variable] = ModuleList()
+        self.optimizable_variables: ModuleList[ReconstructParameter] = ModuleList()
         
     def register_optimizable_parameters(self):
         for var in self.variable_group.__dict__.values():

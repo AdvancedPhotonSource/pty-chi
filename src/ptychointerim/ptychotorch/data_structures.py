@@ -63,7 +63,7 @@ class ComplexTensor(Module):
         self.data.copy_(to_tensor(data))
 
 
-class Variable(Module):
+class ReconstructParameter(Module):
     
     name = None
     optimizable: bool = True
@@ -191,12 +191,12 @@ class Variable(Module):
         pass
     
 
-class DummyVariable(Variable):
+class DummyVariable(ReconstructParameter):
     def __init__(self, *args, **kwargs):
         super().__init__(shape=(1,), optimizable=False, *args, **kwargs)
 
 
-class Object(Variable):
+class Object(ReconstructParameter):
     
     pixel_size_m: float = 1.0
     
@@ -256,7 +256,7 @@ class Object2D(Object):
         return image
         
         
-class Probe(Variable):
+class Probe(ReconstructParameter):
     
     n_modes = 1
     
@@ -333,7 +333,7 @@ class Probe(Variable):
     def get_all_mode_intensity(
             self, 
             opr_mode: Optional[int] = 0, 
-            weights: Optional[Union[Tensor, Variable]] = None,
+            weights: Optional[Union[Tensor, ReconstructParameter]] = None,
         ) -> Tensor:
         """
         Get the intensity of all probe modes.
@@ -352,7 +352,7 @@ class Probe(Variable):
             p = (self.data * weights[None, :, :, :]).sum(0)
         return torch.sum((p.abs()) ** 2, dim=0)
     
-    def get_unique_probes(self, weights: Union[Tensor, Variable], mode_to_apply: Optional[int] = None) -> Tensor:
+    def get_unique_probes(self, weights: Union[Tensor, ReconstructParameter], mode_to_apply: Optional[int] = None) -> Tensor:
         """
         Creates the unique probe for one or more scan points given the weights of eigenmodes.
         
@@ -393,7 +393,7 @@ class Probe(Variable):
                 unique_probe = p_orig[:, 0, ...]
         return unique_probe
     
-    def constrain_opr_mode_orthogonality(self, weights: Union[Tensor, Variable], eps=1e-5):
+    def constrain_opr_mode_orthogonality(self, weights: Union[Tensor, ReconstructParameter], eps=1e-5):
         """Add the following constraints to variable probe weights
 
         1. Remove outliars from weights
@@ -465,7 +465,7 @@ class Probe(Variable):
         self.set_data(probe)
         return weights
     
-    def post_update_hook(self, weights: Union[Tensor, Variable]) -> Tensor:
+    def post_update_hook(self, weights: Union[Tensor, ReconstructParameter]) -> Tensor:
         super().post_update_hook()
         if self.has_multiple_opr_modes:
             weights = self.constrain_opr_mode_orthogonality(weights)
@@ -516,7 +516,7 @@ class Probe(Variable):
                 
     
     
-class OPRModeWeights(Variable):
+class OPRModeWeights(ReconstructParameter):
     
     # TODO: update_relaxation is only used for LSQML. We should create dataclasses
     # to contain additional options for Variable classes, and subclass them for specific
@@ -560,7 +560,7 @@ class OPRModeWeights(Variable):
         return self.data[indices]
     
 
-class ProbePositions(Variable):
+class ProbePositions(ReconstructParameter):
     
     pixel_size_m: float = 1.0
     conversion_factor_dict = {'nm': 1e9, 'um': 1e6, 'm': 1.0}
@@ -583,10 +583,10 @@ class ProbePositions(Variable):
 @dataclasses.dataclass
 class VariableGroup:
 
-    def get_all_variables(self) -> list[Variable]:
+    def get_all_variables(self) -> list[ReconstructParameter]:
         return list(self.__dict__.values())
 
-    def get_optimizable_variables(self) -> list[Variable]:
+    def get_optimizable_variables(self) -> list[ReconstructParameter]:
         ovs = []
         for var in self.get_all_variables():
             if var.optimizable:
