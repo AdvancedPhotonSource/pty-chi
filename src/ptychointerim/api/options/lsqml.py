@@ -19,15 +19,9 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
     The noise model to use.
     """
     
-    noise_model_params: Optional[dict] = None
+    gaussian_noise_std: float = 0.5
     """
-    Noise model parameters. Depending on the choice of `noise_model`, the dictionary can contain the 
-    following keys:
-    
-    Gaussian noise model:
-        - 'gaussian_noise_std': The standard deviation of the gaussian noise.
-    Poisson noise model:
-        (None)
+    The standard deviation of the gaussian noise. Only used when `noise_model == enums.NoiseModels.GAUSSIAN`.
     """
     
     def get_reconstructor_type(self) -> enums.Reconstructors:

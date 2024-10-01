@@ -34,7 +34,7 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
                  n_epochs: int = 100,
                  metric_function: Optional[torch.nn.Module] = None,
                  noise_model: Literal['gaussian', 'poisson'] = 'gaussian',
-                 noise_model_params: Optional[dict] = None,
+                 gaussian_noise_std: float = 0.5,
                  *args, **kwargs
     ) -> None:
         super().__init__(
@@ -45,7 +45,8 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
             metric_function=metric_function,
             *args, **kwargs)
         self.forward_model = Ptychography2DForwardModel(variable_group, retain_intermediates=True)
-        noise_model_params = noise_model_params if noise_model_params is not None else {}
+        
+        noise_model_params = {} if noise_model == 'poisson' else {'sigma': gaussian_noise_std}
         self.noise_model = {
             'gaussian': PtychographyGaussianNoiseModel, 
             'poisson': PtychographyPoissonNoiseModel
