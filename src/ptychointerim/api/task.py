@@ -61,6 +61,8 @@ class PtychographyTask(Task):
         self.probe_positions = None
         self.opr_mode_weights = None
         self.reconstructor = None
+        
+        self.build()
     
     def build(self):
         self.build_random_seed()

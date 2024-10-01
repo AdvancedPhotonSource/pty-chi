@@ -83,7 +83,6 @@ def test_2d_ptycho_interface_lsqml(pytestconfig, generate_gold=False, debug=Fals
     options.reconstructor_options.log_level = logging.INFO
     
     with PtychographyTask(options) as task:
-        task.build()
         task.run()
         # This should be equivalent to:
         # for _ in range(64):
@@ -153,7 +152,6 @@ def test_2d_ptycho_interface_ad(pytestconfig, generate_gold=False, debug=False, 
     options.reconstructor_options.log_level = logging.INFO
     
     with PtychographyTask(options) as task:
-        task.build()
         task.run()
         # This should be equivalent to:
         # for _ in range(64):
