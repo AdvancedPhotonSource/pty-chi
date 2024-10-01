@@ -109,15 +109,12 @@ class ProbePositionOptions(ParameterOptions):
 @dataclasses.dataclass
 class OPRModeWeightsOptions(ParameterOptions):
     
-    initial_weights: Union[ndarray, Tensor, list[float], float] = 0.1
+    initial_weights: Union[ndarray] = None
     """
     The initial weight(s) of the eigenmode(s). Acceptable values include the following:
-    - a (n_scan_points, n_opr_modes) tensor or array of initial weights for every point.
-    - a (n_opr_modes,) tensor, array, or list of floats that gives the weights of each
-        OPR mode for all scan points.
-    - a scaler, which sets the weights of all eigenmodes 
-        (i.e., the second and following OPR modes) to the same value. The weight of the main
-        OPR mode is set to 1 in this case.
+    - a (n_scan_points, n_opr_modes) array of initial weights for every point.
+    - a (n_opr_modes,) array that gives the weights of each OPR mode. These weights
+        will be duplicated for every point.
     """
     
     optimize_intensity_variation: bool = False
@@ -164,7 +161,7 @@ class ReconstructorOptions(Options):
     gpu_indices: Sequence[int] = ()
     """The GPU indices to use for computation. If empty, use all available GPUs."""
     
-    default_dtype: Literal['float32', 'float64'] = 'float32'
+    default_dtype: enums.Dtypes = enums.Dtypes.FLOAT32
     """The default data type to use for computation."""
     
     random_seed: Optional[int] = None

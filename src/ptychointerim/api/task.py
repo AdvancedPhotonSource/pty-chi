@@ -139,17 +139,10 @@ class PtychographyTask(Task):
             self.opr_mode_weights = DummyVariable()
             return
         else:
-            if hasattr(self.opr_mode_weight_options.initial_weights, '__len__'):
-                initial_weights = to_tensor(self.opr_mode_weight_options.initial_weights)
-                if self.opr_mode_weight_options.initial_weights.ndim == 1:
-                    # If a 1D array is given, expand it to all scan points.
-                    initial_weights = initial_weights.unsqueeze(0).repeat(len(self.position_options.position_x_m), 1)
-            else:
-                # If a scalar is given, assume 1 for main mode and use this value for all eigenmodes.
-                initial_weights = utils.generate_initial_opr_mode_weights(
-                    n_points=len(self.position_options.position_x_m), 
-                    n_opr_modes=n_opr_modes, 
-                    eigenmode_weight=self.opr_mode_weight_options.initial_weights)
+            initial_weights = to_tensor(self.opr_mode_weight_options.initial_weights)
+            if self.opr_mode_weight_options.initial_weights.ndim == 1:
+                # If a 1D array is given, expand it to all scan points.
+                initial_weights = initial_weights.unsqueeze(0).repeat(len(self.position_options.position_x_m), 1)
             self.opr_mode_weights = OPRModeWeights(
                 data=initial_weights,
                 optimizable=self.opr_mode_weight_options.optimizable,
