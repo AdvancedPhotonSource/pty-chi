@@ -10,7 +10,7 @@ from torch import Tensor
 from numpy import ndarray
 
 import ptychointerim.api as api
-import ptychointerim.api.enums as enums
+import ptychointerim.maps as maps
 from ptychointerim.ptychotorch.data_structures import *
 from ptychointerim.ptychotorch.io_handles import PtychographyDataset
 from ptychointerim.forward_models import Ptychography2DForwardModel
@@ -85,13 +85,13 @@ class PtychographyTask(Task):
         logging.basicConfig(level=self.reconstructor_options.log_level)
     
     def build_default_device(self):
-        torch.set_default_device(enums.device_dict[self.reconstructor_options.default_device])
+        torch.set_default_device(maps.device_dict[self.reconstructor_options.default_device])
         if len(self.reconstructor_options.gpu_indices) > 0:
             os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, self.reconstructor_options.gpu_indices))
         
     def build_default_dtype(self):
-        torch.set_default_dtype(enums.dtype_dict[self.reconstructor_options.default_dtype])
-        utils.set_default_complex_dtype(enums.complex_dtype_dict[self.reconstructor_options.default_dtype])
+        torch.set_default_dtype(maps.dtype_dict[self.reconstructor_options.default_dtype])
+        utils.set_default_complex_dtype(maps.complex_dtype_dict[self.reconstructor_options.default_dtype])
         
     def build_data(self):
         self.dataset = PtychographyDataset(self.data_options.data)
@@ -102,7 +102,7 @@ class PtychographyTask(Task):
             data=data, 
             pixel_size_m=self.object_options.pixel_size_m,
             optimizable=self.object_options.optimizable,
-            optimizer_class=enums.optimizer_dict[self.object_options.optimizer],
+            optimizer_class=maps.optimizer_dict[self.object_options.optimizer],
             optimizer_params={'lr': self.object_options.step_size},
             **self.object_options.uninherited_fields()
         )
@@ -112,7 +112,7 @@ class PtychographyTask(Task):
         self.probe = Probe(
             data=data, 
             optimizable=self.probe_options.optimizable,
-            optimizer_class=enums.optimizer_dict[self.probe_options.optimizer],
+            optimizer_class=maps.optimizer_dict[self.probe_options.optimizer],
             optimizer_params={'lr': self.probe_options.step_size},
             **self.probe_options.uninherited_fields()
         )
@@ -126,7 +126,7 @@ class PtychographyTask(Task):
         self.probe_positions = ProbePositions(
             data=data,
             optimizable=self.position_options.optimizable,
-            optimizer_class=enums.optimizer_dict[self.position_options.optimizer],
+            optimizer_class=maps.optimizer_dict[self.position_options.optimizer],
             optimizer_params={'lr': self.position_options.step_size},
             **self.position_options.uninherited_fields()
         )
@@ -154,7 +154,7 @@ class PtychographyTask(Task):
             self.opr_mode_weights = OPRModeWeights(
                 data=initial_weights,
                 optimizable=self.opr_mode_weight_options.optimizable,
-                optimizer_class=enums.optimizer_dict[self.opr_mode_weight_options.optimizer],
+                optimizer_class=maps.optimizer_dict[self.opr_mode_weight_options.optimizer],
                 optimizer_params={'lr': self.opr_mode_weight_options.step_size},
                 optimize_intensity_variation=self.opr_mode_weight_options.optimize_intensity_variation,
                 **self.opr_mode_weight_options.uninherited_fields()
@@ -168,21 +168,21 @@ class PtychographyTask(Task):
             opr_mode_weights=self.opr_mode_weights
         )
         
-        reconstructor_class = enums.reconstructor_dict[self.reconstructor_options.get_reconstructor_type()]
+        reconstructor_class = maps.reconstructor_dict[self.reconstructor_options.get_reconstructor_type()]
         
         reconstructor_kwargs = {
             'variable_group': var_group,
             'dataset': self.dataset,
             'batch_size': self.reconstructor_options.batch_size,
             'n_epochs': self.reconstructor_options.num_epochs,
-            'metric_function': enums.loss_function_dict[self.reconstructor_options.metric_function](),
+            'metric_function': maps.loss_function_dict[self.reconstructor_options.metric_function](),
             **self.reconstructor_options.uninherited_fields()
         }
         # Special handling. We should change the expected input type of the reconstructor so that no conversion
         # needs to be done here. 
         if reconstructor_class == AutodiffPtychographyReconstructor:
             reconstructor_kwargs['forward_model_class'] = Ptychography2DForwardModel
-            reconstructor_kwargs['loss_function'] = enums.loss_function_dict[self.reconstructor_options.loss_function]()
+            reconstructor_kwargs['loss_function'] = maps.loss_function_dict[self.reconstructor_options.loss_function]()
         
         self.reconstructor = reconstructor_class(**reconstructor_kwargs)
         self.reconstructor.build()
