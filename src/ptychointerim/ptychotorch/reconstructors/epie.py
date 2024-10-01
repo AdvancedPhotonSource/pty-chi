@@ -61,35 +61,18 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
         indices = indices.cpu()
         positions = probe_positions.tensor[indices]
 
-        y = 0.0
-        obj_patches = object_.extract_patches(
-            positions, probe.get_spatial_shape()
-        )
+        y, obj_patches = self.forward_model.forward(indices, return_object_patches=True)
+        psi = self.forward_model.intermediate_variables['psi']
+        psi_far = self.forward_model.intermediate_variables['psi_far']
 
-        p = torch.zeros_like(probe.get_opr_mode(0))
-        psi_array_shape = (len(obj_patches), probe.n_modes, *obj_patches.shape[1:])
-        psi = torch.zeros(psi_array_shape, dtype=obj_patches.dtype)
-        psi_far = torch.zeros(psi_array_shape, dtype=obj_patches.dtype)
-        psi_prime = torch.zeros(psi_array_shape, dtype=obj_patches.dtype)
-
+        # Get psi_prime
+        p = probe.get_opr_mode(0)
         I_total = (torch.abs(probe.get_opr_mode(0)) ** 2).sum()
-        def compute_psi_variables(p, y):
-            psi = obj_patches * p
-            psi_far = prop.propagate_far_field(psi)
-            y = y + torch.abs(psi_far) ** 2
-
-            # Scaling factor to account for distribution of power among probe modes.
-            A = ( (torch.abs(p) ** 2).sum() / I_total ) ** 0.5
-            psi_prime = psi_far / torch.abs(psi_far) * torch.sqrt(y_true + 1e-7) * A
-            # Do not swap magnitude for bad pixels.
-            psi_prime = torch.where(valid_pixel_mask.repeat(psi_prime.shape[0], 1, 1), psi_prime, psi_far)
-            psi_prime = prop.back_propagate_far_field(psi_prime)
-
-            return psi, psi_far, psi_prime, y
-        
-        for mode in range(probe.n_modes):
-            p[mode] = probe.get_mode_and_opr_mode(mode, 0)
-            psi[:, mode], psi_far[:, mode], psi_prime[:, mode], y = compute_psi_variables(p[mode], y)
+        A = ( (torch.abs(p) ** 2).sum((1, 2)) / I_total ) ** 0.5
+        psi_prime = psi_far / torch.abs(psi_far) * torch.sqrt(y_true + 1e-7)[:, None] * A[None, :, None, None]
+        # Do not swap magnitude for bad pixels.
+        psi_prime = torch.where(valid_pixel_mask.repeat(psi_prime.shape[0], probe.n_modes, 1, 1), psi_prime, psi_far)
+        psi_prime = prop.back_propagate_far_field(psi_prime)
 
         delta_o = None
         if object_.optimizable:
