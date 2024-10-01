@@ -17,12 +17,11 @@ from ptychointerim.forward_models import Ptychography2DForwardModel
 from ptychointerim.ptychotorch.utils import to_tensor
 import ptychointerim.ptychotorch.utils as utils
 from ptychointerim.ptychotorch.reconstructors import *
-from ptychointerim.metrics import MSELossOfSqrt
 
 
 class Task:
     
-    def __init__(self, options: api.TaskOptions, *args, **kwargs) -> None:
+    def __init__(self, options: api.options.base.TaskOptions, *args, **kwargs) -> None:
         pass
     
     def __enter__(self) -> 'Task':
@@ -45,7 +44,7 @@ class Task:
 class PtychographyTask(Task):
     
     def __init__(self,
-                 options: api.PtychographyTaskOptions,
+                 options: api.options.task.PtychographyTaskOptions,
                  *args, **kwargs
     ) -> None:
         super().__init__(options, *args, **kwargs)

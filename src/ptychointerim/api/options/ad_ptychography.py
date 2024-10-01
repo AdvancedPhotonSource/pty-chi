@@ -6,12 +6,13 @@ import json
 from torch import Tensor
 from numpy import ndarray
 
-from .base import *
+import ptychointerim.api.options.base as base
+import ptychointerim.api.options.task as task_options
 import ptychointerim.api.enums as enums
 
 
 @dataclasses.dataclass
-class AutodiffPtychographyReconstructorOptions(ReconstructorOptions):
+class AutodiffPtychographyReconstructorOptions(base.ReconstructorOptions):
         
     loss_function: enums.LossFunctions = enums.LossFunctions.MSE_SQRT
     """
@@ -23,27 +24,27 @@ class AutodiffPtychographyReconstructorOptions(ReconstructorOptions):
     
 
 @dataclasses.dataclass
-class AutodiffPtychographyObjectOptions(ObjectOptions):
+class AutodiffPtychographyObjectOptions(base.ObjectOptions):
     pass
 
 
 @dataclasses.dataclass
-class AutodiffPtychographyProbeOptions(ProbeOptions):
+class AutodiffPtychographyProbeOptions(base.ProbeOptions):
     pass
 
 
 @dataclasses.dataclass
-class AutodiffPtychographyProbePositionOptions(ProbePositionOptions):
+class AutodiffPtychographyProbePositionOptions(base.ProbePositionOptions):
     pass
 
 
 @dataclasses.dataclass
-class AutodiffPtychographyOPRModeWeightsOptions(OPRModeWeightsOptions):
+class AutodiffPtychographyOPRModeWeightsOptions(base.OPRModeWeightsOptions):
     pass
 
 
 @dataclasses.dataclass
-class AutodiffPtychographyOptions(PtychographyTaskOptions):
+class AutodiffPtychographyOptions(task_options.PtychographyTaskOptions):
     
     reconstructor_options: AutodiffPtychographyReconstructorOptions = field(default_factory=AutodiffPtychographyReconstructorOptions)
     

@@ -183,48 +183,9 @@ class ReconstructorOptions(Options):
     def get_reconstructor_type(self) -> enums.Reconstructors:
         return enums.Reconstructors.base
     
-
-@dataclasses.dataclass
-class DataOptions(Options):
-    
-    pass
-    
     
 @dataclasses.dataclass
-class PtychographyDataOptions(DataOptions):
-    
-    data: Union[ndarray, Tensor] = None
-    """The data."""
-    
-    propagation_distance_m: float = 1.0
-    """The propagation distance in meters."""
-    
-    wavelength_m: float = 1e-9
-    """The wavelength in meters."""
-    
-    detector_pixel_size_m: float = 1e-8
-    """The detector pixel size in meters."""
-    
-    valid_pixel_mask: Optional[Union[ndarray, Tensor]] = None
-    """A 2D boolean mask where valid pixels are True."""
-
-
 class TaskOptions(Options):
+
     pass
-
-
-@dataclasses.dataclass
-class PtychographyTaskOptions(TaskOptions):
     
-    data_options: PtychographyDataOptions = field(default_factory=PtychographyDataOptions)
-    
-    reconstructor_options: ReconstructorOptions = field(default_factory=ReconstructorOptions)
-    
-    object_options: ObjectOptions = field(default_factory=ObjectOptions)
-    
-    probe_options: ProbeOptions = field(default_factory=ProbeOptions)
-    
-    probe_position_options: ProbePositionOptions = field(default_factory=ProbePositionOptions)
-    
-    opr_mode_weight_options: OPRModeWeightsOptions = field(default_factory=OPRModeWeightsOptions)
-

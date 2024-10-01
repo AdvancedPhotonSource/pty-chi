@@ -6,12 +6,13 @@ import json
 from torch import Tensor
 from numpy import ndarray
 
-from .base import *
+import ptychointerim.api.options.base as base
+import ptychointerim.api.options.task as task_options
 import ptychointerim.api.enums as enums
 
 
 @dataclasses.dataclass
-class LSQMLReconstructorOptions(ReconstructorOptions):
+class LSQMLReconstructorOptions(base.ReconstructorOptions):
     
     noise_model: enums.NoiseModels = enums.NoiseModels.GAUSSIAN
     """
@@ -34,12 +35,12 @@ class LSQMLReconstructorOptions(ReconstructorOptions):
     
 
 @dataclasses.dataclass
-class LSQMLObjectOptions(ObjectOptions):
+class LSQMLObjectOptions(base.ObjectOptions):
     pass
 
 
 @dataclasses.dataclass
-class LSQMLProbeOptions(ProbeOptions):
+class LSQMLProbeOptions(base.ProbeOptions):
     
     eigenmode_update_relaxation: float = 0.1
     """
@@ -49,12 +50,12 @@ class LSQMLProbeOptions(ProbeOptions):
     
     
 @dataclasses.dataclass
-class LSQMLProbePositionOptions(ProbePositionOptions):
+class LSQMLProbePositionOptions(base.ProbePositionOptions):
     pass
 
 
 @dataclasses.dataclass
-class LSQMLOPRModeWeightsOptions(OPRModeWeightsOptions):
+class LSQMLOPRModeWeightsOptions(base.OPRModeWeightsOptions):
     
     update_relaxation: float = 0.1
     """
@@ -64,7 +65,7 @@ class LSQMLOPRModeWeightsOptions(OPRModeWeightsOptions):
     
 
 @dataclasses.dataclass
-class LSQMLOptions(PtychographyTaskOptions):
+class LSQMLOptions(task_options.PtychographyTaskOptions):
 
     reconstructor_options: LSQMLReconstructorOptions = field(default_factory=LSQMLReconstructorOptions)
     

@@ -6,39 +6,40 @@ import json
 from torch import Tensor
 from numpy import ndarray
 
-from .base import *
+import ptychointerim.api.options.base as base
+import ptychointerim.api.options.task as task_options
 import ptychointerim.api.enums as enums
 
 
 @dataclasses.dataclass
-class PIEPtychographyReconstructorOptions(ReconstructorOptions):
+class PIEPtychographyReconstructorOptions(base.ReconstructorOptions):
         
     def get_reconstructor_type(self) -> enums.Reconstructors:
         return enums.Reconstructors.PIE
     
 
 @dataclasses.dataclass
-class PIEPtychographyObjectOptions(ObjectOptions):
+class PIEPtychographyObjectOptions(base.ObjectOptions):
     pass
 
 
 @dataclasses.dataclass
-class PIEPtychographyProbeOptions(ProbeOptions):
+class PIEPtychographyProbeOptions(base.ProbeOptions):
     pass
 
 
 @dataclasses.dataclass
-class PIEPtychographyProbePositionOptions(ProbePositionOptions):
+class PIEPtychographyProbePositionOptions(base.ProbePositionOptions):
     pass
 
 
 @dataclasses.dataclass
-class PIEPtychographyOPRModeWeightsOptions(OPRModeWeightsOptions):
+class PIEPtychographyOPRModeWeightsOptions(base.OPRModeWeightsOptions):
     pass
 
 
 @dataclasses.dataclass
-class PIEPtychographyOptions(PtychographyTaskOptions):
+class PIEPtychographyOptions(task_options.PtychographyTaskOptions):
     
     reconstructor_options: PIEPtychographyReconstructorOptions = field(default_factory=PIEPtychographyReconstructorOptions)
     
