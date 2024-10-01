@@ -125,7 +125,6 @@ class Variable(Module):
             else:
                 self.optimizer = self.optimizer_class([self.tensor], **self.optimizer_params)
             
-            
     def set_optimizable(self, optimizable):
         self.optimizable = optimizable
         self.tensor.requires_grad_(optimizable)
@@ -185,10 +184,10 @@ class Variable(Module):
             self.tensor.data.grad = grad
         else:
             self.tensor.grad = grad
-            
+    
     def post_update_hook(self, *args, **kwargs):
         pass
-    
+
 
 class DummyVariable(Variable):
     def __init__(self, *args, **kwargs):
@@ -313,6 +312,10 @@ class Probe(Variable):
     @property
     def has_multiple_opr_modes(self):
         return self.n_opr_modes > 1
+    
+    @property
+    def has_multiple_incoherent_modes(self):
+        return self.n_modes > 1
 
     def get_mode(self, mode: int):
         return self.tensor.complex()[:, mode]
@@ -389,6 +392,14 @@ class Probe(Variable):
                 unique_probe = p_orig[:, 0, ...]
         return unique_probe
     
+    def constrain_incoherent_modes_orthogonality(self):
+        orthogonalized_probe = pmath.orthogonalize_gs(
+            self.data,
+            dim=(-2, -1),
+            group_dim=1,
+        )
+        self.set_data(orthogonalized_probe)
+    
     def constrain_opr_mode_orthogonality(self, weights: Union[Tensor, Variable], eps=1e-5):
         """Add the following constraints to variable probe weights
 
@@ -431,7 +442,7 @@ class Probe(Variable):
         probe = pmath.orthogonalize_gs(
             probe,
             dim=(-2, -1),
-            group_dim=-4,
+            group_dim=0,
         )
 
         # Compute the energies of variable OPR modes (i.e., the second and following) 
@@ -460,13 +471,15 @@ class Probe(Variable):
         # Update stored data.
         self.set_data(probe)
         return weights
-    
-    def post_update_hook(self, weights: Union[Tensor, Variable]) -> Tensor:
+
+    def post_update_hook(self, weights: Union[Tensor, Variable]=None) -> Union[Tensor, None]:
         super().post_update_hook()
+        if self.has_multiple_incoherent_modes:
+            self.constrain_incoherent_modes_orthogonality()
         if self.has_multiple_opr_modes:
             weights = self.constrain_opr_mode_orthogonality(weights)
-        return weights
-    
+            return weights
+     
     def normalize_eigenmodes(self):
         """
         Normalize all eigenmodes (the second and following OPR modes) such that each of them

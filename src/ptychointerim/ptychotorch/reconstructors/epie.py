@@ -37,6 +37,9 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
             raise NotImplementedError('EPIEReconstructor does not support metric function yet.')
         if self.variable_group.probe.has_multiple_opr_modes:
             raise NotImplementedError('EPIEReconstructor does not support multiple OPR modes yet.')
+
+    def run_post_update_hooks(self) -> None:
+        self.variable_group.probe.post_update_hook()
         
     def run_minibatch(self, input_data, y_true, *args, **kwargs):
         (delta_o, delta_p, delta_pos), batch_loss = self.compute_updates(
