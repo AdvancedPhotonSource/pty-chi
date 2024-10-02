@@ -393,12 +393,14 @@ class Probe(Variable):
         return unique_probe
     
     def constrain_incoherent_modes_orthogonality(self):
-        orthogonalized_probe = pmath.orthogonalize_gs(
-            self.data,
+        """Orthogonalize the incoherent probe modes for the first OPR mode.""" 
+        probe = self.data
+        probe[0] = pmath.orthogonalize_gs(
+            probe[0],
             dim=(-2, -1),
-            group_dim=1,
+            group_dim=0,
         )
-        self.set_data(orthogonalized_probe)
+        self.set_data(probe)
     
     def constrain_opr_mode_orthogonality(self, weights: Union[Tensor, Variable], eps=1e-5):
         """Add the following constraints to variable probe weights
@@ -467,15 +469,21 @@ class Probe(Variable):
                 keepdims=True,
             ).type(weights.dtype),
         ) * torch.sign(weights)
-            
+
         # Update stored data.
         self.set_data(probe)
         return weights
 
     def post_update_hook(self, weights: Union[Tensor, Variable]=None) -> Union[Tensor, None]:
         super().post_update_hook()
+        # start = torch.cuda.Event(enable_timing=True)
+        # end = torch.cuda.Event(enable_timing=True)
         if self.has_multiple_incoherent_modes:
+            # start.record()
             self.constrain_incoherent_modes_orthogonality()
+            # end.record()
+            # torch.cuda.synchronize()
+            # print(start.elapsed_time(end))
         if self.has_multiple_opr_modes:
             weights = self.constrain_opr_mode_orthogonality(weights)
             return weights
