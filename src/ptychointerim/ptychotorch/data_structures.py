@@ -1,6 +1,7 @@
 from typing import Optional, Union, Tuple, Type, Literal
 import dataclasses
 import os
+import logging
 
 import torch
 from torch import Tensor
@@ -12,7 +13,7 @@ import tifffile
 import ptychointerim.image_proc as ip
 from ptychointerim.ptychotorch.utils import to_tensor, get_default_complex_dtype
 import ptychointerim.maths as pmath
-
+import ptychointerim.api as api
 
 class ComplexTensor(Module):
     """
@@ -63,10 +64,11 @@ class ComplexTensor(Module):
         self.data.copy_(to_tensor(data))
 
 
-class Variable(Module):
+class ReconstructParameter(Module):
     
     name = None
     optimizable: bool = True
+    optimization_plan: api.OptimizationPlan = None
     optimizer = None
     
     def __init__(self, 
@@ -75,13 +77,18 @@ class Variable(Module):
                  is_complex: bool = False,
                  name: Optional[str] = None, 
                  optimizable: bool = True,
+                 optimization_plan: Optional[api.OptimizationPlan] = None,
                  optimizer_class: Optional[Type[torch.optim.Optimizer]] = None,
                  optimizer_params: Optional[dict] = None,
                  *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        assert shape is not None or data is not None
-        self.optimizable = optimizable
+        if shape is None and data is None:
+            raise ValueError("Either shape or data must be specified.")
         self.name = name
+        self.optimizable = optimizable
+        self.optimization_plan = optimization_plan
+        if self.optimization_plan is None:
+            self.optimization_plan = api.OptimizationPlan()
         self.optimizer_class = optimizer_class
         self.optimizer_params = {} if optimizer_params is None else optimizer_params
         self.optimizer = None
@@ -187,14 +194,22 @@ class Variable(Module):
     
     def post_update_hook(self, *args, **kwargs):
         pass
+    
+    def optimization_enabled(self, epoch: int):
+        if self.optimizable and self.optimization_plan.is_enabled(epoch):
+            enabled = True
+        else:
+            enabled = False
+        logging.debug(f"{self.name} optimization enabled at epoch {epoch}: {enabled}")
+        return enabled
+    
 
-
-class DummyVariable(Variable):
+class DummyVariable(ReconstructParameter):
     def __init__(self, *args, **kwargs):
         super().__init__(shape=(1,), optimizable=False, *args, **kwargs)
 
 
-class Object(Variable):
+class Object(ReconstructParameter):
     
     pixel_size_m: float = 1.0
     
@@ -254,7 +269,7 @@ class Object2D(Object):
         return image
         
         
-class Probe(Variable):
+class Probe(ReconstructParameter):
     
     # TODO: eigenmode_update_relaxation is only used for LSQML. We should create dataclasses
     # to contain additional options for Variable classes, and subclass them for specific
@@ -273,7 +288,8 @@ class Probe(Variable):
             for eigenmode update in LSQML.
         """
         super().__init__(*args, name=name, is_complex=True, **kwargs)
-        assert len(self.shape) == 4, 'Probe tensor must be of shape (n_opr_modes, n_modes, h, w).'
+        if len(self.shape) != 4:
+            raise ValueError('Probe tensor must be of shape (n_opr_modes, n_modes, h, w).')
         
         self.eigenmode_update_relaxation = eigenmode_update_relaxation
         
@@ -332,7 +348,7 @@ class Probe(Variable):
     def get_all_mode_intensity(
             self, 
             opr_mode: Optional[int] = 0, 
-            weights: Optional[Union[Tensor, Variable]] = None,
+            weights: Optional[Union[Tensor, ReconstructParameter]] = None,
         ) -> Tensor:
         """
         Get the intensity of all probe modes.
@@ -351,7 +367,7 @@ class Probe(Variable):
             p = (self.data * weights[None, :, :, :]).sum(0)
         return torch.sum((p.abs()) ** 2, dim=0)
     
-    def get_unique_probes(self, weights: Union[Tensor, Variable], mode_to_apply: Optional[int] = None) -> Tensor:
+    def get_unique_probes(self, weights: Union[Tensor, ReconstructParameter], mode_to_apply: Optional[int] = None) -> Tensor:
         """
         Creates the unique probe for one or more scan points given the weights of eigenmodes.
         
@@ -402,7 +418,7 @@ class Probe(Variable):
         )
         self.set_data(probe)
     
-    def constrain_opr_mode_orthogonality(self, weights: Union[Tensor, Variable], eps=1e-5):
+    def constrain_opr_mode_orthogonality(self, weights: Union[Tensor, ReconstructParameter], eps=1e-5):
         """Add the following constraints to variable probe weights
 
         1. Remove outliars from weights
@@ -474,16 +490,10 @@ class Probe(Variable):
         self.set_data(probe)
         return weights
 
-    def post_update_hook(self, weights: Union[Tensor, Variable]=None) -> Union[Tensor, None]:
+    def post_update_hook(self, weights: Union[Tensor, ReconstructParameter]=None) -> Union[Tensor, None]:
         super().post_update_hook()
-        # start = torch.cuda.Event(enable_timing=True)
-        # end = torch.cuda.Event(enable_timing=True)
         if self.has_multiple_incoherent_modes:
-            # start.record()
             self.constrain_incoherent_modes_orthogonality()
-            # end.record()
-            # torch.cuda.synchronize()
-            # print(start.elapsed_time(end))
         if self.has_multiple_opr_modes:
             weights = self.constrain_opr_mode_orthogonality(weights)
             return weights
@@ -533,7 +543,7 @@ class Probe(Variable):
                 
     
     
-class OPRModeWeights(Variable):
+class OPRModeWeights(ReconstructParameter):
     
     # TODO: update_relaxation is only used for LSQML. We should create dataclasses
     # to contain additional options for Variable classes, and subclass them for specific
@@ -548,11 +558,13 @@ class OPRModeWeights(Variable):
             the update step in LSQML.
         """
         super().__init__(*args, name=name, is_complex=False, **kwargs)
-        assert len(self.shape) == 2, 'OPR weights must be of shape (n_scan_points, n_opr_modes).'
+        if len(self.shape) != 2:
+            raise ValueError('OPR weights must be of shape (n_scan_points, n_opr_modes).')
         if self.optimizable:
-            assert (optimize_eigenmode_weights or optimize_intensity_variation), \
-                'When OPRModeWeights is optimizable, at least one of optimize_eigenmode_weights ' \
-                'and optimize_intensity_variation should be set to True.'
+            if not (optimize_eigenmode_weights or optimize_intensity_variation):
+                raise ValueError('When OPRModeWeights is optimizable, at least 1 of '
+                                 'optimize_eigenmode_weights and optimize_intensity_variation '
+                                 'should be set to True.')
         
         self.update_relaxation = update_relaxation
         # TODO: AD optimizes both eigenmode weights and intensity variation when self.optimizable is True.
@@ -575,7 +587,7 @@ class OPRModeWeights(Variable):
         return self.data[indices]
     
 
-class ProbePositions(Variable):
+class ProbePositions(ReconstructParameter):
     
     pixel_size_m: float = 1.0
     conversion_factor_dict = {'nm': 1e9, 'um': 1e6, 'm': 1.0}
@@ -598,10 +610,10 @@ class ProbePositions(Variable):
 @dataclasses.dataclass
 class VariableGroup:
 
-    def get_all_variables(self) -> list[Variable]:
+    def get_all_variables(self) -> list[ReconstructParameter]:
         return list(self.__dict__.values())
 
-    def get_optimizable_variables(self) -> list[Variable]:
+    def get_optimizable_variables(self) -> list[ReconstructParameter]:
         ovs = []
         for var in self.get_all_variables():
             if var.optimizable:

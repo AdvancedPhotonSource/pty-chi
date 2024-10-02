@@ -53,9 +53,10 @@ class LossTracker:
         data_provided = y_pred is not None and y_true is not None
         loss_provided = loss is not None
         if self.always_compute_loss:
-            assert data_provided, "Always_compute_loss requires (y_pred, y_true) to be provided."
-        assert (data_provided or loss_provided), \
-            "One of (y_pred, y_true) and (loss,) must be provided."
+            if not data_provided:
+                raise ValueError("Always_compute_loss requires (y_pred, y_true) to be provided.")
+        if not (data_provided or loss_provided):
+            raise ValueError("One of (y_pred, y_true) and (loss,) must be provided.")
             
         if loss_provided and not self.always_compute_loss:
             self.update_batch_loss_with_value(loss)
@@ -63,8 +64,8 @@ class LossTracker:
             self.update_batch_loss_with_metric_function(y_pred, y_true)
         
     def update_batch_loss_with_metric_function(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> None:
-        assert self.metric_function is not None, \
-            "update_batch_loss_with_metric_function requires a metric function."
+        if self.metric_function is None:
+            raise ValueError("update_batch_loss_with_metric_function requires a metric function.")
         batch_loss = self.metric_function(y_pred, y_true)
         batch_loss = to_numpy(batch_loss)
         self.epoch_loss = self.epoch_loss + batch_loss
@@ -134,7 +135,7 @@ class IterativeReconstructor(Reconstructor):
         self.n_epochs = n_epochs
         self.dataloader = None
         self.metric_function = metric_function
-        self.epoch_counter = 0
+        self.current_epoch = 0
 
     def build(self) -> None:
         super().build()
@@ -153,7 +154,7 @@ class IterativeReconstructor(Reconstructor):
         self.loss_tracker = LossTracker(metric_function=self.metric_function)
         
     def build_counter(self):
-        self.epoch_counter = 0
+        self.current_epoch = 0
 
     def get_config_dict(self) -> dict:
         d = super().get_config_dict()
@@ -179,7 +180,7 @@ class IterativeReconstructor(Reconstructor):
     def run(self, n_epochs: Optional[int] = None, *args, **kwargs):
         self.run_pre_run_hooks()
         n_epochs = n_epochs if n_epochs is not None else self.n_epochs
-        for i_epoch in tqdm.trange(n_epochs):
+        for _ in tqdm.trange(n_epochs):
             self.run_pre_epoch_hooks()
             for batch_data in self.dataloader:
                 input_data = [x.to(torch.get_default_device()) for x in batch_data[:-1]]
@@ -188,11 +189,11 @@ class IterativeReconstructor(Reconstructor):
                 self.run_minibatch(input_data, y_true)
                 
                 self.run_post_update_hooks()
-            self.loss_tracker.conclude_epoch(epoch=i_epoch)
+            self.loss_tracker.conclude_epoch(epoch=self.current_epoch)
             self.loss_tracker.print_latest()
             
-            self.epoch_counter += 1
-
+            self.current_epoch += 1
+            
     
 class AnalyticalIterativeReconstructor(IterativeReconstructor):
 

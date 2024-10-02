@@ -62,7 +62,8 @@ def generate_initial_object(shape: tuple[int, ...], method: Literal['random'] = 
 
 
 def add_additional_opr_probe_modes_to_probe(probe: Tensor, n_opr_modes_to_add: int, normalize: bool = True) -> Tensor:
-    assert probe.ndim == 4
+    if probe.ndim != 4:
+        raise ValueError('probe must be a (n_opr_modes, n_modes, h, w) tensor.')
     n_modes = probe.shape[1]
     opr_modes = torch.empty([n_opr_modes_to_add, n_modes, probe.shape[-2], probe.shape[-1]], dtype=get_default_complex_dtype())
     for i in range(n_opr_modes_to_add):
@@ -149,8 +150,9 @@ def chunked_processing(func: Callable, common_kwargs: dict, chunkable_kwargs: di
     """
     full_batch_size = tuple(chunkable_kwargs.values())[0].shape[0]
     for key, value in tuple(chunkable_kwargs.items())[1:]:
-        assert value.shape[0] == full_batch_size, \
-            'All common arguments must have the same batch size, but {} has shape {}.'.format(key, value.shape)
+        if value.shape[0] != full_batch_size:
+            raise ValueError('All chunkable arguments must have the same batch size, but {} \
+                has shape {}.'.format(key, value.shape))
     
     chunks_of_chunkable_args = []
     ind_st = 0
