@@ -14,6 +14,7 @@ from ptychointerim.ptychotorch.utils import rescale_probe, add_additional_opr_pr
 def setup(gold_dir, cpu_only=True):
     torch.manual_seed(123)
     random.seed(123)
+    np.random.seed(123)
     
     torch.set_default_device('cpu' if cpu_only else 'cuda')
     torch.set_default_dtype(torch.float32)

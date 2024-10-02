@@ -1,8 +1,4 @@
-local_only_tests = [
-    'test_2d_ptycho_autodiff_lynx215.py',
-    'test_2d_ptycho_lsqml_lynx215.py',
-    'test_2d_ptycho_lsqml_lynx9020.py'
-]
+import pytest
 
 
 def pytest_addoption(parser):
@@ -10,20 +6,15 @@ def pytest_addoption(parser):
     parser.addoption("--all", action="store_true", help='Run all tests.')
     
     
-def pytest_collection_modifyitems(config, items):
-    run_all = config.getoption("--all")
+def pytest_configure(config):
+    config.addinivalue_line("markers", "local: mark test as local-only")
 
-    # If filenames are given explicitly, always run them even if --all is not given
-    for arg in config.args:
-        if arg.endswith('.py'):
-            run_all = True
-            break
-
-    if not run_all:
-        for item in items:
-            if item.fspath.basename in local_only_tests:
-                items.remove(item)
-    print('collected items:')
-    for item in items:
-        print('  ' + str(item))
     
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--all"):
+        # --all given in cli: do not skip slow tests
+        return
+    skip_local = pytest.mark.skip(reason="need --all option to run")
+    for item in items:
+        if "local" in item.keywords:
+            item.add_marker(skip_local)

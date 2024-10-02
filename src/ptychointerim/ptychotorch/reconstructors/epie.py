@@ -29,8 +29,8 @@ class EPIEReconstructor(AnalyticalIterativeReconstructor):
 
     def check_inputs(self, *args, **kwargs):
         for var in self.variable_group.get_optimizable_variables():
-            assert 'lr' in var.optimizer_params.keys(), \
-                "Optimizable variable {} must have 'lr' in optimizer_params.".format(var.name)
+            if 'lr' not in var.optimizer_params.keys():
+                raise ValueError("Optimizable variable {} must have 'lr' in optimizer_params.".format(var.name))
         if self.metric_function is not None:
             raise NotImplementedError('EPIEReconstructor does not support metric function yet.')
         if self.variable_group.probe.has_multiple_opr_modes:

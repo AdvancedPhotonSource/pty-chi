@@ -162,9 +162,12 @@ def convolve2d(image: Tensor,
         the last two dimensions are interpreted as height and width, respectively.
     :param kernel: a (H, W) tensor of kernel.
     """
-    assert(image.ndim >= 2)
-    assert(kernel.ndim == 2)
-    assert(kernel.shape[-2] % 2 == 1 and kernel.shape[-1] % 2 == 1)
+    if not image.ndim >= 2:
+        raise ValueError('Image must have at least 2 dimensions.')
+    if not kernel.ndim == 2:
+        raise ValueError('Kernel must have exactly 2 dimensions.')
+    if not (kernel.shape[-2] % 2 == 1 and kernel.shape[-1] % 2 == 1):
+        raise ValueError('Kernel dimensions must be odd.')
     
     if image.dtype.is_complex:
         kernel = kernel.type(image.dtype)
