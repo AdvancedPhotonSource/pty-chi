@@ -141,11 +141,13 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
         obj_patches = self.forward_model.intermediate_variables['obj_patches']
         
         self.update_object_and_probe(indices, chi, obj_patches, positions)
-        if self.variable_group.probe_positions.optimizable:
+        if self.variable_group.probe_positions.optimization_enabled(self.current_epoch):
             self.update_probe_positions(chi, indices, obj_patches)
             
     def update_preconditioners(self):
-        if self.variable_group.probe.optimizable or self.variable_group.object.preconditioner is None:
+        # Update preconditioner of the object only if the probe has been updated in the previous
+        # epoch, or when the preconditioner is None.
+        if self.variable_group.probe.optimization_enabled(self.current_epoch - 1) or self.variable_group.object.preconditioner is None:
             self._update_object_preconditioner()
         
     def _update_object_preconditioner(self):
@@ -178,17 +180,19 @@ class LSQMLReconstructor(AnalyticalIterativeReconstructor):
             indices, chi, obj_patches, delta_o_i, delta_p_i, gamma=gamma
         )
         
-        if self.variable_group.probe.optimizable:
+        if self.variable_group.probe.optimization_enabled(self.current_epoch):
             self._apply_probe_update(alpha_p_i, delta_p_hat)
             
-        if self.variable_group.object.optimizable:
+        if self.variable_group.object.optimization_enabled(self.current_epoch):
             self._apply_object_update(alpha_o_i, delta_o_hat)
             
-        if self.variable_group.probe.has_multiple_opr_modes and self.variable_group.opr_mode_weights.optimizable and \
-                self.variable_group.opr_mode_weights.optimize_eigenmode_weights:
+        if self.variable_group.probe.has_multiple_opr_modes \
+                and self.variable_group.opr_mode_weights.optimization_enabled(self.current_epoch) \
+                and self.variable_group.opr_mode_weights.optimize_eigenmode_weights:
             self.update_opr_probe_modes_and_weights(indices, chi, delta_p_i, delta_p_hat, obj_patches)
             
-        if self.variable_group.opr_mode_weights.optimizable and self.variable_group.opr_mode_weights.optimize_intensity_variation:
+        if self.variable_group.opr_mode_weights.optimization_enabled(self.current_epoch) \
+                and self.variable_group.opr_mode_weights.optimize_intensity_variation:
             delta_weights_int = self._calculate_intensity_variation_update_direction(indices, chi, obj_patches)
             self._apply_variable_intensity_updates(delta_weights_int)
         

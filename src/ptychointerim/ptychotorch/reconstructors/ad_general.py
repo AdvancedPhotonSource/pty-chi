@@ -66,7 +66,7 @@ class AutodiffReconstructor(IterativeReconstructor):
             
     def step_all_optimizers(self):
         for var in self.variable_group.get_optimizable_variables():
-            if var.optimizer is not None:
+            if var.optimization_enabled(self.current_epoch):
                 var.optimizer.step()
 
     def get_forward_model(self) -> ForwardModel:

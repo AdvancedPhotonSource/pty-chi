@@ -103,6 +103,7 @@ class PtychographyTask(Task):
             data=data, 
             pixel_size_m=self.object_options.pixel_size_m,
             optimizable=self.object_options.optimizable,
+            optimization_plan=self.object_options.optimization_plan,
             optimizer_class=maps.optimizer_dict[self.object_options.optimizer],
             optimizer_params={'lr': self.object_options.step_size},
             **self.object_options.uninherited_fields()
@@ -113,6 +114,7 @@ class PtychographyTask(Task):
         self.probe = Probe(
             data=data, 
             optimizable=self.probe_options.optimizable,
+            optimization_plan=self.probe_options.optimization_plan,
             optimizer_class=maps.optimizer_dict[self.probe_options.optimizer],
             optimizer_params={'lr': self.probe_options.step_size},
             **self.probe_options.uninherited_fields()
@@ -127,6 +129,7 @@ class PtychographyTask(Task):
         self.probe_positions = ProbePositions(
             data=data,
             optimizable=self.position_options.optimizable,
+            optimization_plan=self.position_options.optimization_plan,
             optimizer_class=maps.optimizer_dict[self.position_options.optimizer],
             optimizer_params={'lr': self.position_options.step_size},
             **self.position_options.uninherited_fields()
@@ -148,6 +151,7 @@ class PtychographyTask(Task):
             self.opr_mode_weights = OPRModeWeights(
                 data=initial_weights,
                 optimizable=self.opr_mode_weight_options.optimizable,
+                optimization_plan=self.opr_mode_weight_options.optimization_plan,
                 optimizer_class=maps.optimizer_dict[self.opr_mode_weight_options.optimizer],
                 optimizer_params={'lr': self.opr_mode_weight_options.step_size},
                 optimize_intensity_variation=self.opr_mode_weight_options.optimize_intensity_variation,

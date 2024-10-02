@@ -1,9 +1,6 @@
 from enum import StrEnum, auto
 
 
-from ptychointerim.ptychotorch.reconstructors import *
-
-
 class Optimizers(StrEnum):
     SGD = auto()
     ADAM = auto()

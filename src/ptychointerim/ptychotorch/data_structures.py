@@ -1,6 +1,7 @@
 from typing import Optional, Union, Tuple, Type, Literal
 import dataclasses
 import os
+import logging
 
 import torch
 from torch import Tensor
@@ -12,7 +13,7 @@ import tifffile
 import ptychointerim.image_proc as ip
 from ptychointerim.ptychotorch.utils import to_tensor, get_default_complex_dtype
 import ptychointerim.maths as pmath
-
+import ptychointerim.api as api
 
 class ComplexTensor(Module):
     """
@@ -67,6 +68,7 @@ class ReconstructParameter(Module):
     
     name = None
     optimizable: bool = True
+    optimization_plan: api.OptimizationPlan = None
     optimizer = None
     
     def __init__(self, 
@@ -75,14 +77,18 @@ class ReconstructParameter(Module):
                  is_complex: bool = False,
                  name: Optional[str] = None, 
                  optimizable: bool = True,
+                 optimization_plan: Optional[api.OptimizationPlan] = None,
                  optimizer_class: Optional[Type[torch.optim.Optimizer]] = None,
                  optimizer_params: Optional[dict] = None,
                  *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         if shape is None and data is None:
             raise ValueError("Either shape or data must be specified.")
-        self.optimizable = optimizable
         self.name = name
+        self.optimizable = optimizable
+        self.optimization_plan = optimization_plan
+        if self.optimization_plan is None:
+            self.optimization_plan = api.OptimizationPlan()
         self.optimizer_class = optimizer_class
         self.optimizer_params = {} if optimizer_params is None else optimizer_params
         self.optimizer = None
@@ -189,6 +195,14 @@ class ReconstructParameter(Module):
             
     def post_update_hook(self, *args, **kwargs):
         pass
+    
+    def optimization_enabled(self, epoch: int):
+        if self.optimizable and self.optimization_plan.is_enabled(epoch):
+            enabled = True
+        else:
+            enabled = False
+        logging.debug(f"{self.name} optimization enabled at epoch {epoch}: {enabled}")
+        return enabled
     
 
 class DummyVariable(ReconstructParameter):
