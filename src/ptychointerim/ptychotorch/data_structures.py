@@ -530,8 +530,6 @@ class Probe(ReconstructParameter):
 
     def post_update_hook(self, weights: Union[Tensor, ReconstructParameter]=None) -> Union[Tensor, None]:
         super().post_update_hook()
-        if self.has_multiple_incoherent_modes:
-            self.constrain_incoherent_modes_orthogonality()
         if self.has_multiple_opr_modes:
             weights = self.constrain_opr_mode_orthogonality(weights)
             return weights
