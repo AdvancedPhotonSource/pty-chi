@@ -71,8 +71,11 @@ class EPIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         # Get psi_prime
         p = probe.get_opr_mode(0)
         I_total = (torch.abs(probe.get_opr_mode(0)) ** 2).sum()
-        A = ( (torch.abs(p) ** 2).sum((1, 2)) / I_total ) ** 0.5
-        psi_prime = psi_far / torch.abs(psi_far) * torch.sqrt(y_true + 1e-7)[:, None] * A[None, :, None, None]
+
+        sqrt_power_fractions = (((torch.abs(p) ** 2).sum((1, 2)) / I_total ) ** 0.5)
+        psi_prime = psi_far / torch.abs(psi_far) * torch.sqrt(y_true + 1e-7)[:, None] 
+        psi_prime = psi_prime * sqrt_power_fractions[None, :, None, None]
+
         # Do not swap magnitude for bad pixels.
         psi_prime = torch.where(valid_pixel_mask.repeat(psi_prime.shape[0], probe.n_modes, 1, 1), psi_prime, psi_far)
         psi_prime = prop.back_propagate_far_field(psi_prime)
