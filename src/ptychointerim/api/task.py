@@ -117,6 +117,8 @@ class PtychographyTask(Task):
             optimization_plan=self.probe_options.optimization_plan,
             optimizer_class=maps.optimizer_dict[self.probe_options.optimizer],
             optimizer_params={'lr': self.probe_options.step_size},
+            probe_power=self.probe_options.probe_power,
+            probe_power_constraint_stride=self.probe_options.probe_power_constraint_stride,
             **self.probe_options.uninherited_fields()
         )
         

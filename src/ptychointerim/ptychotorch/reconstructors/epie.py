@@ -6,12 +6,12 @@ from torch.utils.data import Dataset
 
 import ptychointerim.ptychotorch.propagation as prop
 from ptychointerim.ptychotorch.data_structures import Ptychography2DVariableGroup
-from ptychointerim.ptychotorch.reconstructors.base import AnalyticalIterativeReconstructor
+from ptychointerim.ptychotorch.reconstructors.base import AnalyticalIterativePtychographyReconstructor
 from ptychointerim.image_proc import place_patches_fourier_shift
 from ptychointerim.position_correction import compute_positions_cross_correlation_update
 
 
-class EPIEReconstructor(AnalyticalIterativeReconstructor):
+class EPIEReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     def __init__(self,
                  variable_group: Ptychography2DVariableGroup,

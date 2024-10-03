@@ -14,6 +14,7 @@ import ptychointerim.image_proc as ip
 from ptychointerim.ptychotorch.utils import to_tensor, get_default_complex_dtype
 import ptychointerim.maths as pmath
 import ptychointerim.api as api
+from ptychointerim.ptychotorch.propagation import propagate_far_field
 
 class ComplexTensor(Module):
     """
@@ -277,7 +278,8 @@ class Probe(ReconstructParameter):
     # TODO: eigenmode_update_relaxation is only used for LSQML. We should create dataclasses
     # to contain additional options for Variable classes, and subclass them for specific
     # reconstruction algorithms - for example, ProbeOptions -> LSQMLProbeOptions.
-    def __init__(self, *args, name='probe', eigenmode_update_relaxation=0.1, **kwargs):
+    def __init__(self, *args, name='probe', eigenmode_update_relaxation=0.1, 
+                 probe_power=0.0, probe_power_constraint_stride=1, **kwargs):
         """
         Represents the probe function in a tensor of shape 
             `(n_opr_modes, n_modes, h, w)`
@@ -289,12 +291,19 @@ class Probe(ReconstructParameter):
         :param name: name of the variable, defaults to 'probe'.
         :param eigenmode_update_relaxation: relaxation factor, or effectively the step size, 
             for eigenmode update in LSQML.
+        :param probe_power: the target probe power. If greater than 0, probe power constraint
+            is run every `probe_power_constraint_stride` epochs, where it scales the probe
+            and object intensity such that the power of the far-field probe is `probe_power`. 
+        :param probe_power_constraint_stride: the number of epochs between probe power constraint
+            updates. 
         """
         super().__init__(*args, name=name, is_complex=True, **kwargs)
         if len(self.shape) != 4:
             raise ValueError('Probe tensor must be of shape (n_opr_modes, n_modes, h, w).')
         
         self.eigenmode_update_relaxation = eigenmode_update_relaxation
+        self.probe_power = probe_power
+        self.probe_power_constraint_stride = probe_power_constraint_stride
         
     def shift(self, shifts: Tensor):
         """
@@ -478,6 +487,35 @@ class Probe(ReconstructParameter):
         # Update stored data.
         self.set_data(probe)
         return weights
+    
+    def constrain_probe_power(
+            self, 
+            object_: Object,
+            opr_mode_weights: Union[Tensor, 'OPRModeWeights']
+    ) -> None:
+        if self.probe_power <= 0.:
+            return
+        
+        if isinstance(opr_mode_weights, OPRModeWeights):
+            opr_mode_weights = opr_mode_weights.data
+        
+        # Shape of probe_composed:        (n_modes, h, w)
+        if self.has_multiple_opr_modes:
+            avg_weights = opr_mode_weights.mean(dim=0)
+            probe_composed = self.get_unique_probes(avg_weights, mode_to_apply=0)
+        else:
+            probe_composed = self.get_opr_mode(0)
+        
+        # TODO: use propagator for forward simulation
+        propagated_probe = propagate_far_field(probe_composed)
+        propagated_probe_power = torch.sum(propagated_probe.abs() ** 2)
+        power_correction = torch.sqrt(self.probe_power / propagated_probe_power)
+        
+        self.set_data(self.data * power_correction)
+        object_.set_data(object_.data / power_correction)
+
+        
+        logging.info('Probe and object scaled by {}.'.format(power_correction))
     
     def post_update_hook(self, weights: Union[Tensor, ReconstructParameter]) -> Tensor:
         super().post_update_hook()
