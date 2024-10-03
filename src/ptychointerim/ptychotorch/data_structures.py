@@ -276,7 +276,9 @@ class Probe(ReconstructParameter):
     # to contain additional options for Variable classes, and subclass them for specific
     # reconstruction algorithms - for example, ProbeOptions -> LSQMLProbeOptions.
     def __init__(self, *args, name='probe', eigenmode_update_relaxation=0.1, 
-                 probe_power=0.0, probe_power_constraint_stride=1, **kwargs):
+                 probe_power=0.0, probe_power_constraint_stride=1, 
+                 orthogonalize_incoherent_modes=False, orthogonalize_incoherent_modes_stride=1, 
+                 **kwargs):
         """
         Represents the probe function in a tensor of shape 
             `(n_opr_modes, n_modes, h, w)`
@@ -293,6 +295,11 @@ class Probe(ReconstructParameter):
             and object intensity such that the power of the far-field probe is `probe_power`. 
         :param probe_power_constraint_stride: the number of epochs between probe power constraint
             updates. 
+        :param orthogonalize_incoherent_modes: whether to orthogonalize incoherent probe modes. If 
+            True, the incoherent probe modes are orthogonalized every 
+            `orthogonalize_incoherent_modes_stride` epochs. 
+        :param orthogonalize_incoherent_modes_stride: the number of epochs between orthogonalizing 
+            the incoherent probe modes.
         """
         super().__init__(*args, name=name, is_complex=True, **kwargs)
         if len(self.shape) != 4:
@@ -301,6 +308,8 @@ class Probe(ReconstructParameter):
         self.eigenmode_update_relaxation = eigenmode_update_relaxation
         self.probe_power = probe_power
         self.probe_power_constraint_stride = probe_power_constraint_stride
+        self.orthogonalize_incoherent_modes = orthogonalize_incoherent_modes
+        self.orthogonalize_incoherent_modes_stride = orthogonalize_incoherent_modes_stride
         
     def shift(self, shifts: Tensor):
         """

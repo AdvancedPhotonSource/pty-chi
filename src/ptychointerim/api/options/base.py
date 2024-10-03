@@ -101,6 +101,14 @@ class ProbeOptions(ParameterOptions):
     probe_power_constraint_stride: int = 1
     """The number of epochs between probe power constraint updates."""
 
+    orthogonalize_incoherent_modes: bool = False
+    """Whether to orthogonalize incoherent probe modes. If True, the incoherent probe 
+    modes are orthogonalized every `orthogonalize_incoherent_modes_stride` epochs.
+    """
+
+    orthogonalize_incoherent_modes_stride: int = 1
+    """The number of epochs between orthogonalizing the incoherent probe modes."""
+
     def check(self):
         if not (self.initial_guess is not None and self.initial_guess.ndim == 4):
             raise ValueError('Probe initial_guess must be a (n_opr_modes, n_modes, h, w) tensor.')
