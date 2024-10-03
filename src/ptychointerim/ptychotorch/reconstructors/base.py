@@ -106,6 +106,14 @@ class Reconstructor:
         d = self.variable_group.get_config_dict()
         d.update({'reconstructor': self.__class__.__name__})
         return d
+    
+
+class PtychographyReconstructor(Reconstructor):
+    
+    variable_group: PtychographyVariableGroup
+
+    def __init__(self, variable_group: PtychographyVariableGroup, *args, **kwargs) -> None:
+        super().__init__(variable_group, *args, **kwargs)
 
 
 class IterativeReconstructor(Reconstructor):
@@ -171,10 +179,16 @@ class IterativeReconstructor(Reconstructor):
     def run_pre_run_hooks(self) -> None:
         pass
     
+    def run_pre_update_hooks(self) -> None:
+        pass
+    
     def run_pre_epoch_hooks(self) -> None:
         pass
     
     def run_post_update_hooks(self) -> None:
+        pass
+    
+    def run_post_epoch_hooks(self) -> None:
         pass
                 
     def run(self, n_epochs: Optional[int] = None, *args, **kwargs):
@@ -185,15 +199,34 @@ class IterativeReconstructor(Reconstructor):
             for batch_data in self.dataloader:
                 input_data = [x.to(torch.get_default_device()) for x in batch_data[:-1]]
                 y_true = batch_data[-1].to(torch.get_default_device())
-
-                self.run_minibatch(input_data, y_true)
                 
+                self.run_pre_update_hooks()
+                self.run_minibatch(input_data, y_true)
                 self.run_post_update_hooks()
+            self.run_post_epoch_hooks()
             self.loss_tracker.conclude_epoch(epoch=self.current_epoch)
             self.loss_tracker.print_latest()
             
             self.current_epoch += 1
             
+            
+class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyReconstructor):
+    
+    variable_group: PtychographyVariableGroup
+
+    def __init__(self, variable_group: PtychographyVariableGroup, *args, **kwargs) -> None:
+        super().__init__(variable_group, *args, **kwargs)
+        
+    def run_post_epoch_hooks(self) -> None:
+        with torch.no_grad():
+            probe = self.variable_group.probe
+            if probe.probe_power > 0. \
+                    and self.current_epoch >= probe.optimization_plan.start \
+                    and (self.current_epoch - probe.optimization_plan.start) % probe.probe_power_constraint_stride == 0:
+                probe.constrain_probe_power(
+                    self.variable_group.object,
+                    self.variable_group.opr_mode_weights
+                )
     
 class AnalyticalIterativeReconstructor(IterativeReconstructor):
 
@@ -279,7 +312,9 @@ class AnalyticalIterativeReconstructor(IterativeReconstructor):
             return super().run(n_epochs=n_epochs, *args, **kwargs)
 
 
-class AnalyticalIterativePtychographyReconstructor(AnalyticalIterativeReconstructor):
+class AnalyticalIterativePtychographyReconstructor(AnalyticalIterativeReconstructor, IterativePtychographyReconstructor):
+    
+    variable_group: PtychographyVariableGroup
 
     def __init__(self, 
                 variable_group: PtychographyVariableGroup,

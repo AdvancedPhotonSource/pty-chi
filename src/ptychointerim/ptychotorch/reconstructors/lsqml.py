@@ -5,7 +5,7 @@ import torch
 import tqdm
 from torch.utils.data import Dataset
 
-from ptychointerim.ptychotorch.reconstructors.base import AnalyticalIterativeReconstructor, LossTracker
+from ptychointerim.ptychotorch.reconstructors.base import AnalyticalIterativePtychographyReconstructor, LossTracker
 from ptychointerim.ptychotorch.data_structures import Ptychography2DVariableGroup, DummyVariable
 from ptychointerim.forward_models import Ptychography2DForwardModel, PtychographyGaussianNoiseModel, PtychographyPoissonNoiseModel
 from ptychointerim.metrics import MSELossOfSqrt
@@ -15,7 +15,7 @@ from ptychointerim.ptychotorch.utils import chunked_processing
 import ptychointerim.maths as pmath
 
 
-class LSQMLReconstructor(AnalyticalIterativeReconstructor):
+class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
     """
     The least square maximum likelihood (LSQ-ML) algorithm described in
     

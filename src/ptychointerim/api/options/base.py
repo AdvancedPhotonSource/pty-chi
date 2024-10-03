@@ -90,6 +90,16 @@ class ProbeOptions(ParameterOptions):
 
     initial_guess: Union[ndarray, Tensor] = None
     """A (n_opr_modes, n_modes, h, w) complex tensor of the probe initial guess."""
+    
+    probe_power: float = 0.0
+    """
+    The target probe power. If greater than 0, probe power constraint
+    is run every `probe_power_constraint_stride` epochs, where it scales the probe
+    and object intensity such that the power of the far-field probe is `probe_power`. 
+    """
+
+    probe_power_constraint_stride: int = 1
+    """The number of epochs between probe power constraint updates."""
 
     def check(self):
         if not (self.initial_guess is not None and self.initial_guess.ndim == 4):

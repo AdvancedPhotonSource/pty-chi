@@ -7,9 +7,10 @@ from torch.utils.data import Dataset
 from ptychointerim.ptychotorch.data_structures import PtychographyVariableGroup
 from ptychointerim.forward_models import ForwardModel
 from ptychointerim.ptychotorch.reconstructors.ad_general import AutodiffReconstructor
+from ptychointerim.ptychotorch.reconstructors.base import IterativePtychographyReconstructor
 
 
-class AutodiffPtychographyReconstructor(AutodiffReconstructor):
+class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychographyReconstructor):
     def __init__(self,
                  variable_group: PtychographyVariableGroup,
                  dataset: Dataset,

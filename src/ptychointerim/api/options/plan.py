@@ -9,10 +9,9 @@ class OptimizationPlan:
     When a `ReconstructParameter` has `optimizable == True`, this class is used to specify
     the start, stop, and stride epochs of the optimization for that parameter.
     """
-    start: Optional[int] = None
+    start: int = 0
     """
-    The starting epoch. If None, optimization will start from the first epoch if the parameter
-    is optimizable.
+    The starting epoch.
     """
     
     stop: Optional[int] = None
@@ -34,4 +33,11 @@ class OptimizationPlan:
         if self.start is None:
             return True
         return (epoch - self.start) % self.stride == 0
+    
+    def is_in_optimization_interval(self, epoch: int) -> bool:
+        if self.start is not None and epoch < self.start:
+            return False
+        if self.stop is not None and epoch >= self.stop:
+            return False
+        return True
     
