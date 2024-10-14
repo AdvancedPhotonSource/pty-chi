@@ -137,6 +137,41 @@ class ProbePositionOptions(ParameterOptions):
     update_magnitude_limit: Optional[float] = 0
     """Magnitude limit of the probe update. No limit is imposed if it is 0."""
 
+    @dataclasses.dataclass
+    class CorrectionOptions:
+        """Options used for specifying the position correction function."""
+
+        correction_type: enums.PositionCorrectionTypes = (
+            enums.PositionCorrectionTypes.GRADIENT
+        )
+        """Type of algorithm used to calculate the position correction update."""
+
+        @dataclasses.dataclass
+        class CrossCorrelationOptions:
+            scale: int = 20000
+
+            real_space_width: float = 0.01
+
+            probe_threshold: float = 0.1
+
+        @dataclasses.dataclass
+        class GradientOptions:
+            pass
+
+        cross_correlation_options: CrossCorrelationOptions = dataclasses.field(
+            default_factory=CrossCorrelationOptions
+        )
+        """Options used with cross correlation position correction."""
+
+        gradient_options: GradientOptions = dataclasses.field(
+            default_factory=GradientOptions
+        )
+        """Options used with gradient based position correction."""
+
+    correction_options: CorrectionOptions = dataclasses.field(
+        default_factory=CorrectionOptions
+    )
+
 
 @dataclasses.dataclass
 class OPRModeWeightsOptions(ParameterOptions):

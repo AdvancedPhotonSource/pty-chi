@@ -1,4 +1,4 @@
-from typing import Optional, Union, Tuple, Type, Literal
+from typing import Optional, Union, Tuple, Type, Literal, Callable
 import dataclasses
 import os
 import logging
@@ -15,6 +15,8 @@ from ptychointerim.ptychotorch.utils import to_tensor, get_default_complex_dtype
 import ptychointerim.maths as pmath
 import ptychointerim.api as api
 from ptychointerim.ptychotorch.propagation import propagate_far_field
+import ptychointerim.position_correction as position_correction
+
 
 class ComplexTensor(Module):
     """
@@ -781,9 +783,17 @@ class ProbePositions(ReconstructParameter):
     
     pixel_size_m: float = 1.0
     conversion_factor_dict = {'nm': 1e9, 'um': 1e6, 'm': 1.0}
-        
-    def __init__(self, *args, pixel_size_m: float = 1.0, name: str = 'probe_positions', 
-                 update_magnitude_limit=0, **kwargs):
+
+    def __init__(
+        self,
+        *args,
+        pixel_size_m: float = 1.0,
+        name: str = "probe_positions",
+        update_magnitude_limit=0,
+        correction_options: api.ProbePositionOptions.CorrectionOptions = api.ProbePositionOptions.CorrectionOptions,
+        probe: Probe = None,
+        **kwargs,
+    ):
         """Probe positions. 
 
         :param data: a tensor of shape (N, 2) giving the probe positions in pixels. 
@@ -792,7 +802,10 @@ class ProbePositions(ReconstructParameter):
         super().__init__(*args, name=name, is_complex=False, **kwargs)
         self.pixel_size_m = pixel_size_m
         self.update_magnitude_limit = update_magnitude_limit
-        
+        self.position_correction = position_correction.PositionCorrection(
+            probe=probe, correction_options=correction_options
+        )
+
     def get_positions_in_physical_unit(self, unit: str = 'm'):
         return self.tensor * self.pixel_size_m * self.conversion_factor_dict[unit]
     

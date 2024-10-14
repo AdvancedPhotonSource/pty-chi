@@ -33,6 +33,11 @@ class Reconstructors(StrEnum):
 class ObjectTypes(StrEnum):
     TWO_D = auto()
     MULTISLICE = auto()
+
+
+class PositionCorrectionTypes(StrEnum):
+    GRADIENT = auto()
+    CROSS_CORRELATION = auto()
     
     
 class NoiseModels(StrEnum):

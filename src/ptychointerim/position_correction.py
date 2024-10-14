@@ -1,35 +1,88 @@
 import torch
-from ptychointerim.image_proc import find_cross_corr_peak
+from ptychointerim.image_proc import find_cross_corr_peak, gaussian_gradient
+from ptychointerim.ptychotorch.data_structures import Probe
+import ptychointerim.api as api
 
 
-def compute_positions_cross_correlation_update(obj_patches: torch.Tensor, 
-                                                updated_obj_patches: torch.Tensor, 
-                                                indices: torch.Tensor, 
-                                                positions: torch.Tensor,
-                                                probe: torch.Tensor):
-    """
-    Use cross-correlation position correction to compute an update to the probe positions.
+class PositionCorrection:
+    def __init__(
+        self,
+        probe: Probe = None,
+        correction_options: api.ProbePositionOptions.CorrectionOptions = api.ProbePositionOptions.CorrectionOptions,
+    ):
+        self.probe = probe
+        self.correction_type = correction_options.correction_type
+        self.scale = correction_options.cross_correlation_options.scale
+        self.real_space_width = correction_options.cross_correlation_options.real_space_width
+        self.probe_threshold = correction_options.cross_correlation_options.probe_threshold
 
-    Based on the paper:
-    - Translation position determination in ptychographic coherent diffraction imaging (2013) - Fucai Zhang
+    def get_update(
+        self,
+        chi: torch.Tensor,
+        obj_patches: torch.Tensor,
+        updated_obj_patches: torch.Tensor,
+    ):
+        if self.correction_type is api.PositionCorrectionTypes.GRADIENT:
+            return self.get_gradient_update(chi, obj_patches)
+        elif self.correction_type is api.PositionCorrectionTypes.CROSS_CORRELATION:
+            return self.get_cross_correlation_update(obj_patches, updated_obj_patches)
 
-    :param obj_patches: A (batch_size, h, w) patches of the object.
-    :param updated_obj_patches: A (batch_size, h, w) patches of the object with the new updates applied.
-    :param indices: A (batch_size) tensor specifying the position index that each object patch corresponds to.
-    :param positions: A (n_positions, 2) tensor of all measurement positions.
-    :param probe: A (h, w) tensor of the probe.
-    """
+    def get_cross_correlation_update(
+        self, obj_patches: torch.Tensor, updated_obj_patches: torch.Tensor
+    ):
+        """
+        Use cross-correlation position correction to compute an update to the probe positions.
 
-    delta_pos = torch.zeros_like(positions)
+        Based on the paper:
+        - Translation position determination in ptychographic coherent diffraction imaging (2013) - Fucai Zhang
 
-    probe_thresh = probe.abs().max() * 0.1
-    probe_mask = probe.abs() > probe_thresh
+        :param obj_patches: A (batch_size, h, w) patches of the object.
+        :param updated_obj_patches: A (batch_size, h, w) patches of the object with the new updates applied.
+        """
 
-    for i in range(len(positions[indices])):
-        delta_pos[indices[i]] = -find_cross_corr_peak(
-            updated_obj_patches[i] * probe_mask,
-            obj_patches[i] * probe_mask,
-            scale=20000, real_space_width=.01
-        )
+        probe_m0 = self.probe.get_mode_and_opr_mode(0, 0)
 
-    return delta_pos
+        N_positions = len(obj_patches)
+        delta_pos = torch.zeros((N_positions, 2))
+
+        probe_thresh = probe_m0.abs().max() * self.probe_threshold
+        probe_mask = probe_m0.abs() > probe_thresh
+
+        for i in range(N_positions):
+            delta_pos[i] = -find_cross_corr_peak(
+                updated_obj_patches[i] * probe_mask,
+                obj_patches[i] * probe_mask,
+                scale=self.scale,
+                real_space_width=self.real_space_width,
+            )
+
+        return delta_pos
+
+    def get_gradient_update(self, chi, obj_patches, eps=1e-6):
+        """
+        Calculate the update direction for probe positions. This routine calculates the gradient with regards
+        to probe positions themselves, in contrast to the delta of probe caused by a 1-pixel shift as in
+        Odstrcil (2018). However, this is the method implemented in both PtychoShelves and Tike.
+
+        Denote probe positions as s. Given dL/dP = -chi * O.conj() (Eq. 24a), dL/ds = dL/dO * dO/ds =
+        real(-chi * P.conj() * grad_O.conj()), where grad_O is the spatial gradient of the probe in x or y.
+        """
+
+        probe_m0 = self.probe.get_mode_and_opr_mode(0, 0)
+
+        chi_m0 = chi[:, 0, :, :]
+        dody, dodx = gaussian_gradient(obj_patches, sigma=0.33)
+
+        pdodx = dodx * probe_m0
+        dldx = (torch.real(pdodx.conj() * chi_m0)).sum(-1).sum(-1)
+        denom_x = (pdodx.abs() ** 2).sum(-1).sum(-1)
+        dldx = dldx / (denom_x + max(denom_x.max(), eps))
+
+        pdody = dody * probe_m0
+        dldy = (torch.real(pdody.conj() * chi_m0)).sum(-1).sum(-1)
+        denom_y = (pdody.abs() ** 2).sum(-1).sum(-1)
+        dldy = dldy / (denom_y + max(denom_y.max(), eps))
+
+        delta_pos = torch.stack([dldy, dldx], dim=1)
+
+        return delta_pos
