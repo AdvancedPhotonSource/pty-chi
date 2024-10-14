@@ -1,4 +1,4 @@
-from typing import Optional, Literal
+from typing import Optional
 import logging
 
 import torch
@@ -8,16 +8,8 @@ from ptychointerim.ptychotorch.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
     LossTracker,
 )
-from ptychointerim.ptychotorch.data_structures import (
-    Ptychography2DParameterGroup,
-    DummyParameter,
-    Object2D,
-)
-from ptychointerim.forward_models import (
-    Ptychography2DForwardModel,
-    PtychographyGaussianNoiseModel,
-    PtychographyPoissonNoiseModel,
-)
+import ptychointerim.ptychotorch.data_structures as ds
+import ptychointerim.forward_models as fm
 from ptychointerim.image_proc import (
     place_patches_fourier_shift,
     extract_patches_fourier_shift,
@@ -25,6 +17,7 @@ from ptychointerim.image_proc import (
 )
 from ptychointerim.ptychotorch.utils import chunked_processing
 import ptychointerim.maths as pmath
+import ptychointerim.api as api
 
 
 class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
@@ -41,45 +34,42 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     def __init__(
         self,
-        parameter_group: Ptychography2DParameterGroup,
+        parameter_group: "ds.Ptychography2DParameterGroup",
         dataset: Dataset,
-        batch_size: int = 1,
-        n_epochs: int = 100,
-        metric_function: Optional[torch.nn.Module] = None,
-        noise_model: Literal["gaussian", "poisson"] = "gaussian",
-        gaussian_noise_std: float = 0.5,
+        options: Optional["api.LSQMLReconstructorOptions"] = None,
         *args,
         **kwargs,
     ) -> None:
         super().__init__(
             parameter_group=parameter_group,
             dataset=dataset,
-            batch_size=batch_size,
-            n_epochs=n_epochs,
-            metric_function=metric_function,
+            options=options,
             *args,
             **kwargs,
         )
-        self.forward_model = Ptychography2DForwardModel(parameter_group, retain_intermediates=True)
 
-        noise_model_params = {} if noise_model == "poisson" else {"sigma": gaussian_noise_std}
+        noise_model_params = (
+            {} if options.noise_model == "poisson" else {"sigma": options.gaussian_noise_std}
+        )
         self.noise_model = {
-            "gaussian": PtychographyGaussianNoiseModel,
-            "poisson": PtychographyPoissonNoiseModel,
-        }[noise_model](**noise_model_params, valid_pixel_mask=self.dataset.valid_pixel_mask.clone())
+            "gaussian": fm.PtychographyGaussianNoiseModel,
+            "poisson": fm.PtychographyPoissonNoiseModel,
+        }[options.noise_model](
+            **noise_model_params, valid_pixel_mask=self.dataset.valid_pixel_mask.clone()
+        )
 
         self.alpha_psi_far = 0.5
         self.alpha_psi_far_all_points = None
 
     def check_inputs(self, *args, **kwargs):
-        if not isinstance(self.parameter_group.object, Object2D):
+        if not isinstance(self.parameter_group.object, ds.Object2D):
             raise NotImplementedError("LSQMLReconstructor only supports 2D objects.")
         if self.parameter_group.opr_mode_weights.optimizer is not None:
             logging.warning(
                 "Selecting optimizer for OPRModeWeights is not supported for "
                 "LSQMLReconstructor and will be disregarded."
             )
-        if not isinstance(self.parameter_group.opr_mode_weights, DummyParameter):
+        if not isinstance(self.parameter_group.opr_mode_weights, ds.DummyParameter):
             if self.parameter_group.opr_mode_weights.data[:, 1:].abs().max() < 1e-5:
                 raise ValueError(
                     "Weights of eigenmodes (the second and following OPR modes) in LSQMLReconstructor "
@@ -108,9 +98,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         logging.info("Probe eigenmodes normalized.")
 
     def get_psi_far_step_size(self, y_pred, y_true, indices, eps=1e-5):
-        if isinstance(self.noise_model, PtychographyGaussianNoiseModel):
+        if isinstance(self.noise_model, fm.PtychographyGaussianNoiseModel):
             alpha = torch.tensor(0.5, device=y_pred.device)  # Eq. 16
-        elif isinstance(self.noise_model, PtychographyPoissonNoiseModel):
+        elif isinstance(self.noise_model, fm.PtychographyPoissonNoiseModel):
             # This implementation reproduces PtychoShelves (gradient_descent_xi_solver)
             # and is different from Eq. 17 of Odstrcil (2018).
             xi = 1 - y_true / (y_pred + eps)
@@ -459,9 +449,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         # FIXME: reduced relax_u/v by a factor of 10 for stability, but PtychoShelves works without this.
         relax_u = (
             min(0.1, batch_size / n_points_total)
-            * self.parameter_group.probe.eigenmode_update_relaxation
+            * self.parameter_group.probe.options.eigenmode_update_relaxation
         )
-        relax_v = self.parameter_group.opr_mode_weights.update_relaxation
+        relax_v = self.parameter_group.opr_mode_weights.options.update_relaxation
         # Shape of delta_p_i:       (batch_size, n_probe_modes, h, w)
         # Shape of delta_p_hat:     (n_probe_modes, h, w)
         # Just use the first incoherent mode.

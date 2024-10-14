@@ -58,6 +58,10 @@ class ParameterOptions(Options):
     Settings for the optimizer of the parameter. For additional information on
     optimizer parameters, see: https://pytorch.org/docs/stable/optim.html
     """
+    
+    def get_non_data_fields(self) -> dict:
+        d = self.__dict__.copy()
+        return d
 
 
 @dataclasses.dataclass
@@ -104,6 +108,11 @@ class ObjectOptions(ParameterOptions):
 
     total_variation_stride: int = 1
     """The number of epochs between total variation constraint updates."""
+    
+    def get_non_data_fields(self) -> dict:
+        d = super().get_non_data_fields()
+        del d["initial_guess"]
+        return d
 
 
 @dataclasses.dataclass
@@ -154,6 +163,11 @@ class ProbeOptions(ParameterOptions):
         if not (self.initial_guess is not None and self.initial_guess.ndim == 4):
             raise ValueError('Probe initial_guess must be a (n_opr_modes, n_modes, h, w) tensor.')
 
+    def get_non_data_fields(self) -> dict:
+        d = super().get_non_data_fields()
+        del d["initial_guess"]
+        return d
+
 
 @dataclasses.dataclass
 class ProbePositionOptions(ParameterOptions):
@@ -169,6 +183,12 @@ class ProbePositionOptions(ParameterOptions):
 
     update_magnitude_limit: Optional[float] = 0
     """Magnitude limit of the probe update. No limit is imposed if it is 0."""
+    
+    def get_non_data_fields(self) -> dict:
+        d = super().get_non_data_fields()
+        del d["position_x_m"]
+        del d["position_y_m"]
+        return d
 
     @dataclasses.dataclass
     class CorrectionOptions:
@@ -240,6 +260,11 @@ class OPRModeWeightsOptions(ParameterOptions):
                 raise ValueError('When OPRModeWeights is optimizable, at least 1 of '
                                  'optimize_intensity_variation and optimize_eigenmode_weights '
                                  'should be set to True.')
+                
+    def get_non_data_fields(self) -> dict:
+        d = super().get_non_data_fields()
+        del d["initial_weights"]
+        return d
 
 
 @dataclasses.dataclass

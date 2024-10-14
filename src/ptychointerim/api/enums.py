@@ -23,8 +23,9 @@ class LossFunctions(StrEnum):
 
 class Reconstructors(StrEnum):
     base = auto()
-    LSQML = auto()
+    AD_GENERAL = auto()
     AD_PTYCHO = auto()
+    LSQML = auto()
     PIE = auto()
     EPIE = auto()
     RPIE = auto()
@@ -48,6 +49,12 @@ class NoiseModels(StrEnum):
 class OrthogonalizationMethods(StrEnum):
     GS = auto()
     SVD = auto()
+    
+
+class ForwardModels(StrEnum):
+    base = auto()
+    PTYCHOGRAPHY_2D = auto()
+    MULTISLICE_PTYCHOGRAPHY = auto()
 
 
 class Devices(StrEnum):

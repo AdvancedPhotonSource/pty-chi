@@ -1,49 +1,50 @@
-from typing import Type, Optional
+from typing import Optional
 
 import torch
 from torch.utils.data import Dataset
 
-from ptychointerim.ptychotorch.data_structures import PtychographyParameterGroup, MultisliceObject
-from ptychointerim.forward_models import ForwardModel, MultislicePtychographyForwardModel
+import ptychointerim.ptychotorch.data_structures as ds
+import ptychointerim.forward_models as fm
 from ptychointerim.ptychotorch.reconstructors.ad_general import AutodiffReconstructor
 from ptychointerim.ptychotorch.reconstructors.base import IterativePtychographyReconstructor
+import ptychointerim.api as api
 
 
 class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychographyReconstructor):
     def __init__(
         self,
-        parameter_group: PtychographyParameterGroup,
+        parameter_group: "ds.PtychographyParameterGroup",
         dataset: Dataset,
-        forward_model_class: Type[ForwardModel],
-        forward_model_params: Optional[dict] = None,
-        batch_size: int = 1,
-        loss_function: torch.nn.Module = None,
-        n_epochs: int = 100,
-        metric_function: Optional[torch.nn.Module] = None,
+        options: Optional["api.options.ad_ptychography.AutodiffPtychographyOptions"] = None,
         *args,
         **kwargs,
     ) -> None:
         super().__init__(
             parameter_group=parameter_group,
             dataset=dataset,
-            forward_model_class=forward_model_class,
-            forward_model_params=forward_model_params,
-            batch_size=batch_size,
-            loss_function=loss_function,
-            n_epochs=n_epochs,
-            metric_function=metric_function,
+            options=options,
             *args,
             **kwargs,
         )
 
     def check_inputs(self, *args, **kwargs):
         super().check_inputs(*args, **kwargs)
-
-        if isinstance(self.parameter_group.object, MultisliceObject):
-            if self.forward_model_class != MultislicePtychographyForwardModel:
+        if type(self.parameter_group.object) is ds.MultisliceObject:
+            if self.forward_model_class != fm.MultislicePtychographyForwardModel:
                 raise ValueError(
                     "If the object is multislice, the forward model must be MultislicePtychographyForwardModel."
                 )
+        if type(self.parameter_group.object) is ds.Object2D:
+            if self.forward_model_class != fm.Ptychography2DForwardModel:
+                raise ValueError(
+                    "If the object is 2D, the forward model must be Ptychography2DForwardModel."
+                )
+                
+    def build_forward_model(self):
+        if self.forward_model_class is fm.MultislicePtychographyForwardModel:
+            if 'wavelength_m' not in self.forward_model_params.keys():
+                self.forward_model_params['wavelength_m'] = self.dataset.wavelength_m
+        return super().build_forward_model()
 
     def run_post_differentiation_hooks(self, input_data, y_true):
         super().run_post_differentiation_hooks(input_data, y_true)

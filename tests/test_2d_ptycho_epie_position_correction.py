@@ -29,11 +29,13 @@ def test_2d_ptycho_epie_position_correction(pytestconfig, generate_gold=False, d
     options.object_options.optimizable = True
     options.object_options.optimizer = api.Optimizers.SGD
     options.object_options.step_size = 0.1
+    options.object_options.alpha = 1
     
     options.probe_options.initial_guess = probe
     options.probe_options.optimizable = True
     options.probe_options.optimizer = api.Optimizers.SGD
     options.probe_options.step_size = 0.1
+    options.probe_options.alpha = 1
 
     options.probe_position_options.position_x_m = positions_px[:, 1]
     options.probe_position_options.position_y_m = positions_px[:, 0]
@@ -44,8 +46,6 @@ def test_2d_ptycho_epie_position_correction(pytestconfig, generate_gold=False, d
     
     options.reconstructor_options.batch_size = 96
     options.reconstructor_options.num_epochs = 32
-    options.reconstructor_options.object_alpha = 1
-    options.reconstructor_options.probe_alpha = 1
     
     task = PtychographyTask(options)
     task.run()

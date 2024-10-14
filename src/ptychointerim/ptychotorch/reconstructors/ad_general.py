@@ -3,38 +3,35 @@ from typing import Type, Optional
 import torch
 from torch.utils.data import Dataset
 
-from ptychointerim.ptychotorch.data_structures import ParameterGroup
-from ptychointerim.forward_models import ForwardModel
+import ptychointerim.ptychotorch.data_structures as ds
+import ptychointerim.forward_models as fm
 from ptychointerim.ptychotorch.reconstructors.base import IterativeReconstructor, LossTracker
+import ptychointerim.api as api
+import ptychointerim.maps as maps
 
 
 class AutodiffReconstructor(IterativeReconstructor):
     def __init__(
         self,
-        parameter_group: ParameterGroup,
+        parameter_group: "ds.ParameterGroup",
         dataset: Dataset,
-        forward_model_class: Type[ForwardModel],
-        forward_model_params: Optional[dict] = None,
-        batch_size: int = 1,
-        loss_function: torch.nn.Module = None,
-        n_epochs: int = 100,
-        metric_function: Optional[torch.nn.Module] = None,
+        options: Optional["api.options.ad_general.AutodiffReconstructorOptions"] = None,
         *args,
         **kwargs,
     ) -> None:
         super().__init__(
             parameter_group=parameter_group,
             dataset=dataset,
-            batch_size=batch_size,
-            n_epochs=n_epochs,
-            metric_function=metric_function,
+            options=options,
             *args,
             **kwargs,
         )
-        self.forward_model_class = forward_model_class
-        self.forward_model_params = forward_model_params if forward_model_params is not None else {}
+        self.forward_model_class = options.forward_model_class
+        if isinstance(self.forward_model_class, (api.enums.ForwardModels, str)):
+            self.forward_model_class = maps.get_forward_model_by_enum(self.forward_model_class)
+        self.forward_model_params = options.forward_model_params if options.forward_model_params is not None else {}
         self.forward_model = None
-        self.loss_function = loss_function
+        self.loss_function = maps.get_loss_function_by_enum(options.loss_function)()
 
     def build(self) -> None:
         super().build()
@@ -45,7 +42,7 @@ class AutodiffReconstructor(IterativeReconstructor):
         # LossTracker should always compute the loss using data if metric function and loss function
         # are not the same type.
         always_compute_loss = (self.metric_function is not None) and (
-            type(self.metric_function) != type(self.loss_function)
+            type(self.metric_function) is not type(self.loss_function)
         )
         self.loss_tracker = LossTracker(metric_function=f, always_compute_loss=always_compute_loss)
 
@@ -84,7 +81,7 @@ class AutodiffReconstructor(IterativeReconstructor):
             if var.optimization_enabled(self.current_epoch):
                 var.optimizer.step()
 
-    def get_forward_model(self) -> ForwardModel:
+    def get_forward_model(self) -> "fm.ForwardModel":
         if isinstance(self.forward_model, torch.nn.DataParallel):
             return self.forward_model.module
         else:

@@ -46,6 +46,7 @@ def test_multislice_ptycho_autodiff(generate_gold=False, debug=False):
     options.probe_position_options.step_size = 1e-1
     options.probe_position_options.update_magnitude_limit = 1.0
     
+    options.reconstructor_options.forward_model_class = api.ForwardModels.MULTISLICE_PTYCHOGRAPHY
     options.reconstructor_options.loss_function = api.LossFunctions.MSE_SQRT
     options.reconstructor_options.batch_size = 101
     options.reconstructor_options.num_epochs = 32

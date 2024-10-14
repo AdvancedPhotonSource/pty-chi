@@ -3,8 +3,7 @@ import torch
 from torch import Tensor
 from torch.nn import ModuleList
 
-from ptychointerim.ptychotorch.data_structures import (ReconstructParameter, ParameterGroup, Ptychography2DParameterGroup,
-                                                       MultisliceObject)
+import ptychointerim.ptychotorch.data_structures as ds
 from ptychointerim.propagate import WavefieldPropagatorParameters, AngularSpectrumPropagator, FourierPropagator
 from ptychointerim.metrics import MSELossOfSqrt
 
@@ -12,17 +11,17 @@ from ptychointerim.metrics import MSELossOfSqrt
 class ForwardModel(torch.nn.Module):
 
     def __init__(self,
-                 parameter_group: ParameterGroup,
+                 parameter_group: ds.ParameterGroup,
                  retain_intermediates: bool = False,
                  *args, **kwargs) -> None:
         super().__init__()
 
-        if not isinstance(parameter_group, ParameterGroup):
+        if not isinstance(parameter_group, ds.ParameterGroup):
             raise TypeError(f"variable_group must be a VariableGroup, not {type(parameter_group)}")
 
         self.parameter_group = parameter_group
         self.retain_intermediates = retain_intermediates
-        self.optimizable_parameters: ModuleList[ReconstructParameter] = ModuleList()
+        self.optimizable_parameters: ModuleList[ds.ReconstructParameter] = ModuleList()
         self.propagator = None
         self.intermediate_variables = {}
 
@@ -46,7 +45,7 @@ class Ptychography2DForwardModel(ForwardModel):
 
     def __init__(
             self,
-            parameter_group: Ptychography2DParameterGroup,
+            parameter_group: ds.Ptychography2DParameterGroup,
             retain_intermediates: bool = False,
             *args, **kwargs) -> None:
         super().__init__(parameter_group, *args, **kwargs)
@@ -177,7 +176,7 @@ class Ptychography2DForwardModel(ForwardModel):
 class MultislicePtychographyForwardModel(Ptychography2DForwardModel):
     def __init__(
         self,
-        parameter_group: Ptychography2DParameterGroup,
+        parameter_group: ds.Ptychography2DParameterGroup,
         retain_intermediates: bool = False,
         wavelength_m: float = 1e-9,
         *args, **kwargs
@@ -187,7 +186,7 @@ class MultislicePtychographyForwardModel(Ptychography2DForwardModel):
             retain_intermediates=retain_intermediates,
             *args, **kwargs
         )
-        if not isinstance(self.parameter_group.object, MultisliceObject):
+        if not isinstance(self.parameter_group.object, ds.MultisliceObject):
             raise TypeError(f"Object must be a MultisliceObject, not {type(self.parameter_group.object)}")
 
         self.wavelength_m = wavelength_m

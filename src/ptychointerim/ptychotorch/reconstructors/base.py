@@ -6,8 +6,11 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 import tqdm
 
-from ptychointerim.ptychotorch.data_structures import ParameterGroup, PtychographyParameterGroup
+import ptychointerim.ptychotorch.data_structures as ds
 from ptychointerim.ptychotorch.utils import to_numpy
+import ptychointerim.api as api
+import ptychointerim.maps as maps
+import ptychointerim.forward_models as fm
 
 
 class LossTracker:
@@ -94,15 +97,29 @@ class LossTracker:
 
 
 class Reconstructor:
-    def __init__(self, parameter_group: ParameterGroup):
+    def __init__(
+        self,
+        parameter_group: "ds.ParameterGroup",
+        options: Optional["api.base.ReconstructorOptions"] = None,
+    ) -> None:
         self.loss_tracker = LossTracker()
         self.parameter_group = parameter_group
+
+        if options is None:
+            options = self.get_option_class()()
+        self.options = options
 
     def check_inputs(self, *args, **kwargs):
         pass
 
     def build(self) -> None:
         self.check_inputs()
+
+    def get_option_class(self):
+        try:
+            return self.__class__.__init__.__annotations__["options"]
+        except KeyError:
+            return api.options.base.ReconstructorOptions
 
     def get_config_dict(self) -> dict:
         d = self.parameter_group.get_config_dict()
@@ -111,20 +128,24 @@ class Reconstructor:
 
 
 class PtychographyReconstructor(Reconstructor):
-    parameter_group: PtychographyParameterGroup
+    parameter_group: "ds.PtychographyParameterGroup"
 
-    def __init__(self, parameter_group: PtychographyParameterGroup, *args, **kwargs) -> None:
-        super().__init__(parameter_group, *args, **kwargs)
+    def __init__(
+        self,
+        parameter_group: "ds.PtychographyParameterGroup",
+        options: Optional["api.base.ReconstructorOptions"] = None,
+        *args,
+        **kwargs,
+    ) -> None:
+        super().__init__(parameter_group, options=options, *args, **kwargs)
 
 
 class IterativeReconstructor(Reconstructor):
     def __init__(
         self,
-        parameter_group: ParameterGroup,
+        parameter_group: "ds.ParameterGroup",
         dataset: Dataset,
-        batch_size: int = 1,
-        n_epochs: int = 100,
-        metric_function: Optional[torch.nn.Module] = None,
+        options: Optional["api.base.ReconstructorOptions"] = None,
         *args,
         **kwargs,
     ) -> None:
@@ -139,12 +160,14 @@ class IterativeReconstructor(Reconstructor):
             loss_function argument in some reconstructors, this function is only used for cost tracking
             and is not involved in the reconstruction math.
         """
-        super().__init__(parameter_group, *args, **kwargs)
-        self.batch_size = batch_size
+        super().__init__(parameter_group, options=options, *args, **kwargs)
+        self.batch_size = options.batch_size
         self.dataset = dataset
-        self.n_epochs = n_epochs
+        self.n_epochs = options.num_epochs
         self.dataloader = None
-        self.metric_function = metric_function
+        self.metric_function = options.metric_function
+        if self.metric_function is not None:
+            self.metric_function = maps.get_loss_function_by_enum(options.metric_function)()
         self.current_epoch = 0
 
     def build(self) -> None:
@@ -217,10 +240,16 @@ class IterativeReconstructor(Reconstructor):
 
 
 class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyReconstructor):
-    parameter_group: PtychographyParameterGroup
+    parameter_group: "ds.PtychographyParameterGroup"
 
-    def __init__(self, parameter_group: PtychographyParameterGroup, *args, **kwargs) -> None:
-        super().__init__(parameter_group, *args, **kwargs)
+    def __init__(
+        self,
+        parameter_group: "ds.PtychographyParameterGroup",
+        options: Optional["api.base.ReconstructorOptions"] = None,
+        *args,
+        **kwargs,
+    ) -> None:
+        super().__init__(parameter_group, options=options, *args, **kwargs)
 
     def run_post_epoch_hooks(self) -> None:
         with torch.no_grad():
@@ -268,20 +297,16 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
 class AnalyticalIterativeReconstructor(IterativeReconstructor):
     def __init__(
         self,
-        parameter_group: ParameterGroup,
+        parameter_group: "ds.ParameterGroup",
         dataset: Dataset,
-        batch_size: int = 1,
-        n_epochs: int = 100,
-        metric_function: Optional[torch.nn.Module] = None,
+        options: Optional["api.base.ReconstructorOptions"] = None,
         *args,
         **kwargs,
     ) -> None:
         super().__init__(
             parameter_group=parameter_group,
             dataset=dataset,
-            batch_size=batch_size,
-            n_epochs=n_epochs,
-            metric_function=metric_function,
+            options=options,
             *args,
             **kwargs,
         )
@@ -356,27 +381,37 @@ class AnalyticalIterativeReconstructor(IterativeReconstructor):
 class AnalyticalIterativePtychographyReconstructor(
     AnalyticalIterativeReconstructor, IterativePtychographyReconstructor
 ):
-    parameter_group: PtychographyParameterGroup
+    parameter_group: "ds.PtychographyParameterGroup"
 
     def __init__(
         self,
-        parameter_group: PtychographyParameterGroup,
+        parameter_group: "ds.PtychographyParameterGroup",
         dataset: Dataset,
-        batch_size: int = 1,
-        n_epochs: int = 100,
-        metric_function: Optional[torch.nn.Module] = None,
+        options: Optional["api.base.ReconstructorOptions"] = None,
         *args,
         **kwargs,
     ) -> None:
         super().__init__(
             parameter_group=parameter_group,
             dataset=dataset,
-            batch_size=batch_size,
-            n_epochs=n_epochs,
-            metric_function=metric_function,
+            options=options,
             *args,
             **kwargs,
         )
+        self.forward_model = None
+        self.build_forward_model()
+
+    def build_forward_model(self):
+        if self.parameter_group.object.options.type == api.enums.ObjectTypes.TWO_D:
+            self.forward_model = fm.Ptychography2DForwardModel(
+                self.parameter_group, retain_intermediates=True
+            )
+        elif self.parameter_group.object.options.type == api.enums.ObjectTypes.MULTISLICE:
+            self.forward_model = fm.MultislicePtychographyForwardModel(
+                self.parameter_group,
+                retain_intermediates=True,
+                wavelength_m=self.dataset.wavelength_m,
+            )
 
     def run_post_epoch_hooks(self) -> None:
         with torch.no_grad():

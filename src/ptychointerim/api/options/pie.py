@@ -12,26 +12,24 @@ class PIEReconstructorOptions(base.ReconstructorOptions):
         
     def get_reconstructor_type(self) -> enums.Reconstructors:
         return enums.Reconstructors.PIE
-    
-    object_alpha: float = 0.1
-    """
-    Multiplier for the update to the object, as defined in table 1 of Maiden (2017).
-    """
-
-    probe_alpha: float = 0.1
-    """
-    Multiplier for the update to the probe, as defined in table 1 of Maiden (2017).
-    """
 
 
 @dataclasses.dataclass
 class PIEObjectOptions(base.ObjectOptions):
-    pass
+    
+    alpha: float = 0.1
+    """
+    Multiplier for the update to the object, as defined in table 1 of Maiden (2017).
+    """
 
 
 @dataclasses.dataclass
 class PIEProbeOptions(base.ProbeOptions):
-    pass
+    
+    alpha: float = 0.1
+    """
+    Multiplier for the update to the probe, as defined in table 1 of Maiden (2017).
+    """
 
 
 @dataclasses.dataclass
