@@ -8,7 +8,7 @@ class PositionCorrection:
     def __init__(
         self,
         probe: Probe = None,
-        correction_options: api.ProbePositionOptions.CorrectionOptions = api.ProbePositionOptions.CorrectionOptions,
+        correction_options: api.options.base.ProbePositionOptions.CorrectionOptions = None,
     ):
         self.probe = probe
         self.correction_type = correction_options.correction_type
