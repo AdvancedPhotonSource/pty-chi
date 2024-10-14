@@ -1,7 +1,5 @@
-from typing import Optional, Literal, Union, Sequence, Any
+from typing import Optional, Union, Sequence
 import dataclasses
-from dataclasses import field
-import json
 import logging
 
 from numpy import ndarray
@@ -12,12 +10,12 @@ from ptychointerim.api.options.plan import OptimizationPlan
 
 @dataclasses.dataclass
 class Options:
-        
+
     def uninherited_fields(self) -> dict:
         """
-        Find fields that are not inherited from the generic options parent 
-        class (typically the direct subclass of `ParameterOptions` or 
-        `Options`), and return them as a dictionary. 
+        Find fields that are not inherited from the generic options parent
+        class (typically the direct subclass of `ParameterOptions` or
+        `Options`), and return them as a dictionary.
         """
         parent_classes = [ObjectOptions, ProbeOptions, ReconstructorOptions, ProbePositionOptions, OPRModeWeightsOptions]
         parent_class = [parent_class for parent_class in parent_classes if isinstance(self, parent_class)][0]
@@ -51,7 +49,7 @@ class ParameterOptions(Options):
 
     step_size: float = 1
     """
-    Step size of the optimizer. This will be the learning rate `lr` in 
+    Step size of the optimizer. This will be the learning rate `lr` in
     `optimizer_params`.
     """
 
@@ -67,30 +65,54 @@ class ObjectOptions(ParameterOptions):
 
     initial_guess: Union[ndarray, Tensor] = None
     """A (h, w) complex tensor of the object initial guess."""
-    
+
     type: enums.ObjectTypes = enums.ObjectTypes.TWO_D
     """Type of the object."""
-    
+
     slice_spacings_m: Optional[ndarray] = None
     """Slice spacing in meters. Only required if `type == ObjectTypes.MULTISLICE`."""
 
     pixel_size_m: float = 1.0
     """The pixel size in meters."""
-    
+
     l1_norm_constraint_weight: float = 0
     """The weight of the L1 norm constraint. Disabled if equal or less than 0."""
-    
+
     l1_norm_constraint_stride: int = 1
     """The number of epochs between L1 norm constraint updates."""
+
+    smoothness_constraint_alpha: float = 0
+    """
+    The relaxation smoothing constant. If greater than 0, the magnitude (but not phase)
+    of the object will be smoothed every `smoothness_constraint_stride` epochs.
+
+    Smoothing is done by constructing a 3x3 kernel of
+    ```
+        alpha, alpha,         alpha
+        alpha, 1 - 8 * alpha, alpha
+        alpha, alpha,         alpha
+    ```
+    and convolve it with the object magnitude. When `alpha == 1 / 8`, the smoothing power
+    is maximal. The value of alpha should not be larger than 1 / 8.
+    """
+
+    smoothness_constraint_stride: int = 1
+    """The number of epochs between smoothness constraint updates."""
+    
+    total_variation_weight: float = 0
+    """The weight of the total variation constraint. Disabled if equal or less than 0."""
+
+    total_variation_stride: int = 1
+    """The number of epochs between total variation constraint updates."""
 
 
 @dataclasses.dataclass
 class ProbeOptions(ParameterOptions):
     """
     The probe configuration.
-    
-    The first OPR mode of all incoherent modes are always optimized aslong as 
-    `optimizable` is `True`. In addition to thtat, eigenmodes (of the first 
+
+    The first OPR mode of all incoherent modes are always optimized aslong as
+    `optimizable` is `True`. In addition to thtat, eigenmodes (of the first
     incoherent mode) are optimized when:
     - The probe has multiple OPR modes;
     - `OPRModeWeightsConfig` is given.
@@ -98,24 +120,35 @@ class ProbeOptions(ParameterOptions):
 
     initial_guess: Union[ndarray, Tensor] = None
     """A (n_opr_modes, n_modes, h, w) complex tensor of the probe initial guess."""
-    
+
     probe_power: float = 0.0
     """
     The target probe power. If greater than 0, probe power constraint
     is run every `probe_power_constraint_stride` epochs, where it scales the probe
-    and object intensity such that the power of the far-field probe is `probe_power`. 
+    and object intensity such that the power of the far-field probe is `probe_power`.
     """
 
     probe_power_constraint_stride: int = 1
     """The number of epochs between probe power constraint updates."""
 
     orthogonalize_incoherent_modes: bool = False
-    """Whether to orthogonalize incoherent probe modes. If True, the incoherent probe 
+    """Whether to orthogonalize incoherent probe modes. If True, the incoherent probe
     modes are orthogonalized every `orthogonalize_incoherent_modes_stride` epochs.
     """
 
     orthogonalize_incoherent_modes_stride: int = 1
     """The number of epochs between orthogonalizing the incoherent probe modes."""
+
+    orthogonalize_incoherent_modes_method: enums.OrthogonalizationMethods = enums.OrthogonalizationMethods.GS
+    """The method to use for incoherent_mode orthogonalization."""
+
+    orthogonalize_opr_modes: bool = False
+    """Whether to orthogonalize OPR modes. If True, the OPR modes are orthogonalized
+    every `orthogonalize_opr_modes_stride` epochs.
+    """
+
+    orthogonalize_opr_modes_stride: int = 1
+    """The number of epochs between orthogonalizing the OPR modes."""
 
     def check(self):
         if not (self.initial_guess is not None and self.initial_guess.ndim == 4):
@@ -183,12 +216,12 @@ class OPRModeWeightsOptions(ParameterOptions):
     - a (n_opr_modes,) array that gives the weights of each OPR mode. These weights
         will be duplicated for every point.
     """
-    
+
     optimize_eigenmode_weights: bool = True
     """
     Whether to optimize eigenmode weights, i.e., the weights of the second and
     following OPR modes.
-    
+
     At least one of `optimize_eigenmode_weights` and `optimize_intensity_variation`
     should be set to `True` if `optimizable` is `True`.
     """
@@ -196,7 +229,7 @@ class OPRModeWeightsOptions(ParameterOptions):
     optimize_intensity_variation: bool = False
     """
     Whether to optimize intensity variation, i.e., the weight of the first OPR mode.
-    
+
     At least one of `optimize_eigenmode_weights` and `optimize_intensity_variation`
     should be set to `True` if `optimizable` is `True`.
     """
@@ -208,43 +241,43 @@ class OPRModeWeightsOptions(ParameterOptions):
                                  'optimize_intensity_variation and optimize_eigenmode_weights '
                                  'should be set to True.')
 
-        
+
 @dataclasses.dataclass
 class ReconstructorOptions(Options):
-    
-    # This should be superseded by CorrectionPlan in ParameterConfig when it is there. 
+
+    # This should be superseded by CorrectionPlan in ParameterConfig when it is there.
     num_epochs: int = 100
     """The number of epochs to run."""
-    
+
     batch_size: int = 1
     """The number of data to process in each minibatch."""
-    
+
     default_device: enums.Devices = enums.Devices.GPU
     """The default device to use for computation."""
-    
+
     gpu_indices: Sequence[int] = ()
     """The GPU indices to use for computation. If empty, use all available GPUs."""
-    
+
     default_dtype: enums.Dtypes = enums.Dtypes.FLOAT32
     """The default data type to use for computation."""
-    
+
     random_seed: Optional[int] = None
     """The random seed to use for reproducibility. If None, no seed will be set."""
-    
+
     metric_function: Optional[enums.LossFunctions] = None
     """
-    The function that computes the tracked cost. Different from the `loss_function` 
+    The function that computes the tracked cost. Different from the `loss_function`
     argument in some reconstructors, this function is only used for cost tracking
     and is not involved in the reconstruction math.
     """
-    
+
     log_level: int | str = logging.INFO
     """The log level to use for logging."""
-    
+
     def get_reconstructor_type(self) -> enums.Reconstructors:
         return enums.Reconstructors.base
-    
-    
+
+
 @dataclasses.dataclass
 class TaskOptions(Options):
 

@@ -1,37 +1,40 @@
 [build-system]
-requires = ["setuptools", "setuptools-scm"]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "ptychointerim"
-authors = [
-    {name = ""},
-]
-description = "ptychointerim"
-readme = "README.md"
+description = "Package of ptychography reconstruction engines"
+readme = "README.rst"
+requires-python = ">=3.10"
 license = {file = "LICENSE.txt"}
-requires-python = ">=3.11.9"
 dependencies = [
-    "numpy",
-    "scipy",
-    "matplotlib",
-    "tqdm",
-    "scikit-learn",
-    "scikit-image",
-    "torchvision",
-    "torch>=2.3",
-    "pandas",
     "h5py",
-    "tqdm",
+    "matplotlib",
     "mypy",
+    "numpy>=2.1",
+    "pandas",
     "ruff",
-    "yapf"
+    "scikit-image",
+    "scikit-learn",
+    "scipy",
+    "torch>=2.4.1",
+    "torchvision",
+    "tqdm",
 ]
+dynamic = ["version"]
 
-version = "0.0.1"
+[tool.setuptools_scm]
 
-[tool.setuptools]
-package-dir = {"" = "src"}  # This tells setuptools that the packages are under "src"
+[tool.mypy]
+plugins = "numpy.typing.mypy_plugin"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.setuptools.package-data]
+"ptychointerim" = ["py.typed"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,5 +1,4 @@
 import argparse
-import os
 import logging
 
 import torch
@@ -21,8 +20,7 @@ def test_2d_ptycho_probe_power_constraint_lsqml(pytestconfig, generate_gold=Fals
     
     tutils.setup(name, cpu_only=False, gpu_indices=[0])
 
-    dataset, probe, pixel_size_m, positions_px = tutils.load_tungsten_data(pos_type='true', additional_opr_modes=3)
-    data = dataset.patterns
+    data, probe, pixel_size_m, positions_px = tutils.load_tungsten_data(pos_type='true', additional_opr_modes=3)
     object_init = torch.ones(
         utils.get_suggested_object_size(positions_px, probe.shape[-2:], extra=100), 
         dtype=utils.get_default_complex_dtype()
@@ -42,7 +40,7 @@ def test_2d_ptycho_probe_power_constraint_lsqml(pytestconfig, generate_gold=Fals
     options.probe_options.optimizable = True
     options.probe_options.optimizer = 'sgd'
     options.probe_options.step_size = 1
-    options.probe_options.probe_power = dataset[0][-1].sum()
+    options.probe_options.probe_power = data[0].sum()
     options.probe_options.probe_power_constraint_stride = 1
     
     options.probe_position_options.position_x_m = positions_m[:, 1]
@@ -93,8 +91,7 @@ def test_2d_ptycho_probe_power_constraint_ad(pytestconfig, generate_gold=False, 
     
     tutils.setup(name, cpu_only=False, gpu_indices=[0])
 
-    dataset, probe, pixel_size_m, positions_px = tutils.load_tungsten_data(pos_type='true', additional_opr_modes=3)
-    data = dataset.patterns
+    data, probe, pixel_size_m, positions_px = tutils.load_tungsten_data(pos_type='true', additional_opr_modes=3)
     object_init = torch.ones(
         utils.get_suggested_object_size(positions_px, probe.shape[-2:], extra=100), 
         dtype=utils.get_default_complex_dtype()
@@ -114,7 +111,7 @@ def test_2d_ptycho_probe_power_constraint_ad(pytestconfig, generate_gold=False, 
     options.probe_options.optimizable = True
     options.probe_options.optimizer = api.Optimizers.SGD
     options.probe_options.step_size = 1e-1
-    options.probe_options.probe_power = dataset[0][-1].sum()
+    options.probe_options.probe_power = data[0].sum()
     options.probe_options.probe_power_constraint_stride = 1
     
     options.probe_position_options.position_x_m = positions_m[:, 1]

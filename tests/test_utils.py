@@ -1,14 +1,11 @@
 import random
 import os
-from pathlib import Path
 import datetime
 
 import torch
 import h5py
 import numpy as np
 
-from ptychointerim.ptychotorch.io_handles import PtychographyDataset
-from ptychointerim.forward_models import Ptychography2DForwardModel
 from ptychointerim.ptychotorch.utils import rescale_probe, add_additional_opr_probe_modes_to_probe, set_default_complex_dtype, to_tensor
 
 
@@ -56,7 +53,6 @@ def setup(name, cpu_only=True, gpu_indices=(0,)):
         
 def load_data_ptychodus(diffraction_pattern_file, parameter_file, subtract_position_mean=False, additional_opr_modes=0):
     patterns = h5py.File(diffraction_pattern_file, 'r')['dp'][...]
-    dataset = PtychographyDataset(patterns)
 
     f_meta = h5py.File(parameter_file, 'r')
     probe = f_meta['probe'][...]
@@ -72,7 +68,7 @@ def load_data_ptychodus(diffraction_pattern_file, parameter_file, subtract_posit
     if subtract_position_mean:
         positions_px -= positions_px.mean(axis=0)
     
-    return dataset, probe, pixel_size_m, positions_px
+    return patterns, probe, pixel_size_m, positions_px
     
     
 def load_tungsten_data(additional_opr_modes=0, pos_type='true'):

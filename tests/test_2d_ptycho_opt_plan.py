@@ -1,5 +1,4 @@
 import argparse
-import os
 import logging
 
 import torch
@@ -7,7 +6,7 @@ import numpy as np
 
 import ptychointerim.api as api
 from ptychointerim.api.task import PtychographyTask
-from ptychointerim.api import LSQMLOptions, AutodiffPtychographyOptions
+from ptychointerim.api import LSQMLOptions
 import ptychointerim.ptychotorch.utils as utils
 
 import test_utils as tutils
@@ -21,8 +20,7 @@ def test_2d_ptycho_opt_plan(pytestconfig, generate_gold=False, debug=False, high
     
     tutils.setup(name, cpu_only=False, gpu_indices=[0])
 
-    dataset, probe, pixel_size_m, positions_px = tutils.load_tungsten_data(pos_type='true', additional_opr_modes=3)
-    data = dataset.patterns
+    data, probe, pixel_size_m, positions_px = tutils.load_tungsten_data(pos_type='true', additional_opr_modes=3)
     object_init = torch.ones(
         utils.get_suggested_object_size(positions_px, probe.shape[-2:], extra=100), 
         dtype=utils.get_default_complex_dtype()

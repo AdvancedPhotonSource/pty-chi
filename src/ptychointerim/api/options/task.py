@@ -2,7 +2,6 @@ import dataclasses
 from dataclasses import field
 
 import ptychointerim.api.options.base as base
-import ptychointerim.api.options.task as task_options
 from .data import PtychographyDataOptions
 
 

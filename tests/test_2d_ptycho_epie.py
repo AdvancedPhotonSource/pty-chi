@@ -1,8 +1,6 @@
 import argparse
-import os
 
 import torch
-import numpy as np
 
 import ptychointerim.api as api
 from ptychointerim.api.task import PtychographyTask
@@ -16,9 +14,8 @@ def test_2d_ptycho_epie(generate_gold=False, debug=False):
     
     tutils.setup(name, cpu_only=False, gpu_indices=[0])
     
-    dataset, probe, pixel_size_m, positions_px = tutils.load_tungsten_data(additional_opr_modes=0)
+    data, probe, pixel_size_m, positions_px = tutils.load_tungsten_data(additional_opr_modes=0)
     probe = probe[:, [0], :, :]
-    data = dataset.patterns
     
     options = api.EPIEOptions()
     

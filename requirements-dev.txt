@@ -1,0 +1,12 @@
+h5py
+matplotlib
+mypy
+numpy>=2.1
+pandas
+pytorch>=2.4.1
+ruff
+scikit-image
+scikit-learn
+scipy
+torchvision
+tqdm

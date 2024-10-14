@@ -1,4 +1,4 @@
-from typing import Optional, Literal, Union, overload
+from typing import Literal, Union, overload
 from types import TracebackType
 import random
 import logging
@@ -11,12 +11,13 @@ from numpy import ndarray
 
 import ptychointerim.api as api
 import ptychointerim.maps as maps
-from ptychointerim.ptychotorch.data_structures import *
+from ptychointerim.ptychotorch.data_structures import (Object2D, MultisliceObject, Probe, ProbePositions, OPRModeWeights,
+                                                       DummyParameter, Ptychography2DParameterGroup)
 from ptychointerim.ptychotorch.io_handles import PtychographyDataset
 from ptychointerim.forward_models import Ptychography2DForwardModel, MultislicePtychographyForwardModel
 from ptychointerim.ptychotorch.utils import to_tensor
 import ptychointerim.ptychotorch.utils as utils
-from ptychointerim.ptychotorch.reconstructors import *
+from ptychointerim.ptychotorch.reconstructors import AutodiffPtychographyReconstructor
 
 
 class Task:
@@ -107,7 +108,11 @@ class PtychographyTask(Task):
             'optimizer_class': maps.optimizer_dict[self.object_options.optimizer],
             'optimizer_params': dict({'lr': self.object_options.step_size}, **self.object_options.optimizer_params),
             'l1_norm_constraint_weight': self.object_options.l1_norm_constraint_weight,
-            'l1_norm_constraint_stride': self.object_options.l1_norm_constraint_stride
+            'l1_norm_constraint_stride': self.object_options.l1_norm_constraint_stride,
+            'smoothness_constraint_alpha': self.object_options.smoothness_constraint_alpha,
+            'smoothness_constraint_stride': self.object_options.smoothness_constraint_stride,
+            'total_variation_weight': self.object_options.total_variation_weight,
+            'total_variation_stride': self.object_options.total_variation_stride
         }
         kwargs.update(self.object_options.uninherited_fields())
         if self.object_options.type == api.ObjectTypes.MULTISLICE:
@@ -129,6 +134,9 @@ class PtychographyTask(Task):
             probe_power_constraint_stride=self.probe_options.probe_power_constraint_stride,
             orthogonalize_incoherent_modes=self.probe_options.orthogonalize_incoherent_modes,
             orthogonalize_incoherent_modes_stride=self.probe_options.orthogonalize_incoherent_modes_stride,
+            orthogonalize_incoherent_modes_method=self.probe_options.orthogonalize_incoherent_modes_method,
+            orthogonalize_opr_modes=self.probe_options.orthogonalize_opr_modes,
+            orthogonalize_opr_modes_stride=self.probe_options.orthogonalize_opr_modes_stride,
             **self.probe_options.uninherited_fields()
         )
         
@@ -152,10 +160,10 @@ class PtychographyTask(Task):
     def build_opr_mode_weights(self):
         n_opr_modes = self.probe_options.initial_guess.shape[0]
         if n_opr_modes == 1:
-            self.opr_mode_weights = DummyVariable()
+            self.opr_mode_weights = DummyParameter()
             return
         if self.opr_mode_weight_options.initial_weights is None:
-            self.opr_mode_weights = DummyVariable()
+            self.opr_mode_weights = DummyParameter()
             return
         else:
             initial_weights = to_tensor(self.opr_mode_weight_options.initial_weights)
@@ -174,7 +182,7 @@ class PtychographyTask(Task):
             )
             
     def build_reconstructor(self):
-        var_group = Ptychography2DVariableGroup(
+        par_group = Ptychography2DParameterGroup(
             object=self.object,
             probe=self.probe,
             probe_positions=self.probe_positions,
@@ -184,7 +192,7 @@ class PtychographyTask(Task):
         reconstructor_class = maps.reconstructor_dict[self.reconstructor_options.get_reconstructor_type()]
         
         reconstructor_kwargs = {
-            'variable_group': var_group,
+            'parameter_group': par_group,
             'dataset': self.dataset,
             'batch_size': self.reconstructor_options.batch_size,
             'n_epochs': self.reconstructor_options.num_epochs,

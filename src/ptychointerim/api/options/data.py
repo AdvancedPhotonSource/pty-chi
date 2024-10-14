@@ -11,7 +11,10 @@ import dataclasses
 class PtychographyDataOptions:
 
     data: Union[ndarray, Tensor] = None
-    """The data."""
+    """
+    The intensity data. Use collected data as they are; data should NOT be FFT-shifted 
+    or square-rooted.
+    """
 
     propagation_distance_m: float = 1.0
     """The propagation distance in meters."""

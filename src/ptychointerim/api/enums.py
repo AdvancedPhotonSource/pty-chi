@@ -14,7 +14,7 @@ class Optimizers(StrEnum):
     RADAM = auto()
     ADAMW = auto()
 
-    
+
 class LossFunctions(StrEnum):
     MSE = auto()
     POISSON = auto()
@@ -28,8 +28,8 @@ class Reconstructors(StrEnum):
     PIE = auto()
     EPIE = auto()
     RPIE = auto()
-    
-    
+
+
 class ObjectTypes(StrEnum):
     TWO_D = auto()
     MULTISLICE = auto()
@@ -38,12 +38,17 @@ class ObjectTypes(StrEnum):
 class PositionCorrectionTypes(StrEnum):
     GRADIENT = auto()
     CROSS_CORRELATION = auto()
-    
-    
+
+
 class NoiseModels(StrEnum):
     GAUSSIAN = auto()
     POISSON = auto()
-    
+
+
+class OrthogonalizationMethods(StrEnum):
+    GS = auto()
+    SVD = auto()
+
 
 class Devices(StrEnum):
     CPU = auto()

@@ -1,10 +1,6 @@
-from typing import Optional, Literal, Union
 import dataclasses
 from dataclasses import field
-import json
 
-from torch import Tensor
-from numpy import ndarray
 
 import ptychointerim.api.options.base as base
 import ptychointerim.api.options.task as task_options

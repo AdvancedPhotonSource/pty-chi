@@ -1,8 +1,6 @@
 import argparse
-import os
 
 import torch
-import numpy as np
 
 import ptychointerim.api as api
 from ptychointerim.api.task import PtychographyTask
@@ -20,13 +18,11 @@ def test_2d_ptycho_epie_mixed_states(pytestconfig, generate_gold=False, debug=Fa
     
     tutils.setup(name, cpu_only=False, gpu_indices=[0])
     
-    dataset, probe, pixel_size_m, positions_px = tutils.load_tungsten_data(additional_opr_modes=0)
+    data, probe, pixel_size_m, positions_px = tutils.load_tungsten_data(additional_opr_modes=0)
 
     probe = orthogonalize_gs(torch.tensor(probe), (-1, -2), 1)
-    probe = rescale_probe(probe[0], dataset.patterns)[None]
-    
-    data = dataset.patterns
-    
+    probe = rescale_probe(probe[0], data)[None]
+        
     options = api.EPIEOptions()
     
     options.data_options.data = data
