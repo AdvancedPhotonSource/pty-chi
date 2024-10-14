@@ -362,42 +362,10 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.parameter_group.object.optimizer.step()
 
     def update_probe_positions(self, chi, indices, obj_patches):
-        delta_pos = self._calculate_probe_position_update_direction(indices, chi, obj_patches)
+        delta_pos = self.parameter_group.probe_positions.position_correction.get_update(
+            chi, obj_patches, None
+        )
         self._apply_probe_position_update(delta_pos, indices)
-
-    def _calculate_probe_position_update_direction(self, indices, chi, obj_patches, eps=1e-6):
-        """
-        Calculate the update direction for probe positions. This routine calculates the gradient with regards
-        to probe positions themselves, in contrast to the delta of probe caused by a 1-pixel shift as in
-        Odstrcil (2018). However, this is the method implemented in both PtychoShelves and Tike.
-
-        Denote probe positions as s. Given dL/dP = -chi * O.conj() (Eq. 24a), dL/ds = dL/dO * dO/ds =
-        real(-chi * P.conj() * grad_O.conj()), where grad_O is the spatial gradient of the probe in x or y.
-        """
-        # Shape of probe:          (n_probe_modes, h, w)
-        # Shape of obj_patches:    (batch_size, h, w)
-        if self.parameter_group.probe.has_multiple_opr_modes:
-            # Shape of probe_m0:   (batch_size, h, w)
-            probe_m0 = self.parameter_group.probe.get_unique_probes(
-                weights=self.parameter_group.opr_mode_weights.get_weights(indices), mode_to_apply=0
-            )[:, 0]
-        else:
-            probe_m0 = self.parameter_group.probe.get_mode_and_opr_mode(0, 0)
-        chi_m0 = chi[:, 0, :, :]
-        dody, dodx = gaussian_gradient(obj_patches, sigma=0.33)
-
-        pdodx = dodx * probe_m0
-        dldx = (torch.real(pdodx.conj() * chi_m0)).sum(-1).sum(-1)
-        denom_x = (pdodx.abs() ** 2).sum(-1).sum(-1)
-        dldx = dldx / (denom_x + max(denom_x.max(), eps))
-
-        pdody = dody * probe_m0
-        dldy = (torch.real(pdody.conj() * chi_m0)).sum(-1).sum(-1)
-        denom_y = (pdody.abs() ** 2).sum(-1).sum(-1)
-        dldy = dldy / (denom_y + max(denom_y.max(), eps))
-
-        delta_pos = torch.stack([dldy, dldx], dim=1)
-        return delta_pos
 
     def _apply_probe_position_update(self, delta_pos, indices):
         # TODO: allow setting step size or use adaptive step size
