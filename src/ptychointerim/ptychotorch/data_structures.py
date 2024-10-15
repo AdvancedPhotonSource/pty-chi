@@ -1013,7 +1013,7 @@ class ProbePositions(ReconstructParameter):
         self.position_correction = position_correction.PositionCorrection(
             probe=probe,
             object_step_size=object_step_size,
-            correction_options=options.correction_options,
+            options=options.correction_options,
         )
 
     def get_positions_in_physical_unit(self, unit: str = "m"):

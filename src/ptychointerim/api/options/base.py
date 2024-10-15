@@ -188,8 +188,24 @@ class ProbeOptions(ParameterOptions):
 
 
 @dataclasses.dataclass
-class ProbePositionOptions(ParameterOptions):
+class PositionCorrectionOptions:
+    """Options used for specifying the position correction function."""
 
+    correction_type: enums.PositionCorrectionTypes = enums.PositionCorrectionTypes.GRADIENT
+    """Type of algorithm used to calculate the position correction update."""
+
+    cross_correlation_scale: int = 20000
+    """The upsampling factor of the cross-correlation in real space."""
+
+    cross_correlation_real_space_width: float = 0.01
+    """The width of the cross-correlation in real-space"""
+
+    cross_correlation_probe_threshold: float = 0.1
+    """The probe intensity threshold used to calculate the probe mask."""
+
+
+@dataclasses.dataclass
+class ProbePositionOptions(ParameterOptions):
     position_x_m: Union[ndarray, Tensor] = None
     """The x position in meters."""
 
@@ -201,49 +217,15 @@ class ProbePositionOptions(ParameterOptions):
 
     update_magnitude_limit: Optional[float] = 0
     """Magnitude limit of the probe update. No limit is imposed if it is 0."""
-    
+
     def get_non_data_fields(self) -> dict:
         d = super().get_non_data_fields()
         del d["position_x_m"]
         del d["position_y_m"]
         return d
 
-    @dataclasses.dataclass
-    class CorrectionOptions:
-        """Options used for specifying the position correction function."""
-
-        correction_type: enums.PositionCorrectionTypes = (
-            enums.PositionCorrectionTypes.GRADIENT
-        )
-        """Type of algorithm used to calculate the position correction update."""
-
-        @dataclasses.dataclass
-        class CrossCorrelationOptions:
-            scale: int = 20000
-            """The upsampling factor of the cross-correlation in real space."""
-
-            real_space_width: float = 0.01
-            """The width of the cross-correlation in real-space"""
-
-            probe_threshold: float = 0.1
-            """The probe intensity threshold used to calculate the probe mask."""
-
-        @dataclasses.dataclass
-        class GradientOptions:
-            pass
-
-        cross_correlation_options: CrossCorrelationOptions = dataclasses.field(
-            default_factory=CrossCorrelationOptions
-        )
-        """Options used with cross correlation position correction."""
-
-        gradient_options: GradientOptions = dataclasses.field(
-            default_factory=GradientOptions
-        )
-        """Options used with gradient based position correction."""
-
-    correction_options: CorrectionOptions = dataclasses.field(
-        default_factory=CorrectionOptions
+    correction_options: PositionCorrectionOptions = dataclasses.field(
+        default_factory=PositionCorrectionOptions
     )
 
 

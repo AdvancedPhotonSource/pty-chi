@@ -13,14 +13,14 @@ class PositionCorrection:
         self,
         probe: Probe = None,
         object_step_size: float = None,
-        correction_options: api.options.base.ProbePositionOptions.CorrectionOptions = None,
+        options: api.options.base.PositionCorrectionOptions = None,
     ):
         self.probe = probe
         self.object_step_size = object_step_size
-        self.correction_type = correction_options.correction_type
-        self.scale = correction_options.cross_correlation_options.scale
-        self.real_space_width = correction_options.cross_correlation_options.real_space_width
-        self.probe_threshold = correction_options.cross_correlation_options.probe_threshold
+        self.correction_type = options.correction_type
+        self.scale = options.cross_correlation_scale
+        self.real_space_width = options.cross_correlation_real_space_width
+        self.probe_threshold = options.cross_correlation_probe_threshold
 
     def get_update(
         self,
