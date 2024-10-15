@@ -108,10 +108,13 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         delta_pos = None
         if probe_positions.optimization_enabled(self.current_epoch) and object_.optimizable:
-            # updated_obj_patches = obj_patches + delta_o_patches * object_.optimizer_params["lr"]
             delta_pos = torch.zeros_like(probe_positions.data)
             delta_pos[indices] = probe_positions.position_correction.get_update(
-                psi_prime - psi, obj_patches, delta_o_patches
+                psi_prime - psi,
+                obj_patches,
+                delta_o_patches,
+                probe.get_mode_and_opr_mode(0, 0),
+                object_.optimizer_params["lr"],
             )
 
         delta_p_all_modes = None

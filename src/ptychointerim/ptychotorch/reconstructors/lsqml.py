@@ -369,7 +369,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     def update_probe_positions(self, chi, indices, obj_patches, delta_o_patches):
         delta_pos = self.parameter_group.probe_positions.position_correction.get_update(
-            chi, obj_patches, delta_o_patches
+            chi,
+            obj_patches,
+            delta_o_patches,
+            self.parameter_group.probe.get_mode_and_opr_mode(0, 0),
+            self.parameter_group.object.optimizer_params["lr"],
         )
         self._apply_probe_position_update(delta_pos, indices)
 

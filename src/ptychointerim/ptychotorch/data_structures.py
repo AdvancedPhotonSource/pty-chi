@@ -996,8 +996,6 @@ class ProbePositions(ReconstructParameter):
         *args,
         name: str = "probe_positions",
         options: "api.options.base.ProbePositionOptions" = None,
-        probe: Probe = None,
-        object_step_size: float = None,
         **kwargs,
     ):
         """
@@ -1011,9 +1009,7 @@ class ProbePositions(ReconstructParameter):
         self.pixel_size_m = options.pixel_size_m
         self.update_magnitude_limit = options.update_magnitude_limit
         self.position_correction = position_correction.PositionCorrection(
-            probe=probe,
-            object_step_size=object_step_size,
-            options=options.correction_options,
+            options=options.correction_options
         )
 
     def get_positions_in_physical_unit(self, unit: str = "m"):
