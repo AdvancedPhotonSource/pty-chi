@@ -168,9 +168,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         if self.parameter_group.object.optimization_enabled(self.current_epoch):
             alpha_mean = self._apply_object_update(alpha_o_i, delta_o_hat)
 
-        if self.parameter_group.probe_positions.optimization_enabled(self.current_epoch):
-            self.update_probe_positions(chi, indices, obj_patches, alpha_mean * delta_o_i)
-
         if self.parameter_group.probe.has_multiple_opr_modes and (
             self.parameter_group.probe.optimization_enabled(self.current_epoch)
             or (
@@ -194,6 +191,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 indices, chi, obj_patches
             )
             self._apply_variable_intensity_updates(delta_weights_int)
+
+        if self.parameter_group.probe_positions.optimization_enabled(self.current_epoch):
+            self.update_probe_positions(chi, indices, obj_patches, alpha_mean * delta_o_i)
 
     def update_preconditioners(self):
         # Update preconditioner of the object only if the probe has been updated in the previous
@@ -369,7 +369,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             chi,
             obj_patches,
             delta_o_patches,
-            self.parameter_group.probe.get_mode_and_opr_mode(0, 0),
+            self.parameter_group.probe,
+            self.parameter_group.opr_mode_weights,
+            indices,
             self.parameter_group.object.optimizer_params["lr"],
         )
         self._apply_probe_position_update(delta_pos, indices)

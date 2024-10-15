@@ -113,7 +113,9 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                 psi_prime - psi,
                 obj_patches,
                 delta_o_patches,
-                probe.get_mode_and_opr_mode(0, 0),
+                probe,
+                self.parameter_group.opr_mode_weights,
+                indices,
                 object_.optimizer_params["lr"],
             )
 

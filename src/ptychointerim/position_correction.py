@@ -1,29 +1,32 @@
 import torch
 from ptychointerim.image_proc import find_cross_corr_peak, gaussian_gradient
-from ptychointerim.ptychotorch.data_structures import Probe
+from ptychointerim.ptychotorch.data_structures import Probe, OPRModeWeights
 import ptychointerim.api as api
 
 
 class PositionCorrection:
     """
-    Class containing the various position correction functions used to 
+    Class containing the various position correction functions used to
     calculate updates to the probe positions.
     """
+
     def __init__(
         self,
         options: api.options.base.PositionCorrectionOptions = None,
     ):
         self.correction_type = options.correction_type
-        self.scale = options.cross_correlation_scale
-        self.real_space_width = options.cross_correlation_real_space_width
-        self.probe_threshold = options.cross_correlation_probe_threshold
+        self.cross_correlation_scale = options.cross_correlation_scale
+        self.cross_correlation_real_space_width = options.cross_correlation_real_space_width
+        self.cross_correlation_probe_threshold = options.cross_correlation_probe_threshold
 
     def get_update(
         self,
         chi: torch.Tensor,
         obj_patches: torch.Tensor,
         delta_o_patches: torch.Tensor,
-        probe: torch.Tensor,
+        probe: Probe,
+        opr_mode_weights: OPRModeWeights,
+        indices: torch.Tensor,
         object_step_size: float,
     ):
         """
@@ -37,9 +40,11 @@ class PositionCorrection:
             A (batch_size, h, w) tensor of patches of the object.
         delta_o_patches : torch.Tensor
             A (batch_size, h, w) tensor of patches of the update to be applied to the object.
-        probe: torch.Tensor
-            A (h, w) tensor of the probe field.
-        object_step_size: float
+        probe : Probe
+            The Probe object that is being reconstructed.
+        opr_mode_weights : OPRModeWeights
+            The OPRModeWeights object that is being reconstructed.
+        object_step_size : float
             The step size/learning rate of the object optimizer.
 
         Returns
@@ -47,10 +52,24 @@ class PositionCorrection:
         Tensor
             A (n_positions, 2) tensor of updates to the probe positions.
         """
+
+        if (
+            probe.has_multiple_opr_modes
+            and self.correction_type is api.PositionCorrectionTypes.GRADIENT
+        ):
+            # Shape of probe_m0:   (batch_size, h, w)
+            probe_m0 = probe.get_unique_probes(
+                weights=opr_mode_weights.get_weights(indices), mode_to_apply=0
+            )[:, 0]
+        else:
+            probe_m0 = probe.get_mode_and_opr_mode(0, 0)
+
         if self.correction_type is api.PositionCorrectionTypes.GRADIENT:
-            return self.get_gradient_update(chi, obj_patches, probe)
+            return self.get_gradient_update(chi, obj_patches, probe_m0)
         elif self.correction_type is api.PositionCorrectionTypes.CROSS_CORRELATION:
-            return self.get_cross_correlation_update(obj_patches, delta_o_patches, probe, object_step_size)
+            return self.get_cross_correlation_update(
+                obj_patches, delta_o_patches, probe_m0, object_step_size
+            )
 
     def get_cross_correlation_update(
         self,
@@ -71,15 +90,15 @@ class PositionCorrection:
         n_positions = len(obj_patches)
         delta_pos = torch.zeros((n_positions, 2))
 
-        probe_thresh = probe.abs().max() * self.probe_threshold
+        probe_thresh = probe.abs().max() * self.cross_correlation_probe_threshold
         probe_mask = probe.abs() > probe_thresh
 
         for i in range(n_positions):
             delta_pos[i] = -find_cross_corr_peak(
                 updated_obj_patches[i] * probe_mask,
                 obj_patches[i] * probe_mask,
-                scale=self.scale,
-                real_space_width=self.real_space_width,
+                scale=self.cross_correlation_scale,
+                real_space_width=self.cross_correlation_real_space_width,
             )
 
         return delta_pos
