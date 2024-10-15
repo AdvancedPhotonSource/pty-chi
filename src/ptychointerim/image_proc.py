@@ -9,12 +9,23 @@ from torch import Tensor
 def extract_patches_fourier_shift(
     image: Tensor, positions: Tensor, shape: Tuple[int, int]
 ) -> Tensor:
-    """Extract patches from 2D object.
+    """
+    Extract patches from 2D object.
 
-    :param image: the whole image.
-    :param positions: a tensor of shape (N, 2) giving the center positions of the patches in pixels.
+    Parameters
+    ----------
+    image : Tensor
+        The whole image.
+    positions : Tensor
+        A tensor of shape (N, 2) giving the center positions of the patches in pixels.
         The origin of the given positions are assumed to be the TOP LEFT corner of the image.
-    :param shape: a tuple giving the patch shape in pixels.
+    shape : tuple of int
+        A tuple giving the patch shape in pixels.
+
+    Returns
+    -------
+    Tensor
+        A tensor of shape (N, H, W) containing the extracted patches.
     """
     # Floating point ranges over which interpolations should be done
     sys_float = positions[:, 0] - (shape[0] - 1.0) / 2.0
@@ -55,12 +66,23 @@ def extract_patches_fourier_shift(
 def place_patches_fourier_shift(
     image: Tensor, positions: Tensor, patches: Tensor, op: Literal["add", "set"] = "add"
 ) -> Tensor:
-    """Place patches into a 2D object.
+    """
+    Place patches into a 2D object.
 
-    :param image: the whole image.
-    :param positions: a tensor of shape (N, 2) giving the center positions of the patches in pixels.
+    Parameters
+    ----------
+    image : Tensor
+        The whole image.
+    positions : Tensor
+        A tensor of shape (N, 2) giving the center positions of the patches in pixels.
         The origin of the given positions are assumed to be the TOP LEFT corner of the image.
-    :param patches: (N, H, W) tensor ofimage patches.
+    patches : Tensor
+        (N, H, W) tensor ofimage patches.
+
+    Returns
+    -------
+    Tensor
+        A tensor with the same shape as the object with patches added onto it.
     """
     shape = patches.shape[-2:]
 
@@ -107,11 +129,20 @@ def place_patches_fourier_shift(
 
 
 def fourier_shift(images: Tensor, shifts: Tensor) -> Tensor:
-    """Apply Fourier shift to a batch of images.
+    """
+    Apply Fourier shift to a batch of images.
 
-    :param images: a [N, H, W] tensor of images.
-    :param shifts: a [N, 2] tensor of shifts in pixels.
-    :return: shifted images.
+    Parameters
+    ----------
+    images : Tensor
+        A [N, H, W] tensor of images.
+    shifts : Tensor
+        A [N, 2] tensor of shifts in pixels.
+
+    Returns
+    -------
+    Tensor
+        Shifted images.
     """
     ft_images = torch.fft.fft2(images)
     freq_y, freq_x = torch.meshgrid(
@@ -140,9 +171,19 @@ def nearest_neighbor_gradient(
     """
     Calculate the nearest neighbor gradient of a 2D image.
 
-    :param image: a (... H, W) tensor of images.
-    :param sigma: sigma of the Gaaussian.
-    :return: a tuple of 2 images with the gradient in y and x directions.
+    Parameters
+    ----------
+    image : Tensor
+        a (... H, W) tensor of images.
+    direction : str
+        'forward' or 'backward'.
+    dim : tuple of int, optional
+        Dimensions to calculate gradient. Default is (0, 1).
+
+    Returns
+    -------
+    tuple of Tensor
+        a tuple of 2 images with the gradient in y and x directions.
     """
     if not hasattr(dim, "__len__"):
         dim = (dim,)
@@ -167,9 +208,17 @@ def gaussian_gradient(image: Tensor, sigma: float = 1.0, kernel_size=5) -> Tenso
     """
     Calculate the gradient of a 2D image with a Gaussian-derivative kernel.
 
-    :param image: a (... H, W) tensor of images.
-    :param sigma: sigma of the Gaaussian.
-    :return: a tuple of 2 images with the gradient in y and x directions.
+    Parameters
+    ----------
+    image : tensor
+        A (... H, W) tensor of images.
+    sigma : float
+        Sigma of the Gaussian.
+
+    Returns
+    -------
+    tuple of tensor
+        A tuple of 2 images with the gradient in y and x directions.
     """
     r = torch.arange(kernel_size) - (kernel_size - 1) / 2.0
     kernel = -r / (math.sqrt(2 * math.pi) * sigma**3) * torch.exp(-(r**2) / (2 * sigma**2))
@@ -200,9 +249,18 @@ def convolve2d(
     This routine flips the kernel to adhere with the textbook definition of convolution.
     torch.nn.functional.conv2d does not flip the kernel in itself.
 
-    :param image: a (... H, W) tensor of images. If the number of dimensions is greater than 2,
+    Parameters
+    ----------
+    image : Tensor
+        A (... H, W) tensor of images. If the number of dimensions is greater than 2,
         the last two dimensions are interpreted as height and width, respectively.
-    :param kernel: a (H, W) tensor of kernel.
+    kernel : Tensor
+        A (H, W) tensor of kernel.
+
+    Returns
+    -------
+    Tensor
+        A (... H, W) tensor of convolved images.
     """
     if not image.ndim >= 2:
         raise ValueError("Image must have at least 2 dimensions.")
@@ -247,13 +305,6 @@ def find_cross_corr_peak(
     """
     Find the cross-correlation peak of two 2D arrays with arbitarily high precision.
 
-    :param f: a (h, w) tensor.
-    :param g: a (h, w) tensor.
-    :param scale: an integer specifying how much to upsample the cross-correlation.
-    :param initial_guess: an initial guess of the location of the cross-correlation peak.
-    :param real_space_width: a number specifying the width of the cross-correlation (in units of non-upsampled pixels).
-    :return: a tensor of the location of the cross-correlation peak.
-
     This implementation is based on:
     - Efficient subpixel image registration algorithms (2008) - Manuel Guizar-Sicairos
 
@@ -262,8 +313,25 @@ def find_cross_corr_peak(
 
     Note: position correction does not work properly when dtype is complex64 instead of complex128.
     The position correction will "walk off" if complex64 is used.
-    """
 
+    Parameters
+    ----------
+    f : Tensor
+        a (h, w) tensor.
+    g : Tensor
+        a (h, w) tensor.
+    scale : int
+        an integer specifying how much to upsample the cross-correlation.
+    initial_guess : list[int]
+        an initial guess of the location of the cross-correlation peak.
+    real_space_width : float
+        a number specifying the width of the cross-correlation (in units of non-upsampled pixels).
+
+    Returns
+    -------
+    Tensor
+        a tensor of the location of the cross-correlation peak.
+    """
     f = torch.fft.ifftshift(f)
     g = torch.fft.ifftshift(g)
 
@@ -303,14 +371,22 @@ def total_variation_2d_chambolle(
     Apply total variation constraint to an image using Chambolle's total variation projection method
     (https://doi.org/10.5201/ipol.2013.61).
 
-    Adapted from fold_slice (local_TV2D_chambolle.m).
-
-    :param image: a (H, W) tensor.
-    :param lmbda: the trade-off parameter (1 / lambda in the paper).
+    Parameters
+    ----------
+    image : Tensor
+        A (H, W) tensor.
+    lmbda : float
+        The trade-off parameter (1 / lambda in the paper).
         Larger lmbda means stronger smoothing.
-    :param niter: an integer specifying the number of iterations.
-    :param tau: the time-step parameter.
-    :return: a (H, W) tensor.
+    niter : int
+        An integer specifying the number of iterations.
+    tau : float
+        The time-step parameter.
+
+    Returns
+    -------
+    Tensor
+        A (H, W) tensor.
     """
 
     def div(p):
@@ -343,3 +419,82 @@ def total_variation_2d_chambolle(
     # Prevent pushing values to 0
     image = torch.sum(x0 * image) / torch.sum(image**2) * image
     return image
+
+
+def remove_grid_artifacts(
+    img: Tensor,
+    pixel_size_m: float,
+    period_x_m: float,
+    period_y_m: float,
+    window_size: int,
+    direction: Literal["x", "y", "xy"] = "xy",
+):
+    """
+    Remove grid artifacts by setting the region near each harmonic peak
+    corresponding to the set periodicity of the artifacts to 0 in the input
+    image's Fourier domain.
+
+    Adapted from fold_slice (remove_grid_artifact.m).
+
+    Parameters
+    ----------
+    img : Tensor
+        The input image.
+    pixel_size_m : float
+        The pixel size in meter.
+    step_size_x : float
+        The period of the artifacts in the x direction in meter.
+    step_size_y : float
+        The period of the artifacts in the y direction in meter.
+    window_size : int
+        The radius of the region around each harmonic peak in which the values
+        are to be set to 0, given in pixels.
+    direction : {'x', 'y', 'xy'}
+        The direction of the artifacts to be removed.
+
+    Returns
+    -------
+    Tensor
+        The output image.
+    """
+    if img.ndim != 2:
+        raise ValueError("Input tensor must be two dimensional.")
+
+    ny, nx = img.shape
+    dk_y, dk_x = 1 / pixel_size_m / ny, 1 / pixel_size_m / nx
+    center_y, center_x = math.floor(ny / 2) + 1, math.floor(nx / 2) + 1
+
+    k_max = 0.5 / pixel_size_m
+    f_img = torch.fft.fftshift(torch.fft.fft2(img))
+    # Frequencies of the artifacts.
+    dk_s_y, dk_s_x = 1 / period_y_m, 1 / period_x_m
+
+    x_range, y_range = 0, 0
+    # Get the frequencies of all harmonic peaks.
+    if "x" in direction:
+        x_range = torch.arange(math.ceil(-k_max / dk_s_x), math.floor(k_max / dk_s_x))
+    if "y" in direction:
+        y_range = torch.arange(math.ceil(-k_max / dk_s_y), math.floor(k_max / dk_s_y))
+
+    for i in range(len(y_range)):
+        for j in range(len(x_range)):
+            # Avoid DC.
+            if not (x_range[j] == 0 and y_range[i] == 0):
+                window_y_lb = int(
+                    max(torch.round(y_range[i] * dk_s_y / dk_y) + center_y - window_size, 0)
+                )
+                window_y_ub = int(
+                    min(torch.round(y_range[i] * dk_s_y / dk_y) + center_y + window_size, ny)
+                )
+
+                window_x_lb = int(
+                    max(torch.round(x_range[j] * dk_s_x / dk_x) + center_x - window_size, 0)
+                )
+                window_x_ub = int(
+                    min(torch.round(x_range[j] * dk_s_x / dk_x) + center_x + window_size, nx)
+                )
+
+                f_img[window_y_lb:window_y_ub, window_x_lb:window_x_ub] = 0
+
+    img_new = torch.real(torch.fft.ifft2(torch.fft.ifftshift(f_img)))
+    return img_new

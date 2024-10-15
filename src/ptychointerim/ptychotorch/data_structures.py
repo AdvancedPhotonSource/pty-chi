@@ -96,14 +96,16 @@ class ReconstructParameter(Module):
         if self.optimization_plan is None:
             self.optimization_plan = api.OptimizationPlan()
         self.optimizer_class = maps.get_optimizer_by_enum(self.options.optimizer)
-        
+
         self.optimizer_params = (
             {} if self.options.optimizer_params is None else self.options.optimizer_params
         )
         # If optimizer_params has 'lr', it will overwrite the step_size.
-        self.optimizer_params = dict({'lr': self.options.step_size}, **self.options.optimizer_params)
+        self.optimizer_params = dict(
+            {"lr": self.options.step_size}, **self.options.optimizer_params
+        )
         self.optimizer = None
-        
+
         self.is_complex = is_complex
         self.preconditioner = None
 
@@ -142,13 +144,9 @@ class ReconstructParameter(Module):
             )
         if self.optimizable:
             if isinstance(self.tensor, ComplexTensor):
-                self.optimizer = self.optimizer_class(
-                    [self.tensor.data], **self.optimizer_params
-                )
+                self.optimizer = self.optimizer_class([self.tensor.data], **self.optimizer_params)
             else:
-                self.optimizer = self.optimizer_class(
-                    [self.tensor], **self.optimizer_params
-                )
+                self.optimizer = self.optimizer_class([self.tensor], **self.optimizer_params)
 
     def set_optimizable(self, optimizable):
         self.optimizable = optimizable
@@ -204,7 +202,10 @@ class ReconstructParameter(Module):
         However, method without automatic differentiation needs this to fill in the gradients
         manually.
 
-        :param grad: tensor of gradient.
+        Parameters
+        ----------
+        grad : Tensor
+            A tensor giving the gradient.
         """
         if isinstance(self.tensor, ComplexTensor):
             grad = torch.stack([grad.real, grad.imag], dim=-1)
@@ -238,6 +239,8 @@ class DummyParameter(ReconstructParameter):
 
 
 class Object(ReconstructParameter):
+    options: "api.options.base.ObjectOptions"
+
     pixel_size_m: float = 1.0
 
     def __init__(
@@ -323,17 +326,42 @@ class Object(ReconstructParameter):
     def constrain_total_variation(self) -> None:
         raise NotImplementedError
 
+    def remove_grid_artifacts_enabled(self, current_epoch: int):
+        if (
+            self.options.remove_grid_artifacts
+            and self.optimization_enabled(current_epoch)
+            and (current_epoch - self.optimization_plan.start)
+            % self.options.remove_grid_artifacts_stride
+            == 0
+        ):
+            return True
+        else:
+            return False
+
+    def remove_grid_artifacts(self, *args, **kwargs):
+        raise NotImplementedError
+
 
 class Object2D(Object):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def extract_patches(self, positions: Tensor, patch_shape: Tuple[int, int]):
-        """Extract patches from 2D object.
+        """
+        Extract patches from 2D object.
 
-        :param positions: a tensor of shape (N, 2) giving the center positions of the patches in pixels.
+        Parameters
+        ----------
+        positions : Tensor
+            Tensor of shape (N, 2) giving the center positions of the patches in pixels.
             The origin of the given positions are assumed to be `self.center_pixel`.
-        :param patch_shape: a tuple giving the patch shape in pixels.
+        patch_shape : tuple of int
+            Tuple giving the patch shape in pixels.
+
+        Returns
+        -------
+        patches : Tensor
+            Tensor of shape (N, H, W) containing the extracted patches.
         """
         # Positions are provided with the origin in the center of the object support.
         # We shift the positions so that the origin is in the upper left corner.
@@ -342,22 +370,36 @@ class Object2D(Object):
         return patches
 
     def place_patches(self, positions: Tensor, patches: Tensor, *args, **kwargs):
-        """Place patches into a 2D object.
+        """
+        Place patches into a 2D object.
 
-        :param positions: a tensor of shape (N, 2) giving the center positions of the patches in pixels.
+        Parameters
+        ----------
+        positions : Tensor
+            Tensor of shape (N, 2) giving the center positions of the patches in pixels.
             The origin of the given positions are assumed to be `self.center_pixel`.
-        :param patches: (N, H, W) tensor ofimage patches.
+        patches : Tensor
+            Tensor of shape (N, H, W) of image patches.
         """
         positions = positions + self.center_pixel
         image = ip.place_patches_fourier_shift(self.tensor.complex(), positions, patches)
         self.tensor.set_data(image)
 
     def place_patches_on_empty_buffer(self, positions: Tensor, patches: Tensor, *args, **kwargs):
-        """Place patches into a zero array with the same shape as the object.
+        """
+        Place patches into a empty buffer.
+        
+        Parameters
+        ----------
+        positions : Tensor
+            Tensor of shape (N, 2) giving the center positions of the patches in pixels.
+        patches : Tensor
+            Tensor of shape (N, H, W) of image patches.
 
-        :param positions: a tensor of shape (N, 2) giving the center positions of the patches in pixels.
-        :param patches: (N, H, W) tensor ofimage patches.
-        :return: a tensor with the same shape as the object with patches added onto it.
+        Returns
+        -------
+        image : Tensor
+            Tensor with the same shape as the object with patches added onto it.
         """
         positions = positions + self.center_pixel
         image = torch.zeros(
@@ -371,6 +413,20 @@ class Object2D(Object):
         data = ip.total_variation_2d_chambolle(data, lmbda=self.total_variation_weight, niter=2)
         self.set_data(data)
 
+    def remove_grid_artifacts(self):
+        data = self.data
+        phase = torch.angle(data)
+        phase = ip.remove_grid_artifacts(
+            phase,
+            pixel_size_m=self.pixel_size_m,
+            period_x_m=self.options.remove_grid_artifacts_period_x_m,
+            period_y_m=self.options.remove_grid_artifacts_period_y_m,
+            window_size=self.options.remove_grid_artifacts_window_size,
+            direction=self.options.remove_grid_artifacts_direction,
+        )
+        data = data.abs() * torch.exp(1j * phase)
+        self.set_data(data)
+
 
 class MultisliceObject(Object2D):
     def __init__(self, *args, **kwargs):
@@ -378,7 +434,10 @@ class MultisliceObject(Object2D):
 
         if len(self.shape) != 3:
             raise ValueError("MultisliceObject should have a shape of (n_slices, h, w).")
-        if self.options.slice_spacings_m is None or len(self.options.slice_spacings_m) != self.n_slices - 1:
+        if (
+            self.options.slice_spacings_m is None
+            or len(self.options.slice_spacings_m) != self.n_slices - 1
+        ):
             raise ValueError("The number of slice spacings must be n_slices - 1.")
 
         self.register_buffer("slice_spacings_m", to_tensor(self.options.slice_spacings_m))
@@ -398,11 +457,16 @@ class MultisliceObject(Object2D):
         return self.data[index, ...]
 
     def extract_patches(self, positions: Tensor, patch_shape: Tuple[int, int]):
-        """Extract (n_patches, n_slices, h', w') patches from the multislice object.
+        """
+        Extract (n_patches, n_slices, h', w') patches from the multislice object.
 
-        :param positions: a tensor of shape (N, 2) giving the center positions of the patches in pixels.
+        Parameters
+        ----------
+        positions : Tensor
+            Tensor of shape (N, 2) giving the center positions of the patches in pixels.
             The origin of the given positions are assumed to be `self.center_pixel`.
-        :param patch_shape: a tuple giving the lateral patch shape in pixels.
+        patch_shape : tuple
+            Tuple giving the lateral patch shape in pixels.
         """
         # Positions are provided with the origin in the center of the object support.
         # We shift the positions so that the origin is in the upper left corner.
@@ -417,11 +481,16 @@ class MultisliceObject(Object2D):
         return patches_all_slices
 
     def place_patches(self, positions: Tensor, patches: Tensor, *args, **kwargs):
-        """Place patches into a 2D object.
+        """
+        Place patches into a 2D object.
 
-        :param positions: a tensor of shape (N, 2) giving the center positions of the patches in pixels.
+        Parameters
+        ----------
+        positions : Tensor
+            Tensor of shape (N, 2) giving the center positions of the patches in pixels.
             The origin of the given positions are assumed to be `self.center_pixel`.
-        :param patches: (n_patches, n_slices, H, W) tensor ofimage patches.
+        patches : Tensor
+            Tensor of shape (n_patches, n_slices, H, W) of image patches.
         """
         positions = positions + self.center_pixel
         updated_slices = []
@@ -434,11 +503,21 @@ class MultisliceObject(Object2D):
         self.tensor.set_data(updated_slices)
 
     def place_patches_on_empty_buffer(self, positions: Tensor, patches: Tensor, *args, **kwargs):
-        """Place patches into a zero array with the lateral shape of the object.
+        """
+        Place patches into a zero array with the lateral shape of the object.
 
-        :param positions: a tensor of shape (N, 2) giving the center positions of the patches in pixels.
-        :param patches: (N, H, W) tensor ofimage patches.
-        :return: a tensor with the lateral shape of the object with patches added onto it.
+        Parameters
+        ----------
+        positions : Tensor
+            Tensor of shape (N, 2) giving the center positions of the patches in pixels.
+            The origin of the given positions are assumed to be `self.center_pixel`.
+        patches : Tensor
+            Tensor of shape (N, H, W) of image patches.
+
+        Returns
+        -------
+        image : Tensor
+            A tensor with the lateral shape of the object with patches added onto it.
         """
         positions = positions + self.center_pixel
         image = torch.zeros(
@@ -453,6 +532,21 @@ class MultisliceObject(Object2D):
             data[i_slice] = ip.total_variation_2d_chambolle(
                 data[i_slice], lmbda=self.total_variation_weight, niter=2
             )
+        self.set_data(data)
+        
+    def remove_grid_artifacts(self):
+        data = self.data
+        phase = torch.angle(data)
+        for i_slice in range(self.n_slices):
+            slice_phase = ip.remove_grid_artifacts(
+                phase[i_slice],
+                pixel_size_m=self.pixel_size_m,
+                period_x_m=self.options.remove_grid_artifacts_period_x_m,
+                period_y_m=self.options.remove_grid_artifacts_period_y_m,
+                window_size=self.options.remove_grid_artifacts_window_size,
+                direction=self.options.remove_grid_artifacts_direction,
+            )
+            data[i_slice] = data[i_slice].abs() * torch.exp(1j * slice_phase)
         self.set_data(data)
 
 
@@ -474,20 +568,6 @@ class Probe(ReconstructParameter):
         - n_opr_modes is the number of mutually coherent probe modes used in orthogonal
           probe relaxation (OPR).
         - n_modes is the number of mutually incoherent probe modes.
-
-        :param name: name of the parameter, defaults to 'probe'.
-        :param eigenmode_update_relaxation: relaxation factor, or effectively the step size,
-            for eigenmode update in LSQML.
-        :param probe_power: the target probe power. If greater than 0, probe power constraint
-            is run every `probe_power_constraint_stride` epochs, where it scales the probe
-            and object intensity such that the power of the far-field probe is `probe_power`.
-        :param probe_power_constraint_stride: the number of epochs between probe power constraint
-            updates.
-        :param orthogonalize_incoherent_modes: whether to orthogonalize incoherent probe modes. If
-            True, the incoherent probe modes are orthogonalized every
-            `orthogonalize_incoherent_modes_stride` epochs.
-        :param orthogonalize_incoherent_modes_stride: the number of epochs between orthogonalizing
-            the incoherent probe modes.
         """
         super().__init__(*args, name=name, options=options, is_complex=True, **kwargs)
         if len(self.shape) != 4:
@@ -505,8 +585,16 @@ class Probe(ReconstructParameter):
         """
         Generate shifted probe.
 
-        :param shifts: A tensor of shape (2,) or (N, 2) giving the shifts in pixels.
+        Parameters
+        ----------
+        shifts : Tensor
+            A tensor of shape (2,) or (N, 2) giving the shifts in pixels.
             If a (N, 2)-shaped tensor is given, a batch of shifted probes are generated.
+
+        Returns
+        -------
+        shifted_probe : Tensor
+            Shifted probe.
         """
         if shifts.ndim == 1:
             probe_straightened = self.tensor.complex().view(-1, *self.shape[-2:])
@@ -560,11 +648,19 @@ class Probe(ReconstructParameter):
         """
         Get the intensity of all probe modes.
 
-        :param opr_mode: the OPR mode. If this is not None, only the intensity of the chosen
+        Parameters
+        ----------
+        opr_mode : Optional[int]
+            the OPR mode. If this is not None, only the intensity of the chosen
             OPR mode is calculated. Otherwise, it calculates the intensity of the weighted sum
             of all OPR modes. In that case, `weights` must be given.
-        :param weights: a (n_opr_modes,) tensor giving the weights of OPR modes.
-        :return: _description_
+        weights : Optional[Union[Tensor, ReconstructParameter]]
+            a (n_opr_modes,) tensor giving the weights of OPR modes.
+
+        Returns
+        -------
+        intensity : Tensor
+            The summed intensity of all probe modes.
         """
         if isinstance(weights, OPRModeWeights):
             weights = weights.data
@@ -578,15 +674,20 @@ class Probe(ReconstructParameter):
         self, weights: Union[Tensor, ReconstructParameter], mode_to_apply: Optional[int] = None
     ) -> Tensor:
         """
-        Creates the unique probe for one or more scan points given the weights of eigenmodes.
-
-        :param weights: A (n_points, n_opr_modes) or (n_opr_modes,) tensor giving the weights
-            of the eigenmodes.
-        :param mode_to_apply: The incoherent mode for which OPR modes should be applied. The data
+        Parameters
+        ----------
+        weights : Tensor
+            A tensor giving the weights of the eigenmodes.
+        mode_to_apply : int, optional
+            The incoherent mode for which OPR modes should be applied. The data
             for other modes will be set to the value of the first OPR mode. If None,
             OPR correction will be done to all incoherent modes.
-        :return: A (n_points, n_modes, h, w) tensor of unique probes if weights.ndim == 2,
-            or a (n_modes, h, w) tensor if weights.ndim == 1.
+
+        Returns
+        -------
+        unique_probe : Tensor
+            A tensor of unique probes. If weights.ndim == 2, the shape is (n_points, n_modes, h, w).
+            If weights.ndim == 1, the shape is (n_modes, h, w).
         """
         if isinstance(weights, OPRModeWeights):
             weights = weights.data
@@ -647,7 +748,8 @@ class Probe(ReconstructParameter):
     def constrain_opr_mode_orthogonality(
         self, weights: Union[Tensor, ReconstructParameter], eps=1e-5
     ):
-        """Add the following constraints to variable probe weights
+        """
+        Add the following constraints to variable probe weights
 
         1. Remove outliars from weights
         2. Enforce orthogonality once per epoch
@@ -662,8 +764,16 @@ class Probe(ReconstructParameter):
         incoherent mode when mixed state probe is used, as this is what PtychoShelves does.
         OPR modes of other incoherent modes are ignored, for now.
 
+        Parameters
+        ----------
+        weights : Tensor
+            A (n_points, n_opr_modes) tensor of weights.
         :param weights: a (n_points, n_opr_modes) tensor of weights.
-        :return: normalized and sorted OPR mode weights.
+        
+        Returns
+        -------
+        Tensor
+            Normalized and sorted OPR mode weights.
         """
         if isinstance(weights, OPRModeWeights):
             weights = weights.data
@@ -791,7 +901,10 @@ class Probe(ReconstructParameter):
         an array of tiles, where the rows correspond to incoherent probe modes
         and columns correspond to OPR modes.
 
-        :param path: path to save. "_phase" and "_mag" will be appended to the filename.
+        Parameters
+        ----------
+        path : str
+            Path to save. "_phase" and "_mag" will be appended to the filename.
         """
         fname = os.path.splitext(path)[0]
         mag_img = np.empty([self.shape[3] * self.shape[1], self.shape[2] * self.shape[0]])
@@ -825,9 +938,12 @@ class OPRModeWeights(ReconstructParameter):
         """
         Weights of OPR modes for each scan point.
 
-        :param name: name of the parameter.
-        :param update_relaxation: relaxation factor, or effectively the step size, for
-            the update step in LSQML.
+        Parameters
+        ----------
+        name : str
+            Name of the parameter.
+        update_relaxation : float
+            Relaxation factor, or effectively the step size, for the update step in LSQML.
         """
         super().__init__(*args, name=name, options=options, is_complex=False, **kwargs)
         if len(self.shape) != 2:
@@ -884,10 +1000,11 @@ class ProbePositions(ReconstructParameter):
         object_step_size: float = None,
         **kwargs,
     ):
-        """Probe positions. 
+        """
+        Probe positions.
 
         :param data: a tensor of shape (N, 2) giving the probe positions in pixels.
-            Input positions should be in row-major order, i.e., y-positons come first.
+            Input positions should be in row-major order, i.e., y-positions come first.
         """
         super().__init__(*args, name=name, options=options, is_complex=False, **kwargs)
         import ptychointerim.position_correction as position_correction

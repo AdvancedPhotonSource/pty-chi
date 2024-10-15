@@ -57,6 +57,12 @@ class ForwardModels(StrEnum):
     MULTISLICE_PTYCHOGRAPHY = auto()
 
 
+class Directions(StrEnum):
+    X = auto()
+    Y = auto()
+    XY = auto()
+
+
 class Devices(StrEnum):
     CPU = auto()
     GPU = auto()

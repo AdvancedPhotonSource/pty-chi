@@ -27,10 +27,19 @@ def rescale_probe(
     """
     Scale probe so that the sum of intensity matches that of the diffraction patterns.
 
-    :param probe: A (n_modes, h, w) or (n_opr_modes, n_modes, h, w) tensor of the probe.
-    :param patterns: A (n, h, w) tensor of diffraction patterns.
-    :param weights: A (n_opr_modes,) tensor of weights for each OPR mode.
-    :return: the scaled probe.
+    Parameters
+    ----------
+    probe : Tensor
+        A (n_modes, h, w) or (n_opr_modes, n_modes, h, w) tensor of the probe.
+    patterns : Tensor
+        A (n, h, w) tensor of diffraction patterns.
+    weights : Tensor, optional
+        A (n_opr_modes,) tensor of weights for each OPR mode.
+
+    Returns
+    -------
+    scaled_probe : Tensor
+        The scaled probe.
     """
     propagator = FourierPropagator()
 
@@ -108,10 +117,19 @@ def generate_initial_opr_mode_weights(
     Generate initial weights for OPR modes, where the weights of the main OPR mode are set to 1,
     and the weights of eigenmodes are set to 0.
 
-    :param n_points: number of scan points.
-    :param n_opr_modes: number of OPR modes.
-    :param eigenmode_weight: initial weight for eigenmodes.
-    :return: a (n_points, n_opr_modes) tensor of weights.
+    Parameters
+    ----------
+    n_points : int
+        number of scan points.
+    n_opr_modes : int
+        number of OPR modes.
+    eigenmode_weight : float
+        initial weight for eigenmodes.
+
+    Returns
+    -------
+    weights : Tensor
+        a (n_points, n_opr_modes) tensor of weights.
     """
     return torch.cat(
         [torch.ones([n_points, 1]), torch.full([n_points, n_opr_modes - 1], eigenmode_weight)],
@@ -171,16 +189,24 @@ def chunked_processing(
     chunk_size: int = 96,
 ):
     """
-    Breaks the data of a vectorized function into chunks and process chunks in sequence to
-    reduce peak memory usage.
+    Parameters
+    ----------
+    func : callable
+        The callable to be executed.
+    common_kwargs : dict
+        A dictionary of arguments that should stay constant across chunks.
+    chunkable_kwargs : dict
+        A dictionary of arguments that should be chunked.
+    iterated_kwargs : dict
+        A dictionary of arguments that should be returned by `func`, then passed to `func`
+        for the next chunk. The order of arguments should be the same as the returns of
+        `func`.
+    chunk_size : int, optional
+        The size of each chunk. Default is 96.
 
-    :param func: the callable to be executed.
-    :param common_kwargs: a dictionary of arguments that should stay constant across chunks.
-    :param chunkable_kwargs: a dictionary of arguments that should be chunked.
-    :param iterated_kwargs: a dictionary of arguments that should be returned by `func`, then
-        passed to `func` for the next chunk. The order of arguments should be the same as
-        the returns of `func`.
-    :return: the returns of `func` as if it is executed for the entire data.
+    Returns
+    -------
+    The returns of `func` as if it is executed for the entire data.
     """
     full_batch_size = tuple(chunkable_kwargs.values())[0].shape[0]
     for key, value in tuple(chunkable_kwargs.items())[1:]:

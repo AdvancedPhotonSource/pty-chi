@@ -35,21 +35,28 @@ class WavefieldPropagatorParameters:
         pixel_height_m: float,
         propagation_distance_m: float,
     ) -> WavefieldPropagatorParameters:
-        """Creates propagator paramaters dataclass from quantities with physical length units.
-        :param wavelength_m: illumination wavelength in meters
-        :type wavelength_m: float
-        :param width_px: number of pixels in the x-direction
-        :type width_px: int
-        :param height_px: number of pixels in the y-direction
-        :type height_px: int
-        :param pixel_width_m: source plane pixel width in meters
-        :type pixel_width_m: float
-        :param pixel_height_m: source plane pixel height in meters
-        :type pixel_height_m: float
-        :param propagation_distance_m: propagation distance in meters
-        :type propagation_distance_m: float
-        :returns: a dataclass that contains the nondimensionalized propagator parameters
-        :rtype: WavefieldPropagatorParameters
+        """
+        Creates propagator paramaters dataclass from quantities with physical length units.
+
+        Parameters
+        ----------
+        wavelength_m : float
+            Illumination wavelength in meters
+        width_px : int
+            Number of pixels in the x-direction
+        height_px : int
+            Number of pixels in the y-direction
+        pixel_width_m : float
+            Source plane pixel width in meters
+        pixel_height_m : float
+            Source plane pixel height in meters
+        propagation_distance_m : float
+            Propagation distance in meters
+
+        Returns
+        -------
+        WavefieldPropagatorParameters
+            a dataclass that contains the nondimensionalized propagator parameters
         """
         return cls(
             width_px,

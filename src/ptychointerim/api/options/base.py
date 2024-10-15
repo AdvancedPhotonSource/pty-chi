@@ -109,6 +109,24 @@ class ObjectOptions(ParameterOptions):
     total_variation_stride: int = 1
     """The number of epochs between total variation constraint updates."""
     
+    remove_grid_artifacts: bool = False
+    """Whether to remove grid artifacts in the object's phase at the end of an epoch."""
+    
+    remove_grid_artifacts_period_x_m: float = 1e-7
+    """The horizontal period of grid artifacts in meters."""
+    
+    remove_grid_artifacts_period_y_m: float = 1e-7
+    """The vertical period of grid artifacts in meters."""
+    
+    remove_grid_artifacts_window_size: int = 5
+    """The window size for grid artifact removal in pixels."""
+    
+    remove_grid_artifacts_direction: enums.Directions = enums.Directions.XY
+    """The direction of grid artifact removal."""
+    
+    remove_grid_artifacts_stride: int = 1
+    """The number of epochs between grid artifact removal updates."""
+    
     def get_non_data_fields(self) -> dict:
         d = super().get_non_data_fields()
         del d["initial_guess"]

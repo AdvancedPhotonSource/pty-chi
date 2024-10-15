@@ -147,9 +147,14 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         Apply updates to optimizable parameters given the updates calculated by self.compute_updates.
 
-        :param delta_o: A (n_replica, h, w, 2) tensor of object update vector.
-        :param delta_p: A (n_replicate, n_opr_modes, n_modes, h, w, 2) tensor of probe update vector.
-        :param delta_pos: A (n_positions, 2) tensor of probe position vectors.
+        Parameters
+        ----------
+        delta_o : Tensor
+            A (n_replica, h, w, 2) tensor of object update vector.
+        delta_p : Tensor
+            A (n_replicate, n_opr_modes, n_modes, h, w, 2) tensor of probe update vector.
+        delta_pos : Tensor
+            A (n_positions, 2) tensor of probe position vectors.
         """
         object_ = self.parameter_group.object
         probe = self.parameter_group.probe

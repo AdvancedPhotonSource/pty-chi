@@ -2,14 +2,23 @@ from typing import Literal, Optional, Tuple, Union
 
 import torch
 
+
 def trim_mean(x: torch.Tensor, fraction: float = 0.1) -> torch.Tensor:
     """
     Calculate the mean of a tensor after removing a certain percentage of the
     lowest and highest values.
 
-    :param x: tensor.
-    :param fraction: the fraction of trim, between 0 and 1.
-    :return: the trimmed mean.
+    Parameters
+    ----------
+    x : Tensor
+        Input tensor.
+    fraction : float, optional
+        The fraction of trim, between 0 and 1. Default is 0.1.
+
+    Returns
+    -------
+    trimmed_mean : tensor
+        The trimmed mean.
     """
     lb = torch.quantile(x, fraction)
     ub = torch.quantile(x, 1 - fraction)
@@ -30,17 +39,27 @@ def orthogonalize_gs(
     Gram-schmidt orthogonalization for complex arrays. Adapted from
     Tike (https://github.com/AdvancedPhotonSource/tike).
 
-    :param x: data to be orthogonalized.
-    :param dim: The axis/axes to be orthogonalized. By default only the last axis is
+    Parameters
+    ----------
+    x : Tensor
+        Data to be orthogonalized.
+    dim : int or tuple of int, optional
+        The axis/axes to be orthogonalized. By default only the last axis is
         orthogonalized. If axis is a tuple, then the number of orthogonal
         vectors is the length of the last dimension not included in axis. The
         other dimensions are broadcast.
-    :param group_dim: The axis along which to orthogonalize. Other dimensions are broadcast.
+    group_dim : int, optional
+        The axis along which to orthogonalize. Other dimensions are broadcast.
+
+    Returns
+    -------
+    Tensor
+        Orthogonalized data.
     """
     x, dim, group_dim = _prepare_data_for_orthogonalization(x, dim, group_dim, move_group_dim_to=0)
     u = x.clone()
     for i in range(1, len(x)):
-        u[i:] -= project(x[i:], u[i - 1:i], dim=dim)
+        u[i:] -= project(x[i:], u[i - 1 : i], dim=dim)
     return torch.moveaxis(u, 0, group_dim)
 
 
@@ -48,29 +67,39 @@ def orthogonalize_svd(
     x: torch.Tensor,
     dim: Union[int, Tuple[int, ...]] = -1,
     group_dim: Union[int, None] = None,
-    preserve_norm: bool = False
+    preserve_norm: bool = False,
 ) -> torch.Tensor:
     """
     SVD orthogonalization for complex arrays. Adapted from PtychoShelves (probe_modes_ortho.m).
 
-    :param x: data to be orthogonalized.
-    :param dim: The axis/axes to be orthogonalized. By default only the last axis is
+    Parameters
+    ----------
+    x : Tensor
+        Data to be orthogonalized.
+    dim : int or tuple of int, optional
+        The axis/axes to be orthogonalized. By default only the last axis is
         orthogonalized. If axis is a tuple, then the number of orthogonal
         vectors is the length of the last dimension not included in axis. The
         other dimensions are broadcast.
-    :param group_dim: The axis along which to orthogonalize. Other dimensions are broadcast.
-    """
-    orig_shape = x.shape
+    group_dim : int, optional
+        The axis along which to orthogonalize. Other dimensions are broadcast.
 
-    x, dim, group_dim = _prepare_data_for_orthogonalization(x, dim, group_dim, move_group_dim_to=None)
+    Returns
+    -------
+    Tensor
+        Orthogonalized data.
+    """
+    x, dim, group_dim = _prepare_data_for_orthogonalization(
+        x, dim, group_dim, move_group_dim_to=None
+    )
     if preserve_norm:
         orig_norm = norm(x, dim=list(dim) + [group_dim], keepdims=True)
 
     # Move group_dim to the end, and move dim right before group_dim.
     x = torch.moveaxis(x, list(sorted(dim)) + [group_dim], list(range(-len(dim) - 1, 0)))
     group_dim_shape = [x.shape[-1]]
-    dim_shape = list(x.shape[-(len(dim) + 1):-1])
-    batch_dim_shape = list(x.shape[:-(len(dim) + 1)])
+    dim_shape = list(x.shape[-(len(dim) + 1) : -1])
+    batch_dim_shape = list(x.shape[: -(len(dim) + 1)])
 
     # Now the axes of x is rearranged to (bcast_dims, *dim, group_dim).
     # Straighten dimensions given by `dim`.`
@@ -82,12 +111,16 @@ def orthogonalize_svd(
         covmat = x.transpose(-1, -2) @ x.conj()
     else:
         covmat = torch.bmm(x.transpose(-1, -2), x.conj())
-        
+
     evals, evecs = torch.linalg.eig(covmat)
 
     sorted_inds = torch.argsort(evals.abs(), dim=-1, descending=True)
     # Shape of evecs:    (bcast_dims_shape, group_dim_shape, group_dim_shape)
-    evecs = torch.gather(evecs, dim=-1, index=sorted_inds[..., None, :].repeat(*([1] * (evecs.ndim - 2)), evecs.shape[-2], 1))
+    evecs = torch.gather(
+        evecs,
+        dim=-1,
+        index=sorted_inds[..., None, :].repeat(*([1] * (evecs.ndim - 2)), evecs.shape[-2], 1),
+    )
 
     if x.ndim == 2:
         x = x @ evecs.conj()
@@ -97,7 +130,7 @@ def orthogonalize_svd(
     # Restore u to the original shape.
     # Unflatten `dim`.
     x = x.reshape(batch_dim_shape + dim_shape + group_dim_shape)
-    # Then, Move `group_dim` and `dim` back. 
+    # Then, Move `group_dim` and `dim` back.
     x = torch.moveaxis(x, list(range(-len(dim) - 1, 0)), list(sorted(dim)) + [group_dim])
 
     if preserve_norm:
@@ -132,7 +165,7 @@ def _prepare_data_for_orthogonalization(
     x: torch.Tensor,
     dim: Union[int, Tuple[int, ...]] = -1,
     group_dim: Union[int, None] = None,
-    move_group_dim_to: Optional[Union[int, Literal['before_dim']]] = None,
+    move_group_dim_to: Optional[Union[int, Literal["before_dim"]]] = None,
 ) -> Tuple[torch.Tensor, Tuple[int, ...], int]:
     """
     Find `dim` and `group_dim`.
@@ -154,7 +187,7 @@ def _prepare_data_for_orthogonalization(
     if group_dim in dim:
         raise ValueError("Cannot orthogonalize a single vector.")
     if move_group_dim_to is not None:
-        if move_group_dim_to == 'before_dim':
+        if move_group_dim_to == "before_dim":
             x = torch.moveaxis(x, group_dim, min(dim) - 1)
         else:
             x = torch.moveaxis(x, group_dim, move_group_dim_to)

@@ -42,8 +42,17 @@ class PositionCorrection:
         Based on the paper:
         - Translation position determination in ptychographic coherent diffraction imaging (2013) - Fucai Zhang
 
-        :param obj_patches: A (batch_size, h, w) tensor of patches of the object.
-        :param delta_o_patches: A (batch_size, h, w) tensor of patches of the update to be applied to the object.
+        Parameters
+        ----------
+        obj_patches : torch.Tensor
+            A (batch_size, h, w) tensor of patches of the object.
+        delta_o_patches : torch.Tensor
+            A (batch_size, h, w) tensor of patches of the update to be applied to the object.
+
+        Returns
+        -------
+        Tensor
+            A (n_positions, 2) tensor of updates to the probe positions.
         """
 
         updated_obj_patches = obj_patches + delta_o_patches * self.object_step_size
@@ -75,8 +84,17 @@ class PositionCorrection:
         Denote probe positions as s. Given dL/dP = -chi * O.conj() (Eq. 24a), dL/ds = dL/dO * dO/ds =
         real(-chi * P.conj() * grad_O.conj()), where grad_O is the spatial gradient of the probe in x or y.
 
-        :param chi: A (batch_size, h, w) tensor of the exit wave update.
-        :param obj_patches: A (batch_size, h, w) tensor of patches of the object.
+        Parameters
+        ----------
+        chi : torch.Tensor
+            A (batch_size, h, w) tensor of the exit wave update.
+        obj_patches : torch.Tensor
+            A (batch_size, h, w) tensor of patches of the object.
+
+        Returns
+        -------
+        Tensor
+            A (n_positions, 2) tensor of updates to the probe positions.
         """
 
         probe_m0 = self.probe.get_mode_and_opr_mode(0, 0)

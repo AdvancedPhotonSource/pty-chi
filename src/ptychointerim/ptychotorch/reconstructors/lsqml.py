@@ -120,9 +120,12 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     def run_reciprocal_space_step(self, y_pred, y_true, indices):
         """
-        Run step 1 of LSQ-ML, which updates psi.
+        Run step 1 of LSQ-ML, which updates `psi`.
 
-        :return: (batch_size, n_probe_modes, h, w) complex tensor
+        Returns
+        -------
+        psi_opt : Tensor
+            A (batch_size, n_probe_modes, h, w) complex tensor.
         """
         # gradient as in Eq. 12a/b
         psi_far_0 = self.forward_model.intermediate_variables["psi_far"]
@@ -135,13 +138,14 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     def run_real_space_step(self, psi_opt, indices):
         """
-        Run step 2 of LSQ-ML, which updates the object, probe, and other variables
-        using psi updated in step 1.
+        Run real space step of LSQ-ML, which updates the object, probe, and other variables
+        using psi updated in the reciprocal space step.
 
-        This step is independent of the likelihood function chosen through `loss_function`.
-
-        :param psi_opt: a (batch_size, n_probe_modes, h, w) complex tensor. Should be
-            psi updated in step 1.
+        Parameters
+        ----------
+        psi_opt : Tensor
+            A (batch_size, n_probe_modes, h, w) complex tensor. 
+            Should be the psi updated in the reciprocal space step.
         """
         positions = self.forward_model.intermediate_variables["positions"]
         psi_0 = self.forward_model.intermediate_variables["psi"]

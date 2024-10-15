@@ -22,10 +22,12 @@ class LossTracker:
         **kwargs,
     ) -> None:
         """
-        The loss tracker is used to track the loss during reconstruction.
-
-        :param metric_function: a function that takes y_pred and y_true and returns a loss.
-        :param always_compute_loss: determines the behavior of update_batch_loss. If True,
+        Parameters
+        ----------
+        metric_function : callable, optional
+            A function that takes y_pred and y_true and returns a loss.
+        always_compute_loss : bool, optional
+            Determines the behavior of update_batch_loss. If True,
             the loss is computed using the metric function as long as y_pred and y_true
             are given. Otherwise, the tracker logs the provided loss value if it is given,
             only computing the loss when it is not.
@@ -150,13 +152,18 @@ class IterativeReconstructor(Reconstructor):
         **kwargs,
     ) -> None:
         """
-        Iterative reconstructor base class.
-
-        :param parameter_group: The ParameterGroup containing optimizable and non-optimizable parameters.
-        :param dataset: The dataset containing diffraction patterns.
-        :param batch_size: The batch size.
-        :param n_epochs: The number of epochs.
-        :param metric_function: The function that computes the tracked cost. Different from the
+        Parameters
+        ----------
+        parameter_group : ds.ParameterGroup
+            The ParameterGroup containing optimizable and non-optimizable parameters.
+        dataset : Dataset
+            The dataset containing diffraction patterns.
+        batch_size : int
+            The batch size.
+        n_epochs : int
+            The number of epochs.
+        metric_function : api.loss_functions.LossFunction
+            The function that computes the tracked cost. Different from the
             loss_function argument in some reconstructors, this function is only used for cost tracking
             and is not involved in the reconstruction math.
         """
@@ -200,8 +207,12 @@ class IterativeReconstructor(Reconstructor):
         """
         Process batch, update parameters, calculate loss, and update loss tracker.
 
-        :param input_data: a list of input data. In many cases it is [indices].
-        :param y_true: the measured data.
+        Parameters
+        ----------
+        input_data : list of Tensor
+            A list of input data. In many cases it is [indices].
+        y_true : Tensor
+            The measured data.
         """
         raise NotImplementedError
 
@@ -292,6 +303,10 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             # Apply total variation constraint.
             if object_.total_variation_enabled(self.current_epoch):
                 object_.constrain_total_variation()
+                
+            # Remove grid artifacts.
+            if object_.remove_grid_artifacts_enabled(self.current_epoch):
+                object_.remove_grid_artifacts()
 
 
 class AnalyticalIterativeReconstructor(IterativeReconstructor):
@@ -353,20 +368,25 @@ class AnalyticalIterativeReconstructor(IterativeReconstructor):
         Calculate the update vectors of optimizable parameters that should be
         applied later.
 
-        This function will be encapsulated in a torch.nn.Module so that it works with
-        DataParallel and DistributedDataParallel.
+        Parameters
+        ----------
+        update_step_module : torch.nn.Module
+            The module that contains the update step function.
+        *args
+            Passed to the update step function.
+        **kwargs
+            Passed to the update step function.
 
-        Do not apply the update vectors to the optimizable parameters in this function.
-        When called in a DataParallel or DistributedDataParallel context, the buffers
-        of optimizable parameters are copies so the updates will not persist. Instead,
-        collect the returned update vectors, reduce them, and apply the updates in
-        `apply_updates` which is called outside DataParallel.
-
-        :return: the update vectors and the batch loss. The shape of each update vector
-            is [n_replica, ..., (2 if complex else none)]. `n_replica` is 1 if only
-            CPU is used, otherwise it is the number of GPUs. If the update vector is
-            complex, it should be returned as real tensor with its real and imaginary
-            parts concatenated at the last dimension.
+        Returns
+        -------
+        updates : tuple of torch.Tensor
+            The update vectors of optimizable parameters. The shape of each update
+            vector is [n_replica, ..., (2 if complex else none)]. `n_replica` is 1 if
+            only CPU is used, otherwise it is the number of GPUs. If the update vector
+            is complex, it should be returned as real tensor with its real and
+            imaginary parts concatenated at the last dimension.
+        loss : float
+            The batch loss.
         """
         raise NotImplementedError
 
