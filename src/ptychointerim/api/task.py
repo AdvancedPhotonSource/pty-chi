@@ -136,7 +136,10 @@ class PtychographyTask(Task):
         data = torch.stack([pos_y, pos_x], dim=1)
         data = data / self.position_options.pixel_size_m
         self.probe_positions = ProbePositions(
-            data=data, options=self.position_options, probe=self.probe
+            data=data,
+            options=self.position_options,
+            probe=self.probe,
+            object_step_size=self.object.optimizer_params['lr'],
         )
 
     def build_opr_mode_weights(self):

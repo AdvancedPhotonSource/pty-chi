@@ -157,6 +157,6 @@ if __name__ == '__main__':
     parser.add_argument('--high-tol', action='store_true')
     args = parser.parse_args()
 
-    test_2d_ptycho_lsqml(None, generate_gold=args.generate_gold, debug=True, high_tol=args.high_tol)
+    # test_2d_ptycho_lsqml(None, generate_gold=args.generate_gold, debug=True, high_tol=args.high_tol)
     test_2d_ptycho_lsqml_poscorr(None, generate_gold=args.generate_gold, debug=True, high_tol=args.high_tol)
-    test_2d_ptycho_lsqml_opr(None, generate_gold=args.generate_gold, debug=True, high_tol=args.high_tol)
+    # test_2d_ptycho_lsqml_opr(None, generate_gold=args.generate_gold, debug=True, high_tol=args.high_tol)

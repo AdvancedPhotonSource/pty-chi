@@ -8,9 +8,11 @@ class PositionCorrection:
     def __init__(
         self,
         probe: Probe = None,
+        object_step_size: float = None,
         correction_options: api.options.base.ProbePositionOptions.CorrectionOptions = None,
     ):
         self.probe = probe
+        self.object_step_size = object_step_size
         self.correction_type = correction_options.correction_type
         self.scale = correction_options.cross_correlation_options.scale
         self.real_space_width = correction_options.cross_correlation_options.real_space_width
@@ -20,15 +22,15 @@ class PositionCorrection:
         self,
         chi: torch.Tensor,
         obj_patches: torch.Tensor,
-        updated_obj_patches: torch.Tensor,
+        delta_o_patches: torch.Tensor,
     ):
         if self.correction_type is api.PositionCorrectionTypes.GRADIENT:
             return self.get_gradient_update(chi, obj_patches)
         elif self.correction_type is api.PositionCorrectionTypes.CROSS_CORRELATION:
-            return self.get_cross_correlation_update(obj_patches, updated_obj_patches)
+            return self.get_cross_correlation_update(obj_patches, delta_o_patches)
 
     def get_cross_correlation_update(
-        self, obj_patches: torch.Tensor, updated_obj_patches: torch.Tensor
+        self, obj_patches: torch.Tensor, delta_o_patches: torch.Tensor
     ):
         """
         Use cross-correlation position correction to compute an update to the probe positions.
@@ -36,9 +38,11 @@ class PositionCorrection:
         Based on the paper:
         - Translation position determination in ptychographic coherent diffraction imaging (2013) - Fucai Zhang
 
-        :param obj_patches: A (batch_size, h, w) patches of the object.
-        :param updated_obj_patches: A (batch_size, h, w) patches of the object with the new updates applied.
+        :param obj_patches: A (batch_size, h, w) tensor of patches of the object.
+        :param delta_o_patches: A (batch_size, h, w) tensor of patches of the update to be applied to the object.
         """
+
+        updated_obj_patches = obj_patches + delta_o_patches * self.object_step_size
 
         probe_m0 = self.probe.get_mode_and_opr_mode(0, 0)
 
@@ -58,7 +62,7 @@ class PositionCorrection:
 
         return delta_pos
 
-    def get_gradient_update(self, chi, obj_patches, eps=1e-6):
+    def get_gradient_update(self, chi: torch.Tensor, obj_patches: torch.Tensor, eps=1e-6):
         """
         Calculate the update direction for probe positions. This routine calculates the gradient with regards
         to probe positions themselves, in contrast to the delta of probe caused by a 1-pixel shift as in
@@ -66,6 +70,9 @@ class PositionCorrection:
 
         Denote probe positions as s. Given dL/dP = -chi * O.conj() (Eq. 24a), dL/ds = dL/dO * dO/ds =
         real(-chi * P.conj() * grad_O.conj()), where grad_O is the spatial gradient of the probe in x or y.
+
+        :param chi: A (batch_size, h, w) tensor of the exit wave update.
+        :param obj_patches: A (batch_size, h, w) tensor of patches of the object.
         """
 
         probe_m0 = self.probe.get_mode_and_opr_mode(0, 0)

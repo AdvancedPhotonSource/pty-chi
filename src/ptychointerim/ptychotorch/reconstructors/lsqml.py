@@ -149,9 +149,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         chi = psi_opt - psi_0  # Eq, 19
         obj_patches = self.forward_model.intermediate_variables["obj_patches"]
 
-        self.update_object_and_probe(indices, chi, obj_patches, positions)
-        if self.parameter_group.probe_positions.optimization_enabled(self.current_epoch):
-            self.update_probe_positions(chi, indices, obj_patches)
+        self.update_parameter_group(indices, chi, obj_patches, positions)
 
     def update_preconditioners(self):
         # Update preconditioner of the object only if the probe has been updated in the previous
@@ -184,7 +182,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         )
         self.parameter_group.object.preconditioner = probe_sq_map
 
-    def update_object_and_probe(self, indices, chi, obj_patches, positions, gamma=1e-5):
+    def update_parameter_group(self, indices, chi, obj_patches, positions, gamma=1e-5):
         # TODO: avoid unnecessary computations when not both of object and probe are optimizable
         delta_p_i = self._calculate_probe_update_direction(chi, obj_patches)  # Eq. 24a
         delta_o_i = self._calculate_object_patch_update_direction(indices, chi)
@@ -198,7 +196,10 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             self._apply_probe_update(alpha_p_i, delta_p_hat)
 
         if self.parameter_group.object.optimization_enabled(self.current_epoch):
-            self._apply_object_update(alpha_o_i, delta_o_hat)
+            alpha_mean = self._apply_object_update(alpha_o_i, delta_o_hat)
+
+        if self.parameter_group.probe_positions.optimization_enabled(self.current_epoch):
+            self.update_probe_positions(chi, indices, obj_patches, alpha_mean * delta_o_i)
 
         if self.parameter_group.probe.has_multiple_opr_modes and (
             self.parameter_group.probe.optimization_enabled(self.current_epoch)
@@ -360,10 +361,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         alpha_mean = pmath.trim_mean(alpha_o_i, 0.1)
         self.parameter_group.object.set_grad(-alpha_mean * delta_o_hat)
         self.parameter_group.object.optimizer.step()
+        return alpha_mean
 
-    def update_probe_positions(self, chi, indices, obj_patches):
+    def update_probe_positions(self, chi, indices, obj_patches, delta_o_patches):
         delta_pos = self.parameter_group.probe_positions.position_correction.get_update(
-            chi, obj_patches, None
+            chi, obj_patches, delta_o_patches
         )
         self._apply_probe_position_update(delta_pos, indices)
 
