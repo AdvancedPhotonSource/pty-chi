@@ -46,6 +46,7 @@ def test_2d_ptycho_epie_mixed_states(pytestconfig, generate_gold=False, debug=Fa
     options.probe_position_options.optimizable = True
     options.probe_position_options.optimizer = api.Optimizers.SGD
     options.probe_position_options.step_size = 1000
+    options.probe_position_options.correction_options.correction_type = api.PositionCorrectionTypes.CROSS_CORRELATION
     
     options.reconstructor_options.batch_size = 96
     options.reconstructor_options.num_epochs = 32
