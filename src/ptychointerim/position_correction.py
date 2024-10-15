@@ -5,6 +5,10 @@ import ptychointerim.api as api
 
 
 class PositionCorrection:
+    """
+    Class containing the various position correction functions used to 
+    calculate updates to the probe positions.
+    """
     def __init__(
         self,
         probe: Probe = None,
