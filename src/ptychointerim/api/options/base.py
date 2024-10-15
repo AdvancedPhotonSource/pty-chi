@@ -202,10 +202,13 @@ class ProbePositionOptions(ParameterOptions):
         @dataclasses.dataclass
         class CrossCorrelationOptions:
             scale: int = 20000
+            """The upsampling factor of the cross-correlation in real space."""
 
             real_space_width: float = 0.01
+            """The width of the cross-correlation in real-space"""
 
             probe_threshold: float = 0.1
+            """The probe intensity threshold used to calculate the probe mask."""
 
         @dataclasses.dataclass
         class GradientOptions:
