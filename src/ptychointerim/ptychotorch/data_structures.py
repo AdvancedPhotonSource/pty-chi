@@ -16,6 +16,7 @@ import ptychointerim.maths as pmath
 import ptychointerim.api as api
 import ptychointerim.maps as maps
 from ptychointerim.propagate import WavefieldPropagator, FourierPropagator
+import ptychointerim.position_correction as position_correction
 
 
 class ComplexTensor(Module):
@@ -1005,7 +1006,6 @@ class ProbePositions(ReconstructParameter):
             Input positions should be in row-major order, i.e., y-positions come first.
         """
         super().__init__(*args, name=name, options=options, is_complex=False, **kwargs)
-        import ptychointerim.position_correction as position_correction
         self.pixel_size_m = options.pixel_size_m
         self.update_magnitude_limit = options.update_magnitude_limit
         self.position_correction = position_correction.PositionCorrection(

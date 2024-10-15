@@ -1,6 +1,7 @@
 import torch
 from ptychointerim.image_proc import find_cross_corr_peak, gaussian_gradient
-from ptychointerim.ptychotorch.data_structures import Probe, OPRModeWeights
+# from ptychointerim.ptychotorch.data_structures import Probe, OPRModeWeights
+import ptychointerim.ptychotorch.data_structures as data_structures
 import ptychointerim.api as api
 
 
@@ -12,7 +13,7 @@ class PositionCorrection:
 
     def __init__(
         self,
-        options: api.options.base.PositionCorrectionOptions = None,
+        options: "api.options.base.PositionCorrectionOptions" = None,
     ):
         self.correction_type = options.correction_type
         self.cross_correlation_scale = options.cross_correlation_scale
@@ -24,8 +25,8 @@ class PositionCorrection:
         chi: torch.Tensor,
         obj_patches: torch.Tensor,
         delta_o_patches: torch.Tensor,
-        probe: Probe,
-        opr_mode_weights: OPRModeWeights,
+        probe: "data_structures.Probe",
+        opr_mode_weights: "data_structures.OPRModeWeights",
         indices: torch.Tensor,
         object_step_size: float,
     ):
