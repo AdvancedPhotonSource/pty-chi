@@ -13,7 +13,6 @@ import ptychointerim.forward_models as fm
 from ptychointerim.image_proc import (
     place_patches_fourier_shift,
     extract_patches_fourier_shift,
-    gaussian_gradient,
 )
 from ptychointerim.ptychotorch.utils import chunked_processing
 import ptychointerim.maths as pmath
@@ -136,7 +135,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         psi_opt = self.forward_model.far_field_propagator.propagate_backward(psi_far)
         return psi_opt
 
-    def run_real_space_step(self, psi_opt, indices, gamma=1e-5):
+    def run_real_space_step(self, psi_opt, indices):
         """
         Run real space step of LSQ-ML, which updates the object, probe, and other variables
         using psi updated in the reciprocal space step.
@@ -153,6 +152,42 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         chi = psi_opt - psi_0  # Eq, 19
         obj_patches = self.forward_model.intermediate_variables["obj_patches"]
 
+        delta_o_patches = self.update_object_and_probe(chi, obj_patches, positions, indices)
+        if self.parameter_group.probe_positions.optimization_enabled(self.current_epoch):
+            self.update_probe_positions(chi, indices, obj_patches, delta_o_patches)
+
+    def update_preconditioners(self):
+        # Update preconditioner of the object only if the probe has been updated in the previous
+        # epoch, or when the preconditioner is None.
+        if (
+            self.parameter_group.probe.optimization_enabled(self.current_epoch - 1)
+            or self.parameter_group.object.preconditioner is None
+        ):
+            self._update_object_preconditioner()
+
+    def _update_object_preconditioner(self):
+        positions_all = self.parameter_group.probe_positions.tensor
+        # Shape of probe:        (n_probe_modes, h, w)
+        object = self.parameter_group.object.tensor.complex()
+
+        probe_int = self.parameter_group.probe.get_all_mode_intensity(opr_mode=0)[None, :, :]
+        # Shape of probe_int:    (n_scan_points, h, w)
+        probe_int = probe_int.repeat(len(positions_all), 1, 1)
+        # Stitch probes of all positions on the object buffer
+        # TODO: allow setting chunk size externally
+        probe_sq_map = chunked_processing(
+            func=place_patches_fourier_shift,
+            common_kwargs={"op": "add"},
+            chunkable_kwargs={
+                "positions": positions_all + self.parameter_group.object.center_pixel,
+                "patches": probe_int,
+            },
+            iterated_kwargs={"image": torch.zeros_like(object).type(torch.get_default_dtype())},
+            chunk_size=64,
+        )
+        self.parameter_group.object.preconditioner = probe_sq_map
+
+    def update_object_and_probe(self, chi, obj_patches, positions, indices, gamma=1e-5):
         # TODO: avoid unnecessary computations when not both of object and probe are optimizable
         delta_p_i = self._calculate_probe_update_direction(chi, obj_patches)  # Eq. 24a
         delta_o_i = self._calculate_object_patch_update_direction(indices, chi)
@@ -192,39 +227,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             )
             self._apply_variable_intensity_updates(delta_weights_int)
 
-        if self.parameter_group.probe_positions.optimization_enabled(self.current_epoch):
-            self.update_probe_positions(chi, indices, obj_patches, alpha_mean * delta_o_i)
-
-    def update_preconditioners(self):
-        # Update preconditioner of the object only if the probe has been updated in the previous
-        # epoch, or when the preconditioner is None.
-        if (
-            self.parameter_group.probe.optimization_enabled(self.current_epoch - 1)
-            or self.parameter_group.object.preconditioner is None
-        ):
-            self._update_object_preconditioner()
-
-    def _update_object_preconditioner(self):
-        positions_all = self.parameter_group.probe_positions.tensor
-        # Shape of probe:        (n_probe_modes, h, w)
-        object = self.parameter_group.object.tensor.complex()
-
-        probe_int = self.parameter_group.probe.get_all_mode_intensity(opr_mode=0)[None, :, :]
-        # Shape of probe_int:    (n_scan_points, h, w)
-        probe_int = probe_int.repeat(len(positions_all), 1, 1)
-        # Stitch probes of all positions on the object buffer
-        # TODO: allow setting chunk size externally
-        probe_sq_map = chunked_processing(
-            func=place_patches_fourier_shift,
-            common_kwargs={"op": "add"},
-            chunkable_kwargs={
-                "positions": positions_all + self.parameter_group.object.center_pixel,
-                "patches": probe_int,
-            },
-            iterated_kwargs={"image": torch.zeros_like(object).type(torch.get_default_dtype())},
-            chunk_size=64,
-        )
-        self.parameter_group.object.preconditioner = probe_sq_map
+        delta_o_patches = alpha_mean * delta_o_i
+        return delta_o_patches
 
     def calculate_object_and_probe_update_step_sizes(
         self, indices, chi, obj_patches, delta_o_i, delta_p_i, gamma=1e-5
