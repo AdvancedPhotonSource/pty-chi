@@ -152,7 +152,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         chi = psi_opt - psi_0  # Eq, 19
         obj_patches = self.forward_model.intermediate_variables["obj_patches"]
 
-        delta_o_patches = self.update_object_and_probe(chi, obj_patches, positions, indices)
+        delta_o_patches = self.update_object_and_probe(indices, chi, obj_patches, positions)
         if self.parameter_group.probe_positions.optimization_enabled(self.current_epoch):
             self.update_probe_positions(chi, indices, obj_patches, delta_o_patches)
 
@@ -187,7 +187,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         )
         self.parameter_group.object.preconditioner = probe_sq_map
 
-    def update_object_and_probe(self, chi, obj_patches, positions, indices, gamma=1e-5):
+    def update_object_and_probe(self, indices, chi, obj_patches, positions, gamma=1e-5):
         # TODO: avoid unnecessary computations when not both of object and probe are optimizable
         delta_p_i = self._calculate_probe_update_direction(chi, obj_patches)  # Eq. 24a
         delta_o_i = self._calculate_object_patch_update_direction(indices, chi)
