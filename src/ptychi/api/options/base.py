@@ -133,6 +133,12 @@ class ObjectOptions(ParameterOptions):
     When enabled, multislice objects are regularized using cross-slice smoothing.
     """
     
+    multislice_regularization_unwrap_phase: bool = True
+    """Whether to unwrap the phase of the object during multislice regularization."""
+    
+    multislice_regularization_finite_diff_method: str = "nearest"
+    """The method for finite difference during multislice regularization."""
+    
     multislice_regularization_stride: int = 1
     """The number of epochs between multislice regularization updates."""
     

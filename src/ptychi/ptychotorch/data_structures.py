@@ -197,8 +197,9 @@ class ReconstructParameter(Module):
             return self.tensor.grad
 
     def set_grad(
-        self, grad: Tensor, 
-        slicer: Optional[Union[slice, int] | tuple[Union[slice, int], ...]] = None
+        self,
+        grad: Tensor,
+        slicer: Optional[Union[slice, int] | tuple[Union[slice, int], ...]] = None,
     ):
         """
         Populate the `grad` field of the contained tensor, so that it can optimized
@@ -209,12 +210,12 @@ class ReconstructParameter(Module):
         Parameters
         ----------
         grad : Tensor
-            A tensor giving the gradient. If the gradient is complex, give it as it is. 
+            A tensor giving the gradient. If the gradient is complex, give it as it is.
             This routine will separate the real and imaginary parts and write them into
             the tensor.grad inside the ComplexTensor object.
         slicer : Optional[Union[slice, int] | tuple[Union[slice, int], ...]]
             A tuple of, or a single slice object or integer, that defines the region of
-            the region of the gradient to update. The shape of `grad` should match 
+            the region of the gradient to update. The shape of `grad` should match
             the region given by `slicer`, if given. If None, the whole gradient is updated.
         """
         if self.tensor.data.grad is None and slicer is not None:
@@ -236,7 +237,7 @@ class ReconstructParameter(Module):
                 self.tensor.grad = grad
             else:
                 self.tensor.grad[*slicer] = grad
-            
+
     def initialize_grad(self):
         """
         Initialize the gradient with zeros.
@@ -421,7 +422,7 @@ class Object2D(Object):
     def place_patches_on_empty_buffer(self, positions: Tensor, patches: Tensor, *args, **kwargs):
         """
         Place patches into a empty buffer.
-        
+
         Parameters
         ----------
         positions : Tensor
@@ -508,7 +509,7 @@ class MultisliceObject(Object2D):
             The origin of the given positions are assumed to be `self.center_pixel`.
         patch_shape : tuple
             Tuple giving the lateral patch shape in pixels.
-            
+
         Returns
         -------
         Tensor
@@ -579,7 +580,7 @@ class MultisliceObject(Object2D):
                 data[i_slice], lmbda=self.total_variation_weight, niter=2
             )
         self.set_data(data)
-        
+
     def remove_grid_artifacts(self):
         data = self.data
         phase = torch.angle(data)
@@ -594,7 +595,7 @@ class MultisliceObject(Object2D):
             )
             data[i_slice] = data[i_slice].abs() * torch.exp(1j * slice_phase)
         self.set_data(data)
-        
+
     def multislice_regularization_enabled(self, current_epoch: int):
         if (
             self.options.multislice_regularization_weight > 0
@@ -606,17 +607,17 @@ class MultisliceObject(Object2D):
             return True
         else:
             return False
-        
+
     def regularize_multislice(self):
         """
         Regularize multislice by applying a low-pass transfer function to the
         3D Fourier space of the magnitude and phase (unwrapped) of all slices.
-        
+
         Adapted from fold_slice (regulation_multilayers.m).
         """
         if self.preconditioner is None:
             raise ValueError("Regularization requires a preconditioner.")
-        
+
         # TODO: use CPU if GPU memory usage is too large.
         fourier_coords = []
         for s in (self.n_slices, self.lateral_shape[0], self.lateral_shape[1]):
@@ -624,16 +625,20 @@ class MultisliceObject(Object2D):
             fourier_coords.append(u)
         fourier_coords = torch.meshgrid(*fourier_coords, indexing="ij")
         # Calculate force of regularization based on the idea that DoF = resolution^2/lambda
-        w = 1 - \
-            torch.atan((self.options.multislice_regularization_weight * \
-                torch.abs(fourier_coords[0]) / torch.sqrt(fourier_coords[1] ** 2 + fourier_coords[2] ** 2 + 1e-3)) ** 2
-                ) / (torch.pi / 2)
+        w = 1 - torch.atan(
+            (
+                self.options.multislice_regularization_weight
+                * torch.abs(fourier_coords[0])
+                / torch.sqrt(fourier_coords[1] ** 2 + fourier_coords[2] ** 2 + 1e-3)
+            )
+            ** 2
+        ) / (torch.pi / 2)
         relax = 1
         alpha = 1
         # Low-pass transfer function.
         w_a = w * torch.exp(-alpha * (fourier_coords[1] ** 2 + fourier_coords[2] ** 2))
         obj = self.data
-        
+
         # Find correction for amplitude.
         aobj = torch.abs(obj)
         fobj = torch.fft.fftn(aobj)
@@ -641,25 +646,36 @@ class MultisliceObject(Object2D):
         aobj_upd = torch.fft.ifftn(fobj)
         # Push towards zero.
         aobj_upd = 1 + 0.9 * (aobj_upd - 1)
-        
+
         # Find correction for phase.
-        w_phase = torch.clip(10 * (self.preconditioner / self.preconditioner.max()), max=1)
+        w_phase = torch.clip(10 * (self.preconditioner / self.preconditioner.max()), max=1, min=0.1)
         w_phase = torch.where(w_phase < 1e-3, 0, w_phase)
-        
-        # Pass 1 instead of w_phase to `weight_map` for now to avoid unstability in 
+
+        # Pass 1 instead of w_phase to `weight_map` for now to avoid unstability in
         # computing phase gradient.
-        pobj = [ip.unwrap_phase_2d(obj[i_slice], weight_map=1, step=0.5) for i_slice in range(self.n_slices)]
-        pobj = torch.stack(pobj, dim=0)
+        if self.options.multislice_regularization_unwrap_phase:
+            pobj = [
+                ip.unwrap_phase_2d(
+                    obj[i_slice],
+                    weight_map=w_phase,
+                    step=0.5,
+                    finite_diff_method=self.options.multislice_regularization_finite_diff_method,
+                )
+                for i_slice in range(self.n_slices)
+            ]
+            pobj = torch.stack(pobj, dim=0)
+        else:
+            pobj = torch.angle(obj)
         fobj = torch.fft.fftn(pobj)
         fobj = fobj * w_a
         pobj_upd = torch.fft.ifftn(fobj)
-        
+
         aobj_upd = torch.real(aobj_upd) - aobj
         pobj_upd = w_phase * (torch.real(pobj_upd) - pobj)
         corr = (1 + relax * aobj_upd) * torch.exp(1j * relax * pobj_upd)
         obj = obj * corr
         self.set_data(obj)
-        
+
 
 class Probe(ReconstructParameter):
     # TODO: eigenmode_update_relaxation is only used for LSQML. We should create dataclasses
@@ -880,7 +896,7 @@ class Probe(ReconstructParameter):
         weights : Tensor
             A (n_points, n_opr_modes) tensor of weights.
         :param weights: a (n_points, n_opr_modes) tensor of weights.
-        
+
         Returns
         -------
         Tensor
