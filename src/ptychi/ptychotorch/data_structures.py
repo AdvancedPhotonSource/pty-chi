@@ -644,10 +644,11 @@ class MultisliceObject(Object2D):
         
         # Find correction for phase.
         w_phase = torch.clip(10 * (self.preconditioner / self.preconditioner.max()), max=1)
+        w_phase = torch.where(w_phase < 1e-3, 0, w_phase)
         
         # Pass 1 instead of w_phase to `weight_map` for now to avoid unstability in 
         # computing phase gradient.
-        pobj = [ip.unwrap_phase_2d(obj[i_slice], weight_map=1) for i_slice in range(self.n_slices)]
+        pobj = [ip.unwrap_phase_2d(obj[i_slice], weight_map=1, step=0.5) for i_slice in range(self.n_slices)]
         pobj = torch.stack(pobj, dim=0)
         fobj = torch.fft.fftn(pobj)
         fobj = fobj * w_a

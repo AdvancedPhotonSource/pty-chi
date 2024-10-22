@@ -131,7 +131,7 @@ def place_patches_fourier_shift(
     return image
 
 
-def fourier_shift(images: Tensor, shifts: Tensor) -> Tensor:
+def fourier_shift(images: Tensor, shifts: Tensor, strictly_preserve_zeros: bool = False) -> Tensor:
     """
     Apply Fourier shift to a batch of images.
 
@@ -141,12 +141,22 @@ def fourier_shift(images: Tensor, shifts: Tensor) -> Tensor:
         A [N, H, W] tensor of images.
     shifts : Tensor
         A [N, 2] tensor of shifts in pixels.
+    strictly_preserve_zeros : bool
+        If True, mask of strictly zero pixels will be generated and shifted
+        by the same amount. Pixels that have a non-zero value in the shifted
+        mask will be set to zero in the shifted image. This preserves the zero
+        pixels in the original image, preventing FFT from introducing small
+        non-zero values due to machine precision.
 
     Returns
     -------
     Tensor
         Shifted images.
     """
+    if strictly_preserve_zeros:
+        zero_mask = images == 0
+        zero_mask = zero_mask.float()
+        zero_mask_shifted = fourier_shift(zero_mask, shifts, strictly_preserve_zeros=False)
     ft_images = torch.fft.fft2(images)
     freq_y, freq_x = torch.meshgrid(
         torch.fft.fftfreq(images.shape[-2]), torch.fft.fftfreq(images.shape[-1]), indexing="ij"
@@ -156,15 +166,15 @@ def fourier_shift(images: Tensor, shifts: Tensor) -> Tensor:
     freq_x = freq_x.repeat(images.shape[0], 1, 1)
     freq_y = freq_y.repeat(images.shape[0], 1, 1)
     mult = torch.exp(
-        1j
-        * -2
-        * torch.pi
+        1j * -2 * torch.pi
         * (freq_x * shifts[:, 1].view(-1, 1, 1) + freq_y * shifts[:, 0].view(-1, 1, 1))
     )
     ft_images = ft_images * mult
     shifted_images = torch.fft.ifft2(ft_images)
     if not images.dtype.is_complex:
         shifted_images = shifted_images.real
+    if strictly_preserve_zeros:
+        shifted_images[zero_mask_shifted > 0] = 0
     return shifted_images
 
 
@@ -240,7 +250,29 @@ def gaussian_gradient(image: Tensor, sigma: float = 1.0, kernel_size=5) -> Tenso
     return grad_y, grad_x
 
 
-def get_phase_gradient(img: Tensor, step: float = 0.5, eps: float = 1e-6) -> Tensor:
+def fourier_gradient(image: Tensor) -> Tensor:
+    """
+    Calculate the gradient of an image using Fourier differentiation
+    theorem: `fft(df/dx) = 2 * pi * i * u * fft(f)`.
+
+    Parameters
+    ----------
+    image : Tensor
+        A (... H, W) tensor of images.
+
+    Returns
+    -------
+    Tuple[Tensor, Tensor]
+        The y and x gradients.
+    """
+    u, v = torch.fft.fftfreq(image.shape[-2]), torch.fft.fftfreq(image.shape[-1])
+    f_image = torch.fft.fft2(image)
+    grad_y = torch.fft.ifft2(f_image * (2j * torch.pi) * u)
+    grad_x = torch.fft.ifft2(f_image * (2j * torch.pi) * v)
+    return grad_y, grad_x
+
+
+def get_phase_gradient(img: Tensor, step: float = 0, eps: float = 1e-6) -> Tensor:
     """
     Get the gradient of the phase of a complex 2D image by first calculating
     the spatial gradient of the complex image, then taking the phase of the
@@ -253,7 +285,9 @@ def get_phase_gradient(img: Tensor, step: float = 0.5, eps: float = 1e-6) -> Ten
     img : Tensor
         A [N, H, W] or [H, W] tensor giving a batch of images or a single image.
     step : float
-        The step size of finite-difference.
+        The step size of finite-difference. If 0, the gradient is calculated
+        using Fourier differentiation, which is sensitive to noise, but more
+        stable if the image has large areas of zeros. 
     eps : float
         A stablizing constant.
 
@@ -262,31 +296,36 @@ def get_phase_gradient(img: Tensor, step: float = 0.5, eps: float = 1e-6) -> Ten
     Tuple[Tensor, Tensor]
         A tuple of 2 tensors with the gradient in y and x directions.
     """
-    if step <= 0:
-        raise ValueError("Step must be positive.")
-
-    if img.ndim == 2:
-        img = img.unsqueeze(0)
-    pad = int(math.ceil(step)) + 1
-    img = torch.nn.functional.pad(img, (pad, pad, pad, pad))
-
-    sy1 = torch.tensor([[-step, 0]], device=img.device).repeat(img.shape[0], 1)
-    sy2 = torch.tensor([[step, 0]], device=img.device).repeat(img.shape[0], 1)
-    complex_prod = fourier_shift(img, sy1) * fourier_shift(img, sy2).conj()
-    complex_prod = torch.where(
-        complex_prod.abs() < complex_prod.abs().max() * 1e-6, 0, complex_prod
-    )
-    gy = pmath.angle(complex_prod, eps=eps) / (2 * step)
-    gy = gy[0, pad:-pad, pad:-pad]
-
-    sx1 = torch.tensor([[0, -step]], device=img.device).repeat(img.shape[0], 1)
-    sx2 = torch.tensor([[0, step]], device=img.device).repeat(img.shape[0], 1)
-    complex_prod = fourier_shift(img, sx1) * fourier_shift(img, sx2).conj()
-    complex_prod = torch.where(
-        complex_prod.abs() < complex_prod.abs().max() * 1e-6, 0, complex_prod
-    )
-    gx = pmath.angle(complex_prod, eps=eps) / (2 * step)
-    gx = gx[0, pad:-pad, pad:-pad]
+    if step < 0:
+        raise ValueError("Step must be 0 or positive.")
+    
+    if step == 0:
+        gy, gx = fourier_gradient(img)
+        gy = torch.imag(img.conj() * gy)
+        gx = torch.imag(img.conj() * gx)
+    else:
+        if img.ndim == 2:
+            img = img.unsqueeze(0)
+        pad = int(math.ceil(step)) + 1
+        img = torch.nn.functional.pad(img, (pad, pad, pad, pad))
+        
+        sy1 = torch.tensor([[-step, 0]], device=img.device).repeat(img.shape[0], 1)
+        sy2 = torch.tensor([[step, 0]], device=img.device).repeat(img.shape[0], 1)
+        complex_prod = fourier_shift(img, sy1) * fourier_shift(img, sy2).conj()
+        complex_prod = torch.where(
+            complex_prod.abs() < complex_prod.abs().max() * 1e-6, 0, complex_prod
+        )
+        gy = pmath.angle(complex_prod, eps=eps) / (2 * step)
+        gy = gy[0, pad:-pad, pad:-pad]
+        
+        sx1 = torch.tensor([[0, -step]], device=img.device).repeat(img.shape[0], 1)
+        sx2 = torch.tensor([[0, step]], device=img.device).repeat(img.shape[0], 1)
+        complex_prod = fourier_shift(img, sx1) * fourier_shift(img, sx2).conj()
+        complex_prod = torch.where(
+            complex_prod.abs() < complex_prod.abs().max() * 1e-6, 0, complex_prod
+        )
+        gx = pmath.angle(complex_prod, eps=eps) / (2 * step)
+        gx = gx[0, pad:-pad, pad:-pad]
     return gy, gx
 
 
@@ -793,7 +832,9 @@ def unwrap_phase_2d(
     img : Tensor
         A complex 2D tensor giving the image.
     step : float
-        The step size used to calculate the gradient.
+        The finite-difference step size used to calculate the gradient. If 0, the gradient is
+        calculated using Fourier differentiation, which is sensitive to noise,
+        but more stable if the image has large areas of zeros.
     weight_map : Optional[Tensor]
         A weight map multiplied to the input image.
     flat_region_mask : Optional[Tensor]
@@ -817,7 +858,7 @@ def unwrap_phase_2d(
         weight_map = torch.clip(weight_map, 0.0, 1.0)
     else:
         weight_map = 1
-                
+
     img = weight_map * img / (img.abs() + eps)
     top_left_phase_bc = torch.angle(img[0, 0])
 
