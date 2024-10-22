@@ -127,6 +127,15 @@ class ObjectOptions(ParameterOptions):
     remove_grid_artifacts_stride: int = 1
     """The number of epochs between grid artifact removal updates."""
     
+    multislice_regularization_weight: float = 0
+    """
+    The weight for multislice regularization. Disabled if 0, or if `type != ObjectTypes.MULTISLICE`. 
+    When enabled, multislice objects are regularized using cross-slice smoothing.
+    """
+    
+    multislice_regularization_stride: int = 1
+    """The number of epochs between multislice regularization updates."""
+    
     def get_non_data_fields(self) -> dict:
         d = super().get_non_data_fields()
         del d["initial_guess"]

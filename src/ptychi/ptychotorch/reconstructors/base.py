@@ -324,6 +324,11 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
                 weights = self.parameter_group.opr_mode_weights
                 weights_data = probe.constrain_opr_mode_orthogonality(weights)
                 weights.set_data(weights_data)
+                
+            # Regularize multislice reconstruction.
+            if (isinstance(object_, ds.MultisliceObject) 
+                and object_.multislice_regularization_enabled(self.current_epoch)):
+                object_.regularize_multislice()
 
             # Apply smoothness constraint.
             if object_.smoothness_constraint_enabled(self.current_epoch):

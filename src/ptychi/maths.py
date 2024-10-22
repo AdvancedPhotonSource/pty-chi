@@ -28,6 +28,28 @@ def trim_mean(x: torch.Tensor, fraction: float = 0.1) -> torch.Tensor:
         return torch.mean(x[mask])
     else:
         return torch.mean(x)
+    
+    
+def angle(x: torch.Tensor, eps=1e-5) -> torch.Tensor:
+    """
+    A stable version of `torch.angle()`, which calculates
+    arctan(imag / (real + eps)) to prevent unstable results when
+    the real part is small (so that the ratio dangles between -inf
+    and inf).
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        The complex tensor as input.
+    eps : float
+        The stablization constant.
+
+    Returns
+    -------
+    torch.Tensor
+        The phase of the complex tensor.
+    """
+    return torch.atan2(x.imag, x.real + eps)
 
 
 def orthogonalize_gs(

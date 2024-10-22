@@ -463,6 +463,14 @@ class Object2D(Object):
 
 class MultisliceObject(Object2D):
     def __init__(self, *args, **kwargs):
+        """
+        Multislice object that stores the object in a (n_slices, h, w) tensor.
+
+        Parameters
+        ----------
+        data : Tensor
+            Tensor of shape (n_slices, h, w) containing the multislice object data.
+        """
         super().__init__(*args, **kwargs)
 
         if len(self.shape) != 3:
@@ -586,7 +594,71 @@ class MultisliceObject(Object2D):
             )
             data[i_slice] = data[i_slice].abs() * torch.exp(1j * slice_phase)
         self.set_data(data)
-
+        
+    def multislice_regularization_enabled(self, current_epoch: int):
+        if (
+            self.options.multislice_regularization_weight > 0
+            and self.optimization_enabled(current_epoch)
+            and (current_epoch - self.optimization_plan.start)
+            % self.options.multislice_regularization_stride
+            == 0
+        ):
+            return True
+        else:
+            return False
+        
+    def regularize_multislice(self):
+        """
+        Regularize multislice by applying a low-pass transfer function to the
+        3D Fourier space of the magnitude and phase (unwrapped) of all slices.
+        
+        Adapted from fold_slice (regulation_multilayers.m).
+        """
+        if self.preconditioner is None:
+            raise ValueError("Regularization requires a preconditioner.")
+        
+        # TODO: use CPU if GPU memory usage is too large.
+        fourier_coords = []
+        for s in (self.n_slices, self.lateral_shape[0], self.lateral_shape[1]):
+            u = torch.fft.fftfreq(s)
+            fourier_coords.append(u)
+        fourier_coords = torch.meshgrid(*fourier_coords, indexing="ij")
+        # Calculate force of regularization based on the idea that DoF = resolution^2/lambda
+        w = 1 - \
+            torch.atan((self.options.multislice_regularization_weight * \
+                torch.abs(fourier_coords[0]) / torch.sqrt(fourier_coords[1] ** 2 + fourier_coords[2] ** 2 + 1e-3)) ** 2
+                ) / (torch.pi / 2)
+        relax = 1
+        alpha = 1
+        # Low-pass transfer function.
+        w_a = w * torch.exp(-alpha * (fourier_coords[1] ** 2 + fourier_coords[2] ** 2))
+        obj = self.data
+        
+        # Find correction for amplitude.
+        aobj = torch.abs(obj)
+        fobj = torch.fft.fftn(aobj)
+        fobj = fobj * w_a
+        aobj_upd = torch.fft.ifftn(fobj)
+        # Push towards zero.
+        aobj_upd = 1 + 0.9 * (aobj_upd - 1)
+        
+        # Find correction for phase.
+        w_phase = torch.clip(10 * (self.preconditioner / self.preconditioner.max()), max=1)
+        
+        # Pass 1 instead of w_phase to `weight_map` for now to avoid unstability in 
+        # computing phase gradient.
+        pobj = [ip.unwrap_phase_2d(obj[i_slice], weight_map=1) for i_slice in range(self.n_slices)]
+        pobj = torch.stack(pobj, dim=0)
+        fobj = torch.fft.fftn(pobj)
+        fobj = fobj * w_a
+        pobj_upd = torch.fft.ifftn(fobj)
+        
+        aobj_upd = torch.real(aobj_upd) - aobj
+        pobj_upd = w_phase * (torch.real(pobj_upd) - pobj)
+        corr = (1 + relax * aobj_upd) * torch.exp(1j * relax * pobj_upd)
+        obj = obj * corr
+        self.set_data(obj)
+        
 
 class Probe(ReconstructParameter):
     # TODO: eigenmode_update_relaxation is only used for LSQML. We should create dataclasses
