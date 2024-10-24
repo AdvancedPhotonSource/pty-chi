@@ -7,6 +7,7 @@ from torch import Tensor
 import torch.signal
 
 import ptychi.maths as pmath
+import ptychi.api.enums as enums
 
 
 def extract_patches_fourier_shift(
@@ -268,6 +269,7 @@ def fourier_gradient(image: Tensor) -> Tensor:
         The y and x gradients.
     """
     u, v = torch.fft.fftfreq(image.shape[-2]), torch.fft.fftfreq(image.shape[-1])
+    u, v = torch.meshgrid(u, v, indexing="ij")
     f_image = torch.fft.fft2(image)
     grad_y = torch.fft.ifft2(f_image * (2j * torch.pi) * u)
     grad_x = torch.fft.ifft2(f_image * (2j * torch.pi) * v)
@@ -276,8 +278,8 @@ def fourier_gradient(image: Tensor) -> Tensor:
 
 def get_phase_gradient(
     img: Tensor,
-    step: float = 0,
-    finite_diff_method: Literal["fourier", "nearest"] = "fourier",
+    fourier_shift_step: float = 0,
+    image_grad_method: enums.ImageGradientMethods = enums.ImageGradientMethods.FOURIER_SHIFT,
     eps: float = 1e-6,
 ) -> Tensor:
     """
@@ -292,14 +294,13 @@ def get_phase_gradient(
     img : Tensor
         A [N, H, W] or [H, W] tensor giving a batch of images or a single image.
     step : float
-        The step size of finite-difference. If 0, the gradient is calculated
-        using Fourier differentiation, which is sensitive to noise, but more
-        stable if the image has large areas of zeros.
-    finite_diff_method : Literal["fourier", "nearest"]
-        The method used to calculate the gradient if finite-difference is
-        used (i.e., when `step > 0`). Can be either 'fourier' or 'nearest':
-        - 'fourier': Use Fourier shift to perform shift.
-        - 'nearest': Use nearest neighbor to perform shift.
+        The finite-difference step size used to calculate the gradient, if
+        the Fourier shift method is used.
+    finite_diff_method : enums.ImageGradientMethods
+        The method used to calculate the phase gradient. 
+            - FOURIER_SHIFT: Use Fourier shift to perform shift.
+            - NEAREST: Use nearest neighbor to perform shift.
+            - FOURIER_DIFFERENTIATION: Use Fourier differentiation.
     eps : float
         A stablizing constant.
 
@@ -308,10 +309,10 @@ def get_phase_gradient(
     Tuple[Tensor, Tensor]
         A tuple of 2 tensors with the gradient in y and x directions.
     """
-    if step < 0:
-        raise ValueError("Step must be 0 or positive.")
+    if fourier_shift_step <= 0 and image_grad_method == enums.ImageGradientMethods.FOURIER_SHIFT:
+        raise ValueError("Step must be positive.")
 
-    if step == 0:
+    if image_grad_method == enums.ImageGradientMethods.FOURIER_DIFFERENTIATION:
         gy, gx = fourier_gradient(img)
         gy = torch.imag(img.conj() * gy)
         gx = torch.imag(img.conj() * gx)
@@ -319,31 +320,37 @@ def get_phase_gradient(
         # Use finite difference.
         if img.ndim == 2:
             img = img.unsqueeze(0)
-        pad = int(math.ceil(step)) + 1
+        pad = int(math.ceil(fourier_shift_step)) + 1
         img = torch.nn.functional.pad(img, (pad, pad, pad, pad))
 
-        sy1 = torch.tensor([[-step, 0]], device=img.device).repeat(img.shape[0], 1)
-        sy2 = torch.tensor([[step, 0]], device=img.device).repeat(img.shape[0], 1)
-        if finite_diff_method == "fourier":
+        sy1 = torch.tensor([[-fourier_shift_step, 0]], device=img.device).repeat(img.shape[0], 1)
+        sy2 = torch.tensor([[fourier_shift_step, 0]], device=img.device).repeat(img.shape[0], 1)
+        if image_grad_method == enums.ImageGradientMethods.FOURIER_SHIFT:
+            # If the image contains zero-valued pixels, Fourier shift can result in small
+            # non-zero values that dangles around 0. This can cause the phase
+            # of the shifted image to dangle between pi and -pi. In that case, use
+            # `finite_diff_method="nearest" instead`, or use `step=1`.
             complex_prod = fourier_shift(img, sy1) * fourier_shift(img, sy2).conj()
-        else:
+        elif image_grad_method == enums.ImageGradientMethods.NEAREST:
             complex_prod = img * torch.concat([img[:, :1, :], img[:, :-1, :]], dim=1).conj()
+        else:
+            raise ValueError(f"Unknown finite-difference method: {image_grad_method}")
         complex_prod = torch.where(
             complex_prod.abs() < complex_prod.abs().max() * 1e-6, 0, complex_prod
         )
-        gy = pmath.angle(complex_prod, eps=eps) / (2 * step)
+        gy = pmath.angle(complex_prod, eps=eps) / (2 * fourier_shift_step)
         gy = gy[0, pad:-pad, pad:-pad]
 
-        sx1 = torch.tensor([[0, -step]], device=img.device).repeat(img.shape[0], 1)
-        sx2 = torch.tensor([[0, step]], device=img.device).repeat(img.shape[0], 1)
-        if finite_diff_method == "fourier":
+        sx1 = torch.tensor([[0, -fourier_shift_step]], device=img.device).repeat(img.shape[0], 1)
+        sx2 = torch.tensor([[0, fourier_shift_step]], device=img.device).repeat(img.shape[0], 1)
+        if image_grad_method == enums.ImageGradientMethods.FOURIER_SHIFT:
             complex_prod = fourier_shift(img, sx1) * fourier_shift(img, sx2).conj()
-        else:
+        elif image_grad_method == enums.ImageGradientMethods.NEAREST:
             complex_prod = img * torch.concat([img[:, :, :1], img[:, :, :-1]], dim=2).conj()
         complex_prod = torch.where(
             complex_prod.abs() < complex_prod.abs().max() * 1e-6, 0, complex_prod
         )
-        gx = pmath.angle(complex_prod, eps=eps) / (2 * step)
+        gx = pmath.angle(complex_prod, eps=eps) / (2 * fourier_shift_step)
         gx = gx[0, pad:-pad, pad:-pad]
     return gy, gx
 
@@ -771,6 +778,7 @@ def vignett(img: Tensor, margin: int = 20, sigma: float = 1.0):
         mask = convolve1d(mask, gauss_win, dim=i_dim, padding="same")
         mask_final_slicer = [slice(None)] * i_dim + [slice(len(gauss_win), len(gauss_win) + margin)]
         mask = mask[*mask_final_slicer]
+        mask = torch.where(mask < 1e-3, 0, mask)
 
         slicer = [slice(None)] * i_dim + [slice(0, margin)]
         img[slicer] = img[slicer] * mask
@@ -837,8 +845,8 @@ def remove_polynomial_background(
 
 def unwrap_phase_2d(
     img: Tensor,
-    step: float = 0.5,
-    finite_diff_method: Literal["fourier", "nearest"] = "fourier",
+    fourier_shift_step: float = 0.5,
+    image_grad_method: enums.ImageGradientMethods = enums.ImageGradientMethods.FOURIER_SHIFT,
     weight_map: Optional[Tensor] = None,
     flat_region_mask: Optional[Tensor] = None,
     deramp_polyfit_order: int = 1,
@@ -851,15 +859,14 @@ def unwrap_phase_2d(
     ----------
     img : Tensor
         A complex 2D tensor giving the image.
-    step : float
-        The finite-difference step size used to calculate the gradient. If 0, the gradient is
-        calculated using Fourier differentiation, which is sensitive to noise,
-        but more stable if the image has large areas of zeros.
-    finite_diff_method : str
-        The method used to calculate the gradient if finite-difference is used
-        (i.e., when `step > 0`). Can be either 'fourier' or 'nearest':
-        - 'fourier': Use Fourier shift to perform shift.
-        - 'nearest': Use nearest neighbor to perform shift.
+    fourier_shift_step : float
+        The finite-difference step size used to calculate the gradient, 
+        if the Fourier shift method is used. 
+    finite_diff_method : enums.ImageGradientMethods
+        The method used to calculate the phase gradient. 
+            - FOURIER_SHIFT: Use Fourier shift to perform shift.
+            - NEAREST: Use nearest neighbor to perform shift.
+            - FOURIER_DIFFERENTIATION: Use Fourier differentiation.
     weight_map : Optional[Tensor]
         A weight map multiplied to the input image.
     flat_region_mask : Optional[Tensor]
@@ -895,7 +902,7 @@ def unwrap_phase_2d(
         )[0, 0]
         img = vignett(img, margin=10, sigma=2.5)
 
-    gy, gx = get_phase_gradient(img, step=step, finite_diff_method=finite_diff_method)
+    gy, gx = get_phase_gradient(img, fourier_shift_step=fourier_shift_step, image_grad_method=image_grad_method)
 
     # The result of `integrate_image_2d_fourier`, which integrates the image using
     # Fourier differentiation and is what's used in fold_slice `get_img_int_2D.m`,

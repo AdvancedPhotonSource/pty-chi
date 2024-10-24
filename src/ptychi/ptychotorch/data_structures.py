@@ -648,18 +648,21 @@ class MultisliceObject(Object2D):
         aobj_upd = 1 + 0.9 * (aobj_upd - 1)
 
         # Find correction for phase.
+        # The weight map is clipped at 0.1. Values that are too close to 0 would result in
+        # small but non-zero pixels in the image after it is multiplied with the weight map.
+        # During phase unwrapping, if the phase gradient is calculated using finite difference
+        # with Fourier shift, these values can dangle around 0, causing the phase of the
+        # complex gradient to flip between pi and -pi. 
         w_phase = torch.clip(10 * (self.preconditioner / self.preconditioner.max()), max=1, min=0.1)
         w_phase = torch.where(w_phase < 1e-3, 0, w_phase)
 
-        # Pass 1 instead of w_phase to `weight_map` for now to avoid unstability in
-        # computing phase gradient.
         if self.options.multislice_regularization_unwrap_phase:
             pobj = [
                 ip.unwrap_phase_2d(
                     obj[i_slice],
                     weight_map=w_phase,
-                    step=0.5,
-                    finite_diff_method=self.options.multislice_regularization_finite_diff_method,
+                    fourier_shift_step=0.5,
+                    image_grad_method=self.options.multislice_regularization_unwrap_image_grad_method,
                 )
                 for i_slice in range(self.n_slices)
             ]

@@ -71,3 +71,10 @@ class Devices(StrEnum):
 class Dtypes(StrEnum):
     FLOAT32 = auto()
     FLOAT64 = auto()
+
+
+class ImageGradientMethods(StrEnum):
+    FOURIER_DIFFERENTIATION = auto()
+    FOURIER_SHIFT = auto()
+    NEAREST = auto()
+    
