@@ -1,19 +1,21 @@
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch.utils.data import Dataset
 
-import ptychi.ptychotorch.data_structures as ds
+import ptychi.data_structures.object
 import ptychi.forward_models as fm
 from ptychi.ptychotorch.reconstructors.ad_general import AutodiffReconstructor
 from ptychi.ptychotorch.reconstructors.base import IterativePtychographyReconstructor
-import ptychi.api as api
+if TYPE_CHECKING:
+    import ptychi.data_structures.parameter_group as pg
+    import ptychi.api as api
 
 
 class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychographyReconstructor):
     def __init__(
         self,
-        parameter_group: "ds.PtychographyParameterGroup",
+        parameter_group: "pg.PtychographyParameterGroup",
         dataset: Dataset,
         options: Optional["api.options.ad_ptychography.AutodiffPtychographyOptions"] = None,
         *args,
@@ -29,12 +31,12 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
 
     def check_inputs(self, *args, **kwargs):
         super().check_inputs(*args, **kwargs)
-        if type(self.parameter_group.object) is ds.MultisliceObject:
+        if type(self.parameter_group.object) is ptychi.data_structures.object.MultisliceObject:
             if self.forward_model_class != fm.MultislicePtychographyForwardModel:
                 raise ValueError(
                     "If the object is multislice, the forward model must be MultislicePtychographyForwardModel."
                 )
-        if type(self.parameter_group.object) is ds.Object2D:
+        if type(self.parameter_group.object) is ptychi.data_structures.object.Object2D:
             if self.forward_model_class != fm.Ptychography2DForwardModel:
                 raise ValueError(
                     "If the object is 2D, the forward model must be Ptychography2DForwardModel."

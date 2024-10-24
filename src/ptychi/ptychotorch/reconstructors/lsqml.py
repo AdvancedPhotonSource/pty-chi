@@ -1,14 +1,15 @@
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import logging
 
 import torch
 from torch.utils.data import Dataset
 
+import ptychi.data_structures.object
 from ptychi.ptychotorch.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
     LossTracker,
 )
-import ptychi.ptychotorch.data_structures as ds
+import ptychi.data_structures.base as ds
 import ptychi.forward_models as fm
 from ptychi.image_proc import (
     place_patches_fourier_shift,
@@ -16,7 +17,9 @@ from ptychi.image_proc import (
 )
 from ptychi.ptychotorch.utils import chunked_processing
 import ptychi.maths as pmath
-import ptychi.api as api
+if TYPE_CHECKING:
+    import ptychi.data_structures.parameter_group as pg
+    import ptychi.api as api
 
 
 class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
@@ -33,7 +36,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     def __init__(
         self,
-        parameter_group: "ds.Ptychography2DParameterGroup",
+        parameter_group: "pg.Ptychography2DParameterGroup",
         dataset: Dataset,
         options: Optional["api.LSQMLReconstructorOptions"] = None,
         *args,
@@ -61,7 +64,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.alpha_psi_far_all_points = None
 
     def check_inputs(self, *args, **kwargs):
-        if not isinstance(self.parameter_group.object, ds.Object2D):
+        if not isinstance(self.parameter_group.object, ptychi.data_structures.object.Object2D):
             raise NotImplementedError("LSQMLReconstructor only supports 2D objects.")
         if self.parameter_group.opr_mode_weights.optimizer is not None:
             logging.warning(
@@ -152,7 +155,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         chi = psi_opt - psi_0  # Eq, 19
         obj_patches = self.forward_model.intermediate_variables["obj_patches"]
 
-        if isinstance(self.parameter_group.object, ds.MultisliceObject):
+        if isinstance(self.parameter_group.object, ptychi.data_structures.object.MultisliceObject):
             delta_o_patches = self.update_object_and_probe_multislice(
                 indices, chi, obj_patches, positions
             )
@@ -176,7 +179,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         positions_all = self.parameter_group.probe_positions.tensor
         # Shape of probe:        (n_probe_modes, h, w)
         object_ = self.parameter_group.object.data[..., :, :]
-        if isinstance(self.parameter_group.object, ds.MultisliceObject):
+        if isinstance(self.parameter_group.object, ptychi.data_structures.object.MultisliceObject):
             object_ = object_[0]
 
         probe_int = self.parameter_group.probe.get_all_mode_intensity(opr_mode=0)[None, :, :]
@@ -236,7 +239,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         gamma : float
             Damping factor for solving the step size linear equations.
         """
-        object_: ds.MultisliceObject = self.parameter_group.object
+        object_: ptychi.data_structures.object.MultisliceObject = self.parameter_group.object
         self.parameter_group.object.initialize_grad()
 
         for i_slice in range(object_.n_slices - 1, -1, -1):

@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from ptychi.ptychotorch.data_structures import Object2D
+from ptychi.data_structures.object import Object2D
 from ptychi.api.options.base import ObjectOptions
 import ptychi.api as api
 

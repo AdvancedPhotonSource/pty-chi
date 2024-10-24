@@ -1,19 +1,21 @@
-from typing import Type, Optional
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch.utils.data import Dataset
 
-import ptychi.ptychotorch.data_structures as ds
+
 import ptychi.forward_models as fm
 from ptychi.ptychotorch.reconstructors.base import IterativeReconstructor, LossTracker
-import ptychi.api as api
 import ptychi.maps as maps
+if TYPE_CHECKING:
+    import ptychi.data_structures.parameter_group as pg
+    import ptychi.api as api
 
 
 class AutodiffReconstructor(IterativeReconstructor):
     def __init__(
         self,
-        parameter_group: "ds.ParameterGroup",
+        parameter_group: "pg.ParameterGroup",
         dataset: Dataset,
         options: Optional["api.options.ad_general.AutodiffReconstructorOptions"] = None,
         *args,
@@ -27,8 +29,7 @@ class AutodiffReconstructor(IterativeReconstructor):
             **kwargs,
         )
         self.forward_model_class = options.forward_model_class
-        if isinstance(self.forward_model_class, (api.enums.ForwardModels, str)):
-            self.forward_model_class = maps.get_forward_model_by_enum(self.forward_model_class)
+        self.forward_model_class = maps.get_forward_model_by_enum(self.forward_model_class)
         self.forward_model_params = options.forward_model_params if options.forward_model_params is not None else {}
         self.forward_model = None
         self.loss_function = maps.get_loss_function_by_enum(options.loss_function)()

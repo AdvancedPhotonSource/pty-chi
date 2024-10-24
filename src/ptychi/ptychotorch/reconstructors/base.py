@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, Sequence
+from typing import Optional, Tuple, Sequence, TYPE_CHECKING
 
 import pandas as pd
 import torch
@@ -6,11 +6,13 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 import tqdm
 
-import ptychi.ptychotorch.data_structures as ds
 from ptychi.ptychotorch.utils import to_numpy
-import ptychi.api as api
 import ptychi.maps as maps
 import ptychi.forward_models as fm
+import ptychi.data_structures.object
+if TYPE_CHECKING:
+    import ptychi.data_structures.parameter_group as pg
+    import ptychi.api as api
 
 
 class LossTracker:
@@ -130,7 +132,7 @@ class LossTracker:
 class Reconstructor:
     def __init__(
         self,
-        parameter_group: "ds.ParameterGroup",
+        parameter_group: "pg.ParameterGroup",
         options: Optional["api.base.ReconstructorOptions"] = None,
     ) -> None:
         self.loss_tracker = LossTracker()
@@ -159,11 +161,11 @@ class Reconstructor:
 
 
 class PtychographyReconstructor(Reconstructor):
-    parameter_group: "ds.PtychographyParameterGroup"
+    parameter_group: "pg.PtychographyParameterGroup"
 
     def __init__(
         self,
-        parameter_group: "ds.PtychographyParameterGroup",
+        parameter_group: "pg.PtychographyParameterGroup",
         options: Optional["api.base.ReconstructorOptions"] = None,
         *args,
         **kwargs,
@@ -174,7 +176,7 @@ class PtychographyReconstructor(Reconstructor):
 class IterativeReconstructor(Reconstructor):
     def __init__(
         self,
-        parameter_group: "ds.ParameterGroup",
+        parameter_group: "pg.ParameterGroup",
         dataset: Dataset,
         options: Optional["api.base.ReconstructorOptions"] = None,
         *args,
@@ -281,11 +283,11 @@ class IterativeReconstructor(Reconstructor):
 
 
 class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyReconstructor):
-    parameter_group: "ds.PtychographyParameterGroup"
+    parameter_group: "pg.PtychographyParameterGroup"
 
     def __init__(
         self,
-        parameter_group: "ds.PtychographyParameterGroup",
+        parameter_group: "pg.PtychographyParameterGroup",
         options: Optional["api.base.ReconstructorOptions"] = None,
         *args,
         **kwargs,
@@ -327,7 +329,7 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
                 weights.set_data(weights_data)
                 
             # Regularize multislice reconstruction.
-            if (isinstance(object_, ds.MultisliceObject) 
+            if (isinstance(object_, ptychi.data_structures.object.MultisliceObject) 
                 and object_.multislice_regularization_enabled(self.current_epoch)):
                 object_.regularize_multislice()
 
@@ -347,7 +349,7 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
 class AnalyticalIterativeReconstructor(IterativeReconstructor):
     def __init__(
         self,
-        parameter_group: "ds.ParameterGroup",
+        parameter_group: "pg.ParameterGroup",
         dataset: Dataset,
         options: Optional["api.base.ReconstructorOptions"] = None,
         *args,
@@ -436,11 +438,11 @@ class AnalyticalIterativeReconstructor(IterativeReconstructor):
 class AnalyticalIterativePtychographyReconstructor(
     AnalyticalIterativeReconstructor, IterativePtychographyReconstructor
 ):
-    parameter_group: "ds.PtychographyParameterGroup"
+    parameter_group: "pg.PtychographyParameterGroup"
 
     def __init__(
         self,
-        parameter_group: "ds.PtychographyParameterGroup",
+        parameter_group: "pg.PtychographyParameterGroup",
         dataset: Dataset,
         options: Optional["api.base.ReconstructorOptions"] = None,
         *args,
@@ -457,11 +459,12 @@ class AnalyticalIterativePtychographyReconstructor(
         self.build_forward_model()
 
     def build_forward_model(self):
-        if self.parameter_group.object.options.type == api.enums.ObjectTypes.TWO_D:
+        import ptychi.api.enums
+        if self.parameter_group.object.options.type == ptychi.api.enums.ObjectTypes.TWO_D:
             self.forward_model = fm.Ptychography2DForwardModel(
                 self.parameter_group, retain_intermediates=True
             )
-        elif self.parameter_group.object.options.type == api.enums.ObjectTypes.MULTISLICE:
+        elif self.parameter_group.object.options.type == ptychi.api.enums.ObjectTypes.MULTISLICE:
             self.forward_model = fm.MultislicePtychographyForwardModel(
                 self.parameter_group,
                 retain_intermediates=True,

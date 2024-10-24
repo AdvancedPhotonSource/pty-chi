@@ -16,7 +16,7 @@ class AutodiffReconstructorOptions(base.ReconstructorOptions):
     The loss function.
     """
 
-    forward_model_class: Union[enums.ForwardModels, Type[fm.ForwardModel]] = enums.ForwardModels.base
+    forward_model_class: Union[enums.ForwardModels, Type["fm.ForwardModel"]] = enums.ForwardModels.base
     """
     The forward model class.
     """

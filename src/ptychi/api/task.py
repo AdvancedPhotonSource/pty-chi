@@ -10,24 +10,18 @@ from torch import Tensor
 from numpy import ndarray
 
 import ptychi.api as api
+import ptychi.data_structures.object as object
+import ptychi.data_structures.opr_mode_weights as oprweights
+import ptychi.data_structures.probe as probe
+import ptychi.data_structures.probe_positions as probepos
+import ptychi.data_structures.parameter_group as paramgrp
 import ptychi.maps as maps
-from ptychi.ptychotorch.data_structures import (
-    Object2D,
-    MultisliceObject,
-    Probe,
-    ProbePositions,
-    OPRModeWeights,
+from ptychi.data_structures.base import (
     DummyParameter,
-    Ptychography2DParameterGroup,
 )
 from ptychi.ptychotorch.io_handles import PtychographyDataset
-from ptychi.forward_models import (
-    Ptychography2DForwardModel,
-    MultislicePtychographyForwardModel,
-)
 from ptychi.ptychotorch.utils import to_tensor
 import ptychi.ptychotorch.utils as utils
-from ptychi.ptychotorch.reconstructors import AutodiffPtychographyReconstructor
 
 
 class Task:
@@ -122,20 +116,20 @@ class PtychographyTask(Task):
             "options": self.object_options,
         }
         if self.object_options.type == api.ObjectTypes.TWO_D:
-            self.object = Object2D(**kwargs)
+            self.object = object.Object2D(**kwargs)
         elif self.object_options.type == api.ObjectTypes.MULTISLICE:
-            self.object = MultisliceObject(**kwargs)
+            self.object = object.MultisliceObject(**kwargs)
 
     def build_probe(self):
         data = to_tensor(self.probe_options.initial_guess)
-        self.probe = Probe(data=data, options=self.probe_options)
+        self.probe = probe.Probe(data=data, options=self.probe_options)
 
     def build_probe_positions(self):
         pos_y = to_tensor(self.position_options.position_y_m)
         pos_x = to_tensor(self.position_options.position_x_m)
         data = torch.stack([pos_y, pos_x], dim=1)
         data = data / self.position_options.pixel_size_m
-        self.probe_positions = ProbePositions(data=data, options=self.position_options)
+        self.probe_positions = probepos.ProbePositions(data=data, options=self.position_options)
 
     def build_opr_mode_weights(self):
         n_opr_modes = self.probe_options.initial_guess.shape[0]
@@ -152,12 +146,12 @@ class PtychographyTask(Task):
                 initial_weights = initial_weights.unsqueeze(0).repeat(
                     len(self.position_options.position_x_m), 1
                 )
-            self.opr_mode_weights = OPRModeWeights(
+            self.opr_mode_weights = oprweights.OPRModeWeights(
                 data=initial_weights, options=self.opr_mode_weight_options
             )
 
     def build_reconstructor(self):
-        par_group = Ptychography2DParameterGroup(
+        par_group = paramgrp.Ptychography2DParameterGroup(
             object=self.object,
             probe=self.probe,
             probe_positions=self.probe_positions,

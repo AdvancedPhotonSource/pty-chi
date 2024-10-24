@@ -7,7 +7,6 @@ from torch import Tensor
 import torch.signal
 
 import ptychi.maths as pmath
-import ptychi.api.enums as enums
 
 
 def extract_patches_fourier_shift(
@@ -279,7 +278,7 @@ def fourier_gradient(image: Tensor) -> Tensor:
 def get_phase_gradient(
     img: Tensor,
     fourier_shift_step: float = 0,
-    image_grad_method: enums.ImageGradientMethods = enums.ImageGradientMethods.FOURIER_SHIFT,
+    image_grad_method: Literal["fourier_shift", "fourier_differentiation", "nearest"] = "fourier_shift",
     eps: float = 1e-6,
 ) -> Tensor:
     """
@@ -309,10 +308,10 @@ def get_phase_gradient(
     Tuple[Tensor, Tensor]
         A tuple of 2 tensors with the gradient in y and x directions.
     """
-    if fourier_shift_step <= 0 and image_grad_method == enums.ImageGradientMethods.FOURIER_SHIFT:
+    if fourier_shift_step <= 0 and image_grad_method == "fourier_shift":
         raise ValueError("Step must be positive.")
 
-    if image_grad_method == enums.ImageGradientMethods.FOURIER_DIFFERENTIATION:
+    if image_grad_method == "fourier_differentiation":
         gy, gx = fourier_gradient(img)
         gy = torch.imag(img.conj() * gy)
         gx = torch.imag(img.conj() * gx)
@@ -325,13 +324,13 @@ def get_phase_gradient(
 
         sy1 = torch.tensor([[-fourier_shift_step, 0]], device=img.device).repeat(img.shape[0], 1)
         sy2 = torch.tensor([[fourier_shift_step, 0]], device=img.device).repeat(img.shape[0], 1)
-        if image_grad_method == enums.ImageGradientMethods.FOURIER_SHIFT:
+        if image_grad_method == "fourier_shift":
             # If the image contains zero-valued pixels, Fourier shift can result in small
             # non-zero values that dangles around 0. This can cause the phase
             # of the shifted image to dangle between pi and -pi. In that case, use
             # `finite_diff_method="nearest" instead`, or use `step=1`.
             complex_prod = fourier_shift(img, sy1) * fourier_shift(img, sy2).conj()
-        elif image_grad_method == enums.ImageGradientMethods.NEAREST:
+        elif image_grad_method == "nearest":
             complex_prod = img * torch.concat([img[:, :1, :], img[:, :-1, :]], dim=1).conj()
         else:
             raise ValueError(f"Unknown finite-difference method: {image_grad_method}")
@@ -343,9 +342,9 @@ def get_phase_gradient(
 
         sx1 = torch.tensor([[0, -fourier_shift_step]], device=img.device).repeat(img.shape[0], 1)
         sx2 = torch.tensor([[0, fourier_shift_step]], device=img.device).repeat(img.shape[0], 1)
-        if image_grad_method == enums.ImageGradientMethods.FOURIER_SHIFT:
+        if image_grad_method == "fourier_shift":
             complex_prod = fourier_shift(img, sx1) * fourier_shift(img, sx2).conj()
-        elif image_grad_method == enums.ImageGradientMethods.NEAREST:
+        elif image_grad_method == "nearest":
             complex_prod = img * torch.concat([img[:, :, :1], img[:, :, :-1]], dim=2).conj()
         complex_prod = torch.where(
             complex_prod.abs() < complex_prod.abs().max() * 1e-6, 0, complex_prod
@@ -846,7 +845,7 @@ def remove_polynomial_background(
 def unwrap_phase_2d(
     img: Tensor,
     fourier_shift_step: float = 0.5,
-    image_grad_method: enums.ImageGradientMethods = enums.ImageGradientMethods.FOURIER_SHIFT,
+    image_grad_method: Literal["fourier_shift", "fourier_differentiation", "nearest"] = "fourier_shift",
     weight_map: Optional[Tensor] = None,
     flat_region_mask: Optional[Tensor] = None,
     deramp_polyfit_order: int = 1,
@@ -862,11 +861,11 @@ def unwrap_phase_2d(
     fourier_shift_step : float
         The finite-difference step size used to calculate the gradient, 
         if the Fourier shift method is used. 
-    finite_diff_method : enums.ImageGradientMethods
+    finite_diff_method : str
         The method used to calculate the phase gradient. 
-            - FOURIER_SHIFT: Use Fourier shift to perform shift.
-            - NEAREST: Use nearest neighbor to perform shift.
-            - FOURIER_DIFFERENTIATION: Use Fourier differentiation.
+            - "fourier_shift": Use Fourier shift to perform shift.
+            - "nearest": Use nearest neighbor to perform shift.
+            - "fourier_differentiation": Use Fourier differentiation.
     weight_map : Optional[Tensor]
         A weight map multiplied to the input image.
     flat_region_mask : Optional[Tensor]

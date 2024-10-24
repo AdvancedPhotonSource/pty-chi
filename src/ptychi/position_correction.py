@@ -1,6 +1,7 @@
 import torch
+import ptychi.data_structures.probe
 from ptychi.image_proc import find_cross_corr_peak, gaussian_gradient
-import ptychi.ptychotorch.data_structures as data_structures
+import ptychi.data_structures.opr_mode_weights as base
 import ptychi.api as api
 
 
@@ -24,8 +25,8 @@ class PositionCorrection:
         chi: torch.Tensor,
         obj_patches: torch.Tensor,
         delta_o_patches: torch.Tensor,
-        probe: "data_structures.Probe",
-        opr_mode_weights: "data_structures.OPRModeWeights",
+        probe: "ptychi.data_structures.probe.Probe",
+        opr_mode_weights: "base.OPRModeWeights",
         indices: torch.Tensor,
         object_step_size: float,
     ):

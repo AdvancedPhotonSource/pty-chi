@@ -1,29 +1,29 @@
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import torch
 from torch import Tensor
 from torch.nn import ModuleList
 
-import ptychi.ptychotorch.data_structures as ds
+import ptychi.data_structures.object
 from ptychi.propagate import (
     WavefieldPropagatorParameters,
     AngularSpectrumPropagator,
     FourierPropagator,
 )
 from ptychi.metrics import MSELossOfSqrt
+if TYPE_CHECKING:
+    import ptychi.data_structures.parameter_group
+    import ptychi.data_structures.base as ds
 
 
 class ForwardModel(torch.nn.Module):
     def __init__(
         self,
-        parameter_group: "ds.ParameterGroup",
+        parameter_group: "ptychi.data_structures.parameter_group.ParameterGroup",
         retain_intermediates: bool = False,
         *args,
         **kwargs,
     ) -> None:
         super().__init__()
-
-        if not isinstance(parameter_group, ds.ParameterGroup):
-            raise TypeError(f"variable_group must be a VariableGroup, not {type(parameter_group)}")
 
         self.parameter_group = parameter_group
         self.retain_intermediates = retain_intermediates
@@ -50,7 +50,7 @@ class ForwardModel(torch.nn.Module):
 class Ptychography2DForwardModel(ForwardModel):
     def __init__(
         self,
-        parameter_group: "ds.Ptychography2DParameterGroup",
+        parameter_group: "ptychi.data_structures.parameter_group.Ptychography2DParameterGroup",
         retain_intermediates: bool = False,
         *args,
         **kwargs,
@@ -204,7 +204,7 @@ class Ptychography2DForwardModel(ForwardModel):
 class MultislicePtychographyForwardModel(Ptychography2DForwardModel):
     def __init__(
         self,
-        parameter_group: "ds.Ptychography2DParameterGroup",
+        parameter_group: "ptychi.data_structures.parameter_group.Ptychography2DParameterGroup",
         retain_intermediates: bool = False,
         wavelength_m: float = 1e-9,
         *args,
@@ -216,7 +216,7 @@ class MultislicePtychographyForwardModel(Ptychography2DForwardModel):
             *args,
             **kwargs,
         )
-        if not isinstance(self.parameter_group.object, ds.MultisliceObject):
+        if not isinstance(self.parameter_group.object, ptychi.data_structures.object.MultisliceObject):
             raise TypeError(
                 f"Object must be a MultisliceObject, not {type(self.parameter_group.object)}"
             )

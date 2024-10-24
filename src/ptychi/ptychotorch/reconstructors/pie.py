@@ -1,16 +1,18 @@
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch.utils.data import Dataset
 from torch import Tensor
 
-import ptychi.ptychotorch.data_structures as ds
+import ptychi.data_structures.object
 from ptychi.ptychotorch.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
 )
 from ptychi.image_proc import place_patches_fourier_shift
 from ptychi.metrics import MSELossOfSqrt
-import ptychi.api as api
+if TYPE_CHECKING:
+    import ptychi.api as api
+    import ptychi.data_structures.parameter_group as pg
 
 
 class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
@@ -29,7 +31,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     def __init__(
         self,
-        parameter_group: "ds.Ptychography2DParameterGroup",
+        parameter_group: "pg.Ptychography2DParameterGroup",
         dataset: Dataset,
         options: Optional["api.options.pie.PIEReconstructorOptions"] = None,
         *args,
@@ -49,7 +51,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         return super().build_loss_tracker()
 
     def check_inputs(self, *args, **kwargs):
-        if not isinstance(self.parameter_group.object, ds.Object2D):
+        if not isinstance(self.parameter_group.object, ptychi.data_structures.object.Object2D):
             raise NotImplementedError("EPIEReconstructor only supports 2D objects.")
         for var in self.parameter_group.get_optimizable_parameters():
             if "lr" not in var.optimizer_params.keys():

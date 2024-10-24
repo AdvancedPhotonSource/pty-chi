@@ -1,7 +1,6 @@
 import dataclasses
 from dataclasses import field
 
-
 import ptychi.api.options.base as base
 import ptychi.api.options.task as task_options
 import ptychi.api.enums as enums

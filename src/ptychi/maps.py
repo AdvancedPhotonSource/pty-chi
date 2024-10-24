@@ -2,80 +2,66 @@ from typing import Type
 
 import torch
 
-from ptychi.api.enums import (
-    Dtypes,
-    Optimizers,
-    LossFunctions,
-    Reconstructors,
-    Devices,
-    NoiseModels,
-    ForwardModels,
-)
+import ptychi.api.enums as enums
 from ptychi.metrics import MSELossOfSqrt
-from ptychi.ptychotorch.reconstructors import (
-    AutodiffPtychographyReconstructor,
-    PIEReconstructor,
-    EPIEReconstructor,
-    RPIEReconstructor,
-    LSQMLReconstructor,
-)
+import ptychi.ptychotorch.reconstructors as reconstructors
 import ptychi.forward_models as fm
 from ptychi.ptychotorch.reconstructors.base import Reconstructor
 
 
-def get_complex_dtype_by_enum(key: Dtypes) -> torch.dtype:
-    return {Dtypes.FLOAT32: torch.complex64, Dtypes.FLOAT64: torch.complex128}[key]
+def get_complex_dtype_by_enum(key: enums.Dtypes) -> torch.dtype:
+    return {enums.Dtypes.FLOAT32: torch.complex64, enums.Dtypes.FLOAT64: torch.complex128}[key]
 
 
-def get_optimizer_by_enum(key: Optimizers) -> torch.optim.Optimizer:
+def get_optimizer_by_enum(key: enums.Optimizers) -> torch.optim.Optimizer:
     return {
-        Optimizers.SGD: torch.optim.SGD,
-        Optimizers.ADAM: torch.optim.Adam,
-        Optimizers.RMSPROP: torch.optim.RMSprop,
-        Optimizers.ADAGRAD: torch.optim.Adagrad,
-        Optimizers.ADADELTA: torch.optim.Adadelta,
-        Optimizers.LBFGS: torch.optim.LBFGS,
-        Optimizers.ASGD: torch.optim.ASGD,
-        Optimizers.SPARSE_ADAM: torch.optim.SparseAdam,
-        Optimizers.ADAMAX: torch.optim.Adamax,
-        Optimizers.RADAM: torch.optim.RAdam,
-        Optimizers.ADAMW: torch.optim.AdamW,
+        enums.Optimizers.SGD: torch.optim.SGD,
+        enums.Optimizers.ADAM: torch.optim.Adam,
+        enums.Optimizers.RMSPROP: torch.optim.RMSprop,
+        enums.Optimizers.ADAGRAD: torch.optim.Adagrad,
+        enums.Optimizers.ADADELTA: torch.optim.Adadelta,
+        enums.Optimizers.LBFGS: torch.optim.LBFGS,
+        enums.Optimizers.ASGD: torch.optim.ASGD,
+        enums.Optimizers.SPARSE_ADAM: torch.optim.SparseAdam,
+        enums.Optimizers.ADAMAX: torch.optim.Adamax,
+        enums.Optimizers.RADAM: torch.optim.RAdam,
+        enums.Optimizers.ADAMW: torch.optim.AdamW,
     }[key]
 
 
-def get_loss_function_by_enum(key: LossFunctions) -> torch.nn.Module:
+def get_loss_function_by_enum(key: enums.LossFunctions) -> torch.nn.Module:
     return {
-        LossFunctions.MSE: torch.nn.MSELoss,
-        LossFunctions.POISSON: torch.nn.PoissonNLLLoss,
-        LossFunctions.MSE_SQRT: MSELossOfSqrt,
+        enums.LossFunctions.MSE: torch.nn.MSELoss,
+        enums.LossFunctions.POISSON: torch.nn.PoissonNLLLoss,
+        enums.LossFunctions.MSE_SQRT: MSELossOfSqrt,
     }[key]
 
 
-def get_forward_model_by_enum(key: ForwardModels) -> Type["fm.ForwardModel"]:
+def get_forward_model_by_enum(key: enums.ForwardModels) -> Type["fm.ForwardModel"]:
     return {
-        ForwardModels.PTYCHOGRAPHY_2D: fm.Ptychography2DForwardModel,
-        ForwardModels.MULTISLICE_PTYCHOGRAPHY: fm.MultislicePtychographyForwardModel,
+        enums.ForwardModels.PTYCHOGRAPHY_2D: fm.Ptychography2DForwardModel,
+        enums.ForwardModels.MULTISLICE_PTYCHOGRAPHY: fm.MultislicePtychographyForwardModel,
     }[key]
 
 
-def get_reconstructor_by_enum(key: Reconstructors) -> Type["Reconstructor"]:
+def get_reconstructor_by_enum(key: enums.Reconstructors) -> Type["Reconstructor"]:
     return {
-        Reconstructors.base: Reconstructor,
-        Reconstructors.LSQML: LSQMLReconstructor,
-        Reconstructors.AD_PTYCHO: AutodiffPtychographyReconstructor,
-        Reconstructors.PIE: PIEReconstructor,
-        Reconstructors.EPIE: EPIEReconstructor,
-        Reconstructors.RPIE: RPIEReconstructor,
+        enums.Reconstructors.base: Reconstructor,
+        enums.Reconstructors.LSQML: reconstructors.LSQMLReconstructor,
+        enums.Reconstructors.AD_PTYCHO: reconstructors.AutodiffPtychographyReconstructor,
+        enums.Reconstructors.PIE: reconstructors.PIEReconstructor,
+        enums.Reconstructors.EPIE: reconstructors.EPIEReconstructor,
+        enums.Reconstructors.RPIE: reconstructors.RPIEReconstructor,
     }[key]
 
 
-def get_noise_model_by_enum(key: NoiseModels) -> str:
-    return {NoiseModels.GAUSSIAN: "gaussian", NoiseModels.POISSON: "poisson"}[key]
+def get_noise_model_by_enum(key: enums.NoiseModels) -> str:
+    return {enums.NoiseModels.GAUSSIAN: "gaussian", enums.NoiseModels.POISSON: "poisson"}[key]
 
 
-def get_device_by_enum(key: Devices) -> str:
-    return {Devices.CPU: "cpu", Devices.GPU: "cuda"}[key]
+def get_device_by_enum(key: enums.Devices) -> str:
+    return {enums.Devices.CPU: "cpu", enums.Devices.GPU: "cuda"}[key]
 
 
-def get_dtype_by_enum(key: Dtypes) -> torch.dtype:
-    return {Dtypes.FLOAT32: torch.float32, Dtypes.FLOAT64: torch.float64}[key]
+def get_dtype_by_enum(key: enums.Dtypes) -> torch.dtype:
+    return {enums.Dtypes.FLOAT32: torch.float32, enums.Dtypes.FLOAT64: torch.float64}[key]
