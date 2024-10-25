@@ -16,9 +16,7 @@ import ptychi.data_structures.probe as probe
 import ptychi.data_structures.probe_positions as probepos
 import ptychi.data_structures.parameter_group as paramgrp
 import ptychi.maps as maps
-from ptychi.data_structures.base import (
-    DummyParameter,
-)
+from ptychi.data_structures.base import DummyParameter
 from ptychi.ptychotorch.io_handles import PtychographyDataset
 from ptychi.ptychotorch.utils import to_tensor
 import ptychi.ptychotorch.utils as utils
@@ -115,10 +113,7 @@ class PtychographyTask(Task):
             "data": data,
             "options": self.object_options,
         }
-        if self.object_options.type == api.ObjectTypes.TWO_D:
-            self.object = object.Object2D(**kwargs)
-        elif self.object_options.type == api.ObjectTypes.MULTISLICE:
-            self.object = object.MultisliceObject(**kwargs)
+        self.object = object.PlanarObject(**kwargs)
 
     def build_probe(self):
         data = to_tensor(self.probe_options.initial_guess)
@@ -151,7 +146,7 @@ class PtychographyTask(Task):
             )
 
     def build_reconstructor(self):
-        par_group = paramgrp.Ptychography2DParameterGroup(
+        par_group = paramgrp.PlanarPtychographyParameterGroup(
             object=self.object,
             probe=self.probe,
             probe_positions=self.probe_positions,

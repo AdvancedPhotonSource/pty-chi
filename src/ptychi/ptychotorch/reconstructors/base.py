@@ -329,7 +329,7 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
                 weights.set_data(weights_data)
                 
             # Regularize multislice reconstruction.
-            if (isinstance(object_, ptychi.data_structures.object.MultisliceObject) 
+            if (object_.is_multislice
                 and object_.multislice_regularization_enabled(self.current_epoch)):
                 object_.regularize_multislice()
 
@@ -459,17 +459,10 @@ class AnalyticalIterativePtychographyReconstructor(
         self.build_forward_model()
 
     def build_forward_model(self):
-        import ptychi.api.enums
-        if self.parameter_group.object.options.type == ptychi.api.enums.ObjectTypes.TWO_D:
-            self.forward_model = fm.Ptychography2DForwardModel(
-                self.parameter_group, retain_intermediates=True
-            )
-        elif self.parameter_group.object.options.type == ptychi.api.enums.ObjectTypes.MULTISLICE:
-            self.forward_model = fm.MultislicePtychographyForwardModel(
-                self.parameter_group,
-                retain_intermediates=True,
-                wavelength_m=self.dataset.wavelength_m,
-            )
+        self.forward_model = fm.PlanarPtychographyForwardModel(
+            self.parameter_group, retain_intermediates=True,
+            wavelength_m=self.dataset.wavelength_m
+        )
 
     def run_post_epoch_hooks(self) -> None:
         with torch.no_grad():

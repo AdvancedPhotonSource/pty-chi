@@ -39,8 +39,7 @@ def get_loss_function_by_enum(key: enums.LossFunctions) -> torch.nn.Module:
 
 def get_forward_model_by_enum(key: enums.ForwardModels) -> Type["fm.ForwardModel"]:
     return {
-        enums.ForwardModels.PTYCHOGRAPHY_2D: fm.Ptychography2DForwardModel,
-        enums.ForwardModels.MULTISLICE_PTYCHOGRAPHY: fm.MultislicePtychographyForwardModel,
+        enums.ForwardModels.PLANAR_PTYCHOGRAPHY: fm.PlanarPtychographyForwardModel,
     }[key]
 
 

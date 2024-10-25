@@ -42,5 +42,5 @@ class PtychographyParameterGroup(ParameterGroup):
 
 
 @dataclasses.dataclass
-class Ptychography2DParameterGroup(PtychographyParameterGroup):
-    object: "object.Object2D"
+class PlanarPtychographyParameterGroup(PtychographyParameterGroup):
+    object: "object.PlanarObject"

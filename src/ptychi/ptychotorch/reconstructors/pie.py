@@ -4,7 +4,6 @@ import torch
 from torch.utils.data import Dataset
 from torch import Tensor
 
-import ptychi.data_structures.object
 from ptychi.ptychotorch.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
 )
@@ -28,10 +27,12 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
     The `step_size` parameter is equivalent to gamma in Eq. 22 of Maiden (2017)
     when `optimizer == SGD`.
     """
+    
+    parameter_group: "pg.PlanarPtychographyParameterGroup"
 
     def __init__(
         self,
-        parameter_group: "pg.Ptychography2DParameterGroup",
+        parameter_group: "pg.PlanarPtychographyParameterGroup",
         dataset: Dataset,
         options: Optional["api.options.pie.PIEReconstructorOptions"] = None,
         *args,
@@ -51,7 +52,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         return super().build_loss_tracker()
 
     def check_inputs(self, *args, **kwargs):
-        if not isinstance(self.parameter_group.object, ptychi.data_structures.object.Object2D):
+        if self.parameter_group.object.is_multislice:
             raise NotImplementedError("EPIEReconstructor only supports 2D objects.")
         for var in self.parameter_group.get_optimizable_parameters():
             if "lr" not in var.optimizer_params.keys():
@@ -82,7 +83,8 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         indices = indices.cpu()
         positions = probe_positions.tensor[indices]
 
-        y, obj_patches = self.forward_model.forward(indices, return_object_patches=True)
+        y = self.forward_model.forward(indices)
+        obj_patches = self.forward_model.intermediate_variables["obj_patches"]
         psi = self.forward_model.intermediate_variables["psi"]
         psi_far = self.forward_model.intermediate_variables["psi_far"]
 
@@ -105,11 +107,13 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
             delta_o_patches = step_weight * (psi_prime - psi)
             delta_o_patches = delta_o_patches.sum(1)
             delta_o = place_patches_fourier_shift(
-                torch.zeros_like(object_.data),
+                torch.zeros_like(object_.get_slice(0)),
                 positions + object_.center_pixel,
                 delta_o_patches,
                 op="add",
             )
+            # Add slice dimension.
+            delta_o = delta_o.unsqueeze(0)
 
         delta_pos = None
         if probe_positions.optimization_enabled(self.current_epoch) and object_.optimizable:
@@ -134,7 +138,19 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         return (delta_o, delta_p_all_modes, delta_pos), y
 
     def calculate_object_step_weight(self, p: Tensor):
-        """Calculate the weight for the object update step."""
+        """
+        Calculate the weight for the object update step.
+        
+        Parameters
+        ----------
+        p : Tensor
+            A (n_modes, h, w) tensor giving the first OPR mode of the probe.
+            
+        Returns
+        -------
+        Tensor
+            A (batch_size, h, w) tensor giving the weight for the object update step.        
+        """
         numerator = p.abs() * p.conj()
         denominator = p.abs().sum(0).max() * (
             p.abs() ** 2 + self.parameter_group.object.options.alpha * (p.abs() ** 2).sum(0).max()
@@ -143,14 +159,28 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         return step_weight
 
     def calculate_probe_step_weight(self, obj_patches: Tensor):
-        """Calculate the weight for the probe update step."""
+        """
+        Calculate the weight for the probe update step.
+        
+        Parameters
+        ----------
+        obj_patches : Tensor
+            A (batch_size, n_slices, h, w) tensor giving the object patches.
+            
+        Returns
+        -------
+        Tensor
+        """
+        # Just take the first slice.
+        obj_patches = obj_patches[:, 0]
+        
         obj_max = (torch.abs(obj_patches) ** 2).max(-1).values.max(-1).values.view(-1, 1, 1)
         numerator = obj_patches.abs() * obj_patches.conj()
         denominator = obj_max * (
             obj_patches.abs() ** 2 + self.parameter_group.probe.options.alpha * obj_max
         )
         step_weight = numerator / denominator
-        return step_weight[:, None]
+        return step_weight
 
     def apply_updates(self, delta_o, delta_p, delta_pos, *args, **kwargs):
         """
@@ -205,6 +235,9 @@ class EPIEReconstructor(PIEReconstructor):
         return step_weight
 
     def calculate_probe_step_weight(self, obj_patches: Tensor):
+        # Just take the first slice.
+        obj_patches = obj_patches[:, 0]
+        
         obj_max = (torch.abs(obj_patches) ** 2).max(-1).values.max(-1).values.view(-1, 1, 1)
         step_weight = self.parameter_group.probe.options.alpha * obj_patches.conj() / obj_max
         step_weight = step_weight[:, None]
@@ -241,6 +274,9 @@ class RPIEReconstructor(PIEReconstructor):
         return step_weight
 
     def calculate_probe_step_weight(self, obj_patches: Tensor):
+        # Just take the first slice.
+        obj_patches = obj_patches[:, 0]
+        
         obj_max = (torch.abs(obj_patches) ** 2).max(-1).values.max(-1).values.view(-1, 1, 1)
         step_weight = obj_patches.conj() / (
             (1 - self.parameter_group.probe.options.alpha) * (torch.abs(obj_patches) ** 2)

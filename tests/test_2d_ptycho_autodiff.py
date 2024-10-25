@@ -19,7 +19,7 @@ def test_2d_ptycho_autodiff(generate_gold=False, debug=False):
     options = api.AutodiffPtychographyOptions()
     options.data_options.data = data
     
-    options.object_options.initial_guess = torch.ones(get_suggested_object_size(positions_px, probe.shape[-2:], extra=100), dtype=get_default_complex_dtype())
+    options.object_options.initial_guess = torch.ones([1, *get_suggested_object_size(positions_px, probe.shape[-2:], extra=100)], dtype=get_default_complex_dtype())
     options.object_options.pixel_size_m = pixel_size_m
     options.object_options.optimizable = True
     options.object_options.optimizer = api.Optimizers.SGD
@@ -41,7 +41,7 @@ def test_2d_ptycho_autodiff(generate_gold=False, debug=False):
     task = PtychographyTask(options)
     task.run()
     
-    recon = task.get_data_to_cpu('object', as_numpy=True)
+    recon = task.get_data_to_cpu('object', as_numpy=True)[0]
     
     if generate_gold:
         tutils.save_gold_data(name, recon)
@@ -59,7 +59,7 @@ def test_2d_ptycho_autodiff_l1(generate_gold=False, debug=False):
     options = api.AutodiffPtychographyOptions()
     options.data_options.data = data
     
-    options.object_options.initial_guess = torch.ones(get_suggested_object_size(positions_px, probe.shape[-2:], extra=100), dtype=get_default_complex_dtype())
+    options.object_options.initial_guess = torch.ones([1, *get_suggested_object_size(positions_px, probe.shape[-2:], extra=100)], dtype=get_default_complex_dtype())
     options.object_options.pixel_size_m = pixel_size_m
     options.object_options.optimizable = True
     options.object_options.optimizer = api.Optimizers.SGD
@@ -82,7 +82,7 @@ def test_2d_ptycho_autodiff_l1(generate_gold=False, debug=False):
     task = PtychographyTask(options)
     task.run()
     
-    recon = task.get_data_to_cpu('object', as_numpy=True)
+    recon = task.get_data_to_cpu('object', as_numpy=True)[0]
     
     if generate_gold:
         tutils.save_gold_data(name, recon)
@@ -100,7 +100,7 @@ def test_2d_ptycho_autodiff_opr(generate_gold=False, debug=False):
     options = api.AutodiffPtychographyOptions()
     options.data_options.data = data
     
-    options.object_options.initial_guess = torch.ones(get_suggested_object_size(positions_px, probe.shape[-2:], extra=100), dtype=get_default_complex_dtype())
+    options.object_options.initial_guess = torch.ones([1, *get_suggested_object_size(positions_px, probe.shape[-2:], extra=100)], dtype=get_default_complex_dtype())
     options.object_options.pixel_size_m = pixel_size_m
     options.object_options.optimizable = True
     options.object_options.optimizer = api.Optimizers.SGD
@@ -127,7 +127,7 @@ def test_2d_ptycho_autodiff_opr(generate_gold=False, debug=False):
     task = PtychographyTask(options)
     task.run()
     
-    recon = task.get_data_to_cpu('object', as_numpy=True)
+    recon = task.get_data_to_cpu('object', as_numpy=True)[0]
     
     if generate_gold:
         tutils.save_gold_data(name, recon)

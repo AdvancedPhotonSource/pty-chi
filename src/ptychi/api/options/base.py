@@ -70,11 +70,8 @@ class ObjectOptions(ParameterOptions):
     initial_guess: Union[ndarray, Tensor] = None
     """A (h, w) complex tensor of the object initial guess."""
 
-    type: enums.ObjectTypes = enums.ObjectTypes.TWO_D
-    """Type of the object."""
-
     slice_spacings_m: Optional[ndarray] = None
-    """Slice spacing in meters. Only required if `type == ObjectTypes.MULTISLICE`."""
+    """Slice spacing in meters. This should be provided if the object is multislice."""
 
     pixel_size_m: float = 1.0
     """The pixel size in meters."""

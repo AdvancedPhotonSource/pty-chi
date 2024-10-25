@@ -38,7 +38,7 @@ class PositionCorrection:
         chi : torch.Tensor
             A (batch_size, h, w) tensor of the exit wave update.
         obj_patches : torch.Tensor
-            A (batch_size, h, w) tensor of patches of the object.
+            A (batch_size, n_slices, h, w) tensor of patches of the object.
         delta_o_patches : torch.Tensor
             A (batch_size, h, w) tensor of patches of the update to be applied to the object.
         probe : Probe
@@ -85,7 +85,9 @@ class PositionCorrection:
         Based on the paper:
         - Translation position determination in ptychographic coherent diffraction imaging (2013) - Fucai Zhang
         """
-
+        # Just take the first slice.
+        obj_patches = obj_patches[:, 0]
+        
         updated_obj_patches = obj_patches + delta_o_patches * object_step_size
 
         n_positions = len(obj_patches)
@@ -115,7 +117,9 @@ class PositionCorrection:
         Denote probe positions as s. Given dL/dP = -chi * O.conj() (Eq. 24a), dL/ds = dL/dO * dO/ds =
         real(-chi * P.conj() * grad_O.conj()), where grad_O is the spatial gradient of the probe in x or y.
         """
-
+        # Just take the first slice.
+        obj_patches = obj_patches[:, 0]
+        
         chi_m0 = chi[:, 0, :, :]
         dody, dodx = gaussian_gradient(obj_patches, sigma=0.33)
 

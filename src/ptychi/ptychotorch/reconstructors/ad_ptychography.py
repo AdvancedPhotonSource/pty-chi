@@ -28,22 +28,9 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
             *args,
             **kwargs,
         )
-
-    def check_inputs(self, *args, **kwargs):
-        super().check_inputs(*args, **kwargs)
-        if type(self.parameter_group.object) is ptychi.data_structures.object.MultisliceObject:
-            if self.forward_model_class != fm.MultislicePtychographyForwardModel:
-                raise ValueError(
-                    "If the object is multislice, the forward model must be MultislicePtychographyForwardModel."
-                )
-        if type(self.parameter_group.object) is ptychi.data_structures.object.Object2D:
-            if self.forward_model_class != fm.Ptychography2DForwardModel:
-                raise ValueError(
-                    "If the object is 2D, the forward model must be Ptychography2DForwardModel."
-                )
                 
     def build_forward_model(self):
-        if self.forward_model_class is fm.MultislicePtychographyForwardModel:
+        if self.parameter_group.object.is_multislice:
             if 'wavelength_m' not in self.forward_model_params.keys():
                 self.forward_model_params['wavelength_m'] = self.dataset.wavelength_m
         return super().build_forward_model()

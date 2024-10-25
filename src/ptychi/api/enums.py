@@ -31,11 +31,6 @@ class Reconstructors(StrEnum):
     RPIE = auto()
 
 
-class ObjectTypes(StrEnum):
-    TWO_D = auto()
-    MULTISLICE = auto()
-
-
 class PositionCorrectionTypes(StrEnum):
     GRADIENT = auto()
     CROSS_CORRELATION = auto()
@@ -53,8 +48,7 @@ class OrthogonalizationMethods(StrEnum):
 
 class ForwardModels(StrEnum):
     base = auto()
-    PTYCHOGRAPHY_2D = auto()
-    MULTISLICE_PTYCHOGRAPHY = auto()
+    PLANAR_PTYCHOGRAPHY = auto()
 
 
 class Directions(StrEnum):

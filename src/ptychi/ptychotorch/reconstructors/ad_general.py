@@ -29,7 +29,8 @@ class AutodiffReconstructor(IterativeReconstructor):
             **kwargs,
         )
         self.forward_model_class = options.forward_model_class
-        self.forward_model_class = maps.get_forward_model_by_enum(self.forward_model_class)
+        if not isinstance(self.forward_model_class, type):
+            self.forward_model_class = maps.get_forward_model_by_enum(self.forward_model_class)
         self.forward_model_params = options.forward_model_params if options.forward_model_params is not None else {}
         self.forward_model = None
         self.loss_function = maps.get_loss_function_by_enum(options.loss_function)()

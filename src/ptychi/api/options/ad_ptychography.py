@@ -12,7 +12,7 @@ import ptychi.forward_models as fm
 
 @dataclasses.dataclass
 class AutodiffPtychographyReconstructorOptions(ad_general.AutodiffReconstructorOptions):
-    forward_model_class: Union[enums.ForwardModels, Type[fm.ForwardModel]] = enums.ForwardModels.PTYCHOGRAPHY_2D
+    forward_model_class: Union[enums.ForwardModels, Type[fm.ForwardModel]] = enums.ForwardModels.PLANAR_PTYCHOGRAPHY
     
     def get_reconstructor_type(self) -> enums.Reconstructors:
         return enums.Reconstructors.AD_PTYCHO

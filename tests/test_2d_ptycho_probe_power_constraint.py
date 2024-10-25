@@ -22,7 +22,7 @@ def test_2d_ptycho_probe_power_constraint_lsqml(pytestconfig, generate_gold=Fals
 
     data, probe, pixel_size_m, positions_px = tutils.load_tungsten_data(pos_type='true', additional_opr_modes=3)
     object_init = torch.ones(
-        utils.get_suggested_object_size(positions_px, probe.shape[-2:], extra=100), 
+        [1, *utils.get_suggested_object_size(positions_px, probe.shape[-2:], extra=100)], 
         dtype=utils.get_default_complex_dtype()
     )
     positions_m = positions_px * pixel_size_m
@@ -68,7 +68,7 @@ def test_2d_ptycho_probe_power_constraint_lsqml(pytestconfig, generate_gold=Fals
         # for _ in range(64):
         #     task.iterate(1)
         
-        recon = task.get_data_to_cpu(name='object', as_numpy=True)
+        recon = task.get_data_to_cpu(name='object', as_numpy=True)[0]
         
         if debug and not generate_gold:
             import matplotlib.pyplot as plt
@@ -93,7 +93,7 @@ def test_2d_ptycho_probe_power_constraint_ad(pytestconfig, generate_gold=False, 
 
     data, probe, pixel_size_m, positions_px = tutils.load_tungsten_data(pos_type='true', additional_opr_modes=3)
     object_init = torch.ones(
-        utils.get_suggested_object_size(positions_px, probe.shape[-2:], extra=100), 
+        [1, *utils.get_suggested_object_size(positions_px, probe.shape[-2:], extra=100)], 
         dtype=utils.get_default_complex_dtype()
     )
     positions_m = positions_px * pixel_size_m
@@ -141,7 +141,7 @@ def test_2d_ptycho_probe_power_constraint_ad(pytestconfig, generate_gold=False, 
         # for _ in range(64):
         #     task.iterate(1)
         
-        recon = task.get_data_to_cpu(name='object', as_numpy=True)
+        recon = task.get_data_to_cpu(name='object', as_numpy=True)[0]
         
         if debug and not generate_gold:
             tutils.plot_complex_image(recon)

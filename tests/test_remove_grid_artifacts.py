@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from ptychi.data_structures.object import Object2D
+from ptychi.data_structures.object import PlanarObject
 from ptychi.api.options.base import ObjectOptions
 import ptychi.api as api
 
@@ -9,8 +9,8 @@ import ptychi.api as api
 def test_remove_grid_artifacts(debug=False):
     phase = torch.zeros([64, 64])
     phase[::10, ::10] = 1
-    data = torch.ones([64, 64]) * torch.exp(1j * phase)
-    object = Object2D(
+    data = torch.ones([1, 64, 64]) * torch.exp(1j * phase)
+    object = PlanarObject(
         data=data,
         options=ObjectOptions(
             pixel_size_m=1,
@@ -24,7 +24,7 @@ def test_remove_grid_artifacts(debug=False):
     with torch.no_grad():
         object.remove_grid_artifacts()
     
-    data = object.data.detach().cpu().numpy()
+    data = object.data.detach().cpu().numpy()[0]
 
     if debug:
         import matplotlib.pyplot as plt

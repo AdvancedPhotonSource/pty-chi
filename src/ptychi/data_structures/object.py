@@ -7,6 +7,7 @@ from torch import Tensor
 import ptychi.image_proc as ip
 import ptychi.data_structures.base as ds
 from ptychi.ptychotorch.utils import get_default_complex_dtype, to_tensor
+
 if TYPE_CHECKING:
     import ptychi.api as api
 
@@ -69,22 +70,8 @@ class Object(ds.ReconstructParameter):
         else:
             return False
 
-    def constrain_smoothness(self) -> None:
-        """
-        Smooth the magnitude of the object.
-        """
-        if self.smoothness_constraint_alpha > 1.0 / 8:
-            logging.warning(
-                f"Alpha = {self.smoothness_constraint_alpha} in smoothness constraint should be less than 1/8."
-            )
-        psf = torch.ones(3, 3, device=self.device) * self.smoothness_constraint_alpha
-        psf[2, 2] = 1 - 8 * self.smoothness_constraint_alpha
-
-        data = self.data
-        mag = data.abs()
-        mag = ip.convolve2d(mag, psf, "same")
-        data = data / data.abs() * mag
-        self.set_data(data)
+    def constrain_smoothness(self):
+        raise NotImplementedError
 
     def total_variation_enabled(self, current_epoch: int):
         if (
@@ -115,116 +102,40 @@ class Object(ds.ReconstructParameter):
         raise NotImplementedError
 
 
-class Object2D(Object):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+class PlanarObject(Object):
+    """
+    Object that consists of one or multiple planes, i.e., 2D object or
+    multislice object. The object is stored in a (n_slices, h , w) tensor.
+    """
 
-    def extract_patches(self, positions: Tensor, patch_shape: Tuple[int, int]):
-        """
-        Extract patches from 2D object.
-
-        Parameters
-        ----------
-        positions : Tensor
-            Tensor of shape (N, 2) giving the center positions of the patches in pixels.
-            The origin of the given positions are assumed to be `self.center_pixel`.
-        patch_shape : tuple of int
-            Tuple giving the patch shape in pixels.
-
-        Returns
-        -------
-        patches : Tensor
-            Tensor of shape (N, H, W) containing the extracted patches.
-        """
-        # Positions are provided with the origin in the center of the object support.
-        # We shift the positions so that the origin is in the upper left corner.
-        positions = positions + self.center_pixel
-        patches = ip.extract_patches_fourier_shift(self.tensor.complex(), positions, patch_shape)
-        return patches
-
-    def place_patches(self, positions: Tensor, patches: Tensor, *args, **kwargs):
-        """
-        Place patches into a 2D object.
-
-        Parameters
-        ----------
-        positions : Tensor
-            Tensor of shape (N, 2) giving the center positions of the patches in pixels.
-            The origin of the given positions are assumed to be `self.center_pixel`.
-        patches : Tensor
-            Tensor of shape (N, H, W) of image patches.
-        """
-        positions = positions + self.center_pixel
-        image = ip.place_patches_fourier_shift(self.tensor.complex(), positions, patches)
-        self.tensor.set_data(image)
-
-    def place_patches_on_empty_buffer(self, positions: Tensor, patches: Tensor, *args, **kwargs):
-        """
-        Place patches into a empty buffer.
-
-        Parameters
-        ----------
-        positions : Tensor
-            Tensor of shape (N, 2) giving the center positions of the patches in pixels.
-        patches : Tensor
-            Tensor of shape (N, H, W) of image patches.
-
-        Returns
-        -------
-        image : Tensor
-            Tensor with the same shape as the object with patches added onto it.
-        """
-        positions = positions + self.center_pixel
-        image = torch.zeros(
-            self.shape, dtype=get_default_complex_dtype(), device=self.tensor.data.device
-        )
-        image = ip.place_patches_fourier_shift(image, positions, patches, op="add")
-        return image
-
-    def constrain_total_variation(self) -> None:
-        data = self.data
-        data = ip.total_variation_2d_chambolle(data, lmbda=self.total_variation_weight, niter=2)
-        self.set_data(data)
-
-    def remove_grid_artifacts(self):
-        data = self.data
-        phase = torch.angle(data)
-        phase = ip.remove_grid_artifacts(
-            phase,
-            pixel_size_m=self.pixel_size_m,
-            period_x_m=self.options.remove_grid_artifacts_period_x_m,
-            period_y_m=self.options.remove_grid_artifacts_period_y_m,
-            window_size=self.options.remove_grid_artifacts_window_size,
-            direction=self.options.remove_grid_artifacts_direction,
-        )
-        data = data.abs() * torch.exp(1j * phase)
-        self.set_data(data)
-
-
-class MultisliceObject(Object2D):
-    def __init__(self, *args, **kwargs):
-        """
-        Multislice object that stores the object in a (n_slices, h, w) tensor.
-
-        Parameters
-        ----------
-        data : Tensor
-            Tensor of shape (n_slices, h, w) containing the multislice object data.
-        """
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        name: str = "object",
+        options: "api.options.base.ObjectOptions" = None,
+        *args,
+        **kwargs,
+    ) -> None:
+        super().__init__(name=name, options=options, *args, **kwargs)
 
         if len(self.shape) != 3:
-            raise ValueError("MultisliceObject should have a shape of (n_slices, h, w).")
+            raise ValueError("PlanarObject should have a shape of (n_slices, h, w).")
         if (
-            self.options.slice_spacings_m is None
-            or len(self.options.slice_spacings_m) != self.n_slices - 1
+            self.options.slice_spacings_m is not None
+            and len(self.options.slice_spacings_m) != self.n_slices - 1
         ):
             raise ValueError("The number of slice spacings must be n_slices - 1.")
 
-        self.register_buffer("slice_spacings_m", to_tensor(self.options.slice_spacings_m))
+        if self.is_multislice:
+            self.register_buffer("slice_spacings_m", to_tensor(self.options.slice_spacings_m))
+        else:
+            self.slice_spacing_m = None
 
         center_pixel = torch.tensor(self.shape[1:], device=torch.get_default_device()) / 2.0
         self.register_buffer("center_pixel", center_pixel)
+
+    @property
+    def is_multislice(self) -> bool:
+        return self.shape[0] > 1
 
     @property
     def n_slices(self):
@@ -239,7 +150,7 @@ class MultisliceObject(Object2D):
 
     def extract_patches(self, positions: Tensor, patch_shape: Tuple[int, int]):
         """
-        Extract (n_patches, n_slices, h', w') patches from the multislice object.
+        Extract (n_patches, n_slices, h', w') patches from the object.
 
         Parameters
         ----------
@@ -268,7 +179,7 @@ class MultisliceObject(Object2D):
 
     def place_patches(self, positions: Tensor, patches: Tensor, *args, **kwargs):
         """
-        Place patches into a 2D object.
+        Place patches into the object.
 
         Parameters
         ----------
@@ -312,6 +223,24 @@ class MultisliceObject(Object2D):
         image = ip.place_patches_fourier_shift(image, positions, patches, op="add")
         return image
 
+    def constrain_smoothness(self) -> None:
+        """
+        Smooth the magnitude of the object.
+        """
+        if self.smoothness_constraint_alpha > 1.0 / 8:
+            logging.warning(
+                f"Alpha = {self.smoothness_constraint_alpha} in smoothness constraint should be less than 1/8."
+            )
+        psf = torch.ones(3, 3, device=self.device) * self.smoothness_constraint_alpha
+        psf[2, 2] = 1 - 8 * self.smoothness_constraint_alpha
+
+        data = self.data
+        for i_slice in range(self.n_slices):
+            mag = data[i_slice].abs()
+            mag = ip.convolve2d(mag, psf, "same")
+            data[i_slice] = data[i_slice] / data[i_slice].abs() * mag
+        self.set_data(data)
+
     def constrain_total_variation(self) -> None:
         data = self.data
         for i_slice in range(self.n_slices):
@@ -322,17 +251,17 @@ class MultisliceObject(Object2D):
 
     def remove_grid_artifacts(self):
         data = self.data
-        phase = torch.angle(data)
         for i_slice in range(self.n_slices):
-            slice_phase = ip.remove_grid_artifacts(
-                phase[i_slice],
+            phase = torch.angle(data[i_slice])
+            phase = ip.remove_grid_artifacts(
+                phase,
                 pixel_size_m=self.pixel_size_m,
                 period_x_m=self.options.remove_grid_artifacts_period_x_m,
                 period_y_m=self.options.remove_grid_artifacts_period_y_m,
                 window_size=self.options.remove_grid_artifacts_window_size,
                 direction=self.options.remove_grid_artifacts_direction,
             )
-            data[i_slice] = data[i_slice].abs() * torch.exp(1j * slice_phase)
+            data = data[i_slice].abs() * torch.exp(1j * phase)
         self.set_data(data)
 
     def multislice_regularization_enabled(self, current_epoch: int):
@@ -391,7 +320,7 @@ class MultisliceObject(Object2D):
         # small but non-zero pixels in the image after it is multiplied with the weight map.
         # During phase unwrapping, if the phase gradient is calculated using finite difference
         # with Fourier shift, these values can dangle around 0, causing the phase of the
-        # complex gradient to flip between pi and -pi. 
+        # complex gradient to flip between pi and -pi.
         w_phase = torch.clip(10 * (self.preconditioner / self.preconditioner.max()), max=1, min=0.1)
         w_phase = torch.where(w_phase < 1e-3, 0, w_phase)
 

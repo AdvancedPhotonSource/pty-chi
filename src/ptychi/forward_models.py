@@ -47,11 +47,12 @@ class ForwardModel(torch.nn.Module):
             self.intermediate_variables[name] = var
 
 
-class Ptychography2DForwardModel(ForwardModel):
+class PlanarPtychographyForwardModel(ForwardModel):
     def __init__(
         self,
-        parameter_group: "ptychi.data_structures.parameter_group.Ptychography2DParameterGroup",
+        parameter_group: "ptychi.data_structures.parameter_group.PlanarPtychographyParameterGroup",
         retain_intermediates: bool = False,
+        wavelength_m: Optional[float] = None,
         *args,
         **kwargs,
     ) -> None:
@@ -67,6 +68,12 @@ class Ptychography2DForwardModel(ForwardModel):
         self.probe = parameter_group.probe
         self.probe_positions = parameter_group.probe_positions
         self.opr_mode_weights = parameter_group.opr_mode_weights
+        
+        self.wavelength_m = wavelength_m
+        self.prop_params = None
+
+        self.near_field_propagator = None
+        self.build_propagator()
 
         # Intermediate variables. Only used if retain_intermediate is True.
         self.intermediate_variables = {
@@ -75,6 +82,8 @@ class Ptychography2DForwardModel(ForwardModel):
             "psi": None,
             "psi_far": None,
         }
+        
+        self.check_inputs()
 
     def check_inputs(self):
         if self.probe.has_multiple_opr_modes:
@@ -82,21 +91,76 @@ class Ptychography2DForwardModel(ForwardModel):
                 raise ValueError(
                     "OPRModeWeights must be given when the probe has multiple OPR modes."
                 )
+        if self.object.is_multislice:
+            if self.wavelength_m is None:
+                raise ValueError("Wavelength must be given when the object is multislice.")
+                
+    def build_propagator(self):
+        if not self.object.is_multislice:
+            return
+        self.prop_params = WavefieldPropagatorParameters.create_simple(
+            wavelength_m=self.wavelength_m,
+            width_px=self.probe.shape[-1],
+            height_px=self.probe.shape[-2],
+            pixel_width_m=self.object.pixel_size_m,
+            pixel_height_m=self.object.pixel_size_m,
+            propagation_distance_m=self.object.slice_spacings_m[0],
+        )
+        self.near_field_propagator = AngularSpectrumPropagator(self.prop_params)
 
-    def forward_real_space(self, indices: Tensor, obj_patches: Tensor) -> Tensor:
+    def forward_real_space(self, indices, obj_patches):
+        """
+        Propagate through the planar object.
+        
+        If `retain_intermediates` is True, the modulated and then propagated
+        wavefield at each slice will also be stored in the intermediate
+        variable dictionary as "slice_psis".
+
+        Parameters
+        ----------
+        indices : Tensor
+            Indices of diffraction pattern in the batch.
+        obj_patches : Tensor
+            A (batch_size, n_slices, h, w) tensor of object patches.
+
+        Returns
+        -------
+        Tensor
+            A (batch_size, n_modes, h, w) tensor of wavefields at the
+            exiting plane.
+        """
+        # Shape of obj_patches:   (batch_size, n_slices, h, w)
         if self.probe.has_multiple_opr_modes:
-            # Shape of probe:  (batch_size, n_modes, h, w)
+            # Shape of probe:     (batch_size, n_modes, h, w)
             probe = self.probe.get_unique_probes(
                 self.opr_mode_weights.get_weights(indices), mode_to_apply=0
             )
         else:
-            # Shape of probe:  (n_modes, h, w)
+            # Shape of probe:     (n_modes, h, w)
             probe = self.probe.data
-        # Shape of psi:        (batch_size, n_probe_modes, h, w)
-        psi = obj_patches[:, None, :, :] * probe
 
-        self.record_intermediate_variable("psi", psi)
-        return psi
+        if self.retain_intermediates:
+            slice_psis = []
+
+        slice_psi = probe
+        for i_slice in range(self.parameter_group.object.n_slices):
+            if self.retain_intermediates and i_slice > 0:
+                slice_psis.append(slice_psi)
+                
+            # Modulate wavefield.
+            # Shape of slice_psi: (batch_size, n_modes, h, w)
+            slice_patches = obj_patches[:, i_slice, ...]
+            slice_psi = slice_patches[:, None, :, :] * slice_psi
+
+            # Propagate wavefield.
+            if i_slice < self.parameter_group.object.n_slices - 1:
+                slice_psi = self.propagate_to_next_slice(slice_psi, i_slice)
+        if self.retain_intermediates:
+            # Shape of slice_psis: (batch_size, n_slices - 1, n_modes, h, w)
+            if len(slice_psis) > 0:
+                self.record_intermediate_variable("slice_psis", torch.stack(slice_psis, dim=1))
+            self.record_intermediate_variable("psi", slice_psi)
+        return slice_psi
 
     def forward_far_field(self, psi: Tensor) -> Tensor:
         """
@@ -115,6 +179,68 @@ class Ptychography2DForwardModel(ForwardModel):
         psi_far = self.far_field_propagator.propagate_forward(psi)
         self.record_intermediate_variable("psi_far", psi_far)
         return psi_far
+    
+    def propagate_to_next_slice(self, psi: Tensor, slice_index: int):
+        """
+        Propagate wavefield to the next slice by the distance given by
+        `self.object.slice_spacing_m[slice_index]`.
+
+        Parameters
+        ----------
+        psi : Tensor.
+            A (batch_size, n_modes, h, w) complex tensor giving the wavefield at 
+            the current slice.
+        slice_index : int
+            The index of the current slice.
+
+        Returns
+        -------
+        Tensor
+            The wavefield propagated to the next slice. 
+        """
+        self.prop_params = WavefieldPropagatorParameters.create_simple(
+                    wavelength_m=self.wavelength_m,
+                    width_px=self.probe.shape[-1],
+                    height_px=self.probe.shape[-2],
+                    pixel_width_m=self.object.pixel_size_m,
+                    pixel_height_m=self.object.pixel_size_m,
+                    propagation_distance_m=self.object.slice_spacings_m[slice_index],
+                )
+        self.near_field_propagator.update(self.prop_params)
+        slice_psi_prop = self.near_field_propagator.propagate_forward(psi)
+        return slice_psi_prop
+    
+    def propagate_to_previous_slice(self, psi: Tensor, slice_index: int):
+        """
+        Propagate wavefield to the previous slice by the distance given by
+        `self.object.slice_spacing_m[slice_index - 1]`.
+
+        Parameters
+        ----------
+        psi : Tensor.
+            A (batch_size, n_modes, h, w) complex tensor giving the wavefield at 
+            the current slice.
+        slice_index : int
+            The index of the current slice.
+
+        Returns
+        -------
+        Tensor
+            The wavefield propagated to the next slice. 
+        """
+        if slice_index == 0:
+            return psi
+        self.prop_params = WavefieldPropagatorParameters.create_simple(
+                    wavelength_m=self.wavelength_m,
+                    width_px=self.probe.shape[-1],
+                    height_px=self.probe.shape[-2],
+                    pixel_width_m=self.object.pixel_size_m,
+                    pixel_height_m=self.object.pixel_size_m,
+                    propagation_distance_m=self.object.slice_spacings_m[slice_index - 1],
+                )
+        self.near_field_propagator.update(self.prop_params)
+        slice_psi_prop = self.near_field_propagator.propagate_backward(psi)
+        return slice_psi_prop
 
     def forward(self, indices: Tensor, return_object_patches: bool = False) -> Tensor:
         """
@@ -199,177 +325,6 @@ class Ptychography2DForwardModel(ForwardModel):
             self.probe.tensor.data.grad = self.probe.tensor.data.grad * (
                 patterns.numel() / len(patterns)
             )
-
-
-class MultislicePtychographyForwardModel(Ptychography2DForwardModel):
-    def __init__(
-        self,
-        parameter_group: "ptychi.data_structures.parameter_group.Ptychography2DParameterGroup",
-        retain_intermediates: bool = False,
-        wavelength_m: float = 1e-9,
-        *args,
-        **kwargs,
-    ) -> None:
-        super().__init__(
-            parameter_group=parameter_group,
-            retain_intermediates=retain_intermediates,
-            *args,
-            **kwargs,
-        )
-        if not isinstance(self.parameter_group.object, ptychi.data_structures.object.MultisliceObject):
-            raise TypeError(
-                f"Object must be a MultisliceObject, not {type(self.parameter_group.object)}"
-            )
-
-        self.wavelength_m = wavelength_m
-        self.prop_params = None
-
-        self.near_field_propagator = None
-        self.build_propagator()
-
-    def build_propagator(self):
-        self.prop_params = WavefieldPropagatorParameters.create_simple(
-            wavelength_m=self.wavelength_m,
-            width_px=self.probe.shape[-1],
-            height_px=self.probe.shape[-2],
-            pixel_width_m=self.object.pixel_size_m,
-            pixel_height_m=self.object.pixel_size_m,
-            propagation_distance_m=self.object.slice_spacings_m[0],
-        )
-        self.near_field_propagator = AngularSpectrumPropagator(self.prop_params)
-
-    def forward_real_space(self, indices, obj_patches):
-        """
-        Propagate through the multislice object.
-        
-        If `retain_intermediates` is True, the modulated and then propagated
-        wavefield at each slice will also be stored in the intermediate
-        variable dictionary as "slice_psis".
-
-        Parameters
-        ----------
-        indices : Tensor
-            Indices of diffraction pattern in the batch.
-        obj_patches : Tensor
-            A (batch_size, n_slices, h, w) tensor of object patches.
-
-        Returns
-        -------
-        Tensor
-            A (batch_size, n_modes, h, w) tensor of wavefields at the
-            exiting plane.
-        """
-        # Shape of obj_patches:   (batch_size, n_slices, h, w)
-        if self.probe.has_multiple_opr_modes:
-            # Shape of probe:     (batch_size, n_modes, h, w)
-            probe = self.probe.get_unique_probes(
-                self.opr_mode_weights.get_weights(indices), mode_to_apply=0
-            )
-        else:
-            # Shape of probe:     (n_modes, h, w)
-            probe = self.probe.data
-
-        if self.retain_intermediates:
-            slice_psis = []
-
-        slice_psi = probe
-        for i_slice in range(self.parameter_group.object.n_slices):
-            if self.retain_intermediates and i_slice > 0:
-                slice_psis.append(slice_psi)
-                
-            # Modulate wavefield.
-            # Shape of slice_psi: (batch_size, n_modes, h, w)
-            slice_patches = obj_patches[:, i_slice, ...]
-            slice_psi = slice_patches[:, None, :, :] * slice_psi
-
-            # Propagate wavefield.
-            if i_slice < self.parameter_group.object.n_slices - 1:
-                slice_psi = self.propagate_to_next_slice(slice_psi, i_slice)
-        if self.retain_intermediates:
-            # Shape of slice_psis: (batch_size, n_slices - 1, n_modes, h, w)
-            self.record_intermediate_variable("slice_psis", torch.stack(slice_psis, dim=1))
-            self.record_intermediate_variable("psi", slice_psi)
-        return slice_psi
-    
-    def propagate_to_next_slice(self, psi: Tensor, slice_index: int):
-        """
-        Propagate wavefield to the next slice by the distance given by
-        `self.object.slice_spacing_m[slice_index]`.
-
-        Parameters
-        ----------
-        psi : Tensor.
-            A (batch_size, n_modes, h, w) complex tensor giving the wavefield at 
-            the current slice.
-        slice_index : int
-            The index of the current slice.
-
-        Returns
-        -------
-        Tensor
-            The wavefield propagated to the next slice. 
-        """
-        self.prop_params = WavefieldPropagatorParameters.create_simple(
-                    wavelength_m=self.wavelength_m,
-                    width_px=self.probe.shape[-1],
-                    height_px=self.probe.shape[-2],
-                    pixel_width_m=self.object.pixel_size_m,
-                    pixel_height_m=self.object.pixel_size_m,
-                    propagation_distance_m=self.object.slice_spacings_m[slice_index],
-                )
-        self.near_field_propagator.update(self.prop_params)
-        slice_psi_prop = self.near_field_propagator.propagate_forward(psi)
-        return slice_psi_prop
-    
-    def propagate_to_previous_slice(self, psi: Tensor, slice_index: int):
-        """
-        Propagate wavefield to the previous slice by the distance given by
-        `self.object.slice_spacing_m[slice_index - 1]`.
-
-        Parameters
-        ----------
-        psi : Tensor.
-            A (batch_size, n_modes, h, w) complex tensor giving the wavefield at 
-            the current slice.
-        slice_index : int
-            The index of the current slice.
-
-        Returns
-        -------
-        Tensor
-            The wavefield propagated to the next slice. 
-        """
-        if slice_index == 0:
-            return psi
-        self.prop_params = WavefieldPropagatorParameters.create_simple(
-                    wavelength_m=self.wavelength_m,
-                    width_px=self.probe.shape[-1],
-                    height_px=self.probe.shape[-2],
-                    pixel_width_m=self.object.pixel_size_m,
-                    pixel_height_m=self.object.pixel_size_m,
-                    propagation_distance_m=self.object.slice_spacings_m[slice_index - 1],
-                )
-        self.near_field_propagator.update(self.prop_params)
-        slice_psi_prop = self.near_field_propagator.propagate_backward(psi)
-        return slice_psi_prop
-
-    def forward(self, indices: Tensor, return_object_patches: bool = False) -> Tensor:
-        """
-        Run ptychographic forward simulation and calculate the measured intensities.
-
-        Parameters
-        ----------
-        indices : Tensor
-            A (N,) tensor of diffraction pattern indices in the batch.
-        positions : Tensor
-            A (N, 2) tensor of probe positions in pixels.
-
-        Returns
-        -------
-        Tensor
-            Measured intensities (squared magnitudes).
-        """
-        return super().forward(indices, return_object_patches=return_object_patches)
 
 
 class NoiseModel(torch.nn.Module):
