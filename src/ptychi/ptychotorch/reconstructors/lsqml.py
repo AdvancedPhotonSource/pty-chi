@@ -190,7 +190,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 "positions": positions_all + self.parameter_group.object.center_pixel,
                 "patches": probe_int,
             },
-            iterated_kwargs={"image": torch.zeros_like(object_).type(torch.get_default_dtype())},
+            iterated_kwargs={"image": torch.zeros_like(object_.real).type(torch.get_default_dtype())},
             chunk_size=64,
         )
         self.parameter_group.object.preconditioner = probe_sq_map
@@ -272,7 +272,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         return delta_o_patches
 
     def _get_psi_im1(self, i_slice, indices):
-        """
+        r"""
         Get $\psi_{i-1}$, the wavefield modulated by the previous slice and then propagated,
         for multislice reconstruction. If `i_slice == 0`, return the probe instead.
 
@@ -456,7 +456,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.parameter_group.probe.optimizer.step()
 
     def _calculate_object_patch_update_direction(self, indices, chi, psi_im1=None):
-        """
+        r"""
         Calculate the update direction for object patches, implementing
         Eq. 24b of Odstrcil, 2018. This function works in both 2D mode and
         multislice mode:
