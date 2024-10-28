@@ -11,6 +11,7 @@ import ptychi.maps as maps
 import ptychi.forward_models as fm
 import ptychi.api.enums as enums
 import ptychi.ptychotorch.io_handles as io
+
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
     import ptychi.api as api
@@ -221,7 +222,7 @@ class IterativeReconstructor(Reconstructor):
         else:
             data_loader_kwargs["batch_size"] = self.batch_size
             data_loader_kwargs["shuffle"] = True
-        
+
         self.dataloader = DataLoader(**data_loader_kwargs)
         self.dataset.move_attributes_to_device(torch.get_default_device())
 
@@ -347,6 +348,17 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             # Apply position constraint.
             if positions.position_mean_constraint_enabled(self.current_epoch):
                 positions.constrain_position_mean()
+
+            # Update compact mode clustering.
+            if (
+                self.options.batching_mode == enums.BatchingModes.COMPACT
+                and self.options.compact_mode_update_clustering
+                and positions.optimization_enabled(self.current_epoch)
+                and (self.current_epoch - positions.optimization_plan.start)
+                % self.options.compact_mode_update_clustering_stride
+                == 0
+            ):
+                self.dataloader.batch_sampler.update_clusters(positions.data.detach().cpu())
 
 
 class AnalyticalIterativeReconstructor(IterativeReconstructor):

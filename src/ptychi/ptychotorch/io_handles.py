@@ -73,6 +73,7 @@ class PtychographyCompactBatchSampler(torch.utils.data.Sampler):
         self.build_clusters()
 
     def build_clusters(self):
+        self.clusters_of_indices = []
         kmeans = sklearn.cluster.KMeans(n_clusters=self.__len__())
         kmeans.fit(self.positions)
         cluster_labels = kmeans.predict(self.positions)
@@ -80,6 +81,10 @@ class PtychographyCompactBatchSampler(torch.utils.data.Sampler):
             self.clusters_of_indices.append(
                 to_tensor(np.where(cluster_labels == i_cluster)[0], device="cpu", dtype=torch.long)
             )
+            
+    def update_clusters(self, positions):
+        self.positions = to_numpy(positions)
+        self.build_clusters()
 
     def __len__(self):
         return int(np.round(len(self.positions) / self.batch_size))

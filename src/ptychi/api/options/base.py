@@ -312,6 +312,18 @@ class ReconstructorOptions(Options):
     - `enums.BatchingModes.COMPACT`: load a spatially close cluster of data in each minibatch.
       This is equivalent to the compact mode in PtychoSheleves.
     """
+    
+    compact_mode_update_clustering: bool = False
+    """
+    If True, clusters are updated after each probe position update when `batching_mode` is
+    `COMPACT`.
+    """
+    
+    compact_mode_update_clustering_stride: int = 1
+    """
+    The number of epochs between updating clusters when `batching_mode` is `COMPACT` and
+    `compact_mode_update_clustering` is `True`.
+    """
 
     default_device: enums.Devices = enums.Devices.GPU
     """The default device to use for computation."""
