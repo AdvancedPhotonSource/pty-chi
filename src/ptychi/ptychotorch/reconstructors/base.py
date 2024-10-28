@@ -9,7 +9,8 @@ import tqdm
 from ptychi.ptychotorch.utils import to_numpy
 import ptychi.maps as maps
 import ptychi.forward_models as fm
-import ptychi.data_structures.object
+import ptychi.api.enums as enums
+import ptychi.ptychotorch.io_handles as io
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
     import ptychi.api as api
@@ -70,7 +71,7 @@ class LossTracker:
         - If always_compute_loss is False, the loss is updated using the provided loss
           as long as it is provided.
         - Otherwise, the loss is computed using the metric function and provided data.
-        
+
         At least one of (y_pred, y_true) and loss must be provided. Also, in the former
         case, metric_function must be provided.
 
@@ -199,7 +200,9 @@ class IterativeReconstructor(Reconstructor):
         self.dataloader = None
         self.displayed_loss_function = options.displayed_loss_function
         if self.displayed_loss_function is not None:
-            self.displayed_loss_function = maps.get_loss_function_by_enum(options.displayed_loss_function)()
+            self.displayed_loss_function = maps.get_loss_function_by_enum(
+                options.displayed_loss_function
+            )()
         self.current_epoch = 0
 
     def build(self) -> None:
@@ -208,13 +211,18 @@ class IterativeReconstructor(Reconstructor):
         self.build_loss_tracker()
         self.build_counter()
 
-    def build_dataloader(self):
-        self.dataloader = DataLoader(
-            self.dataset,
-            batch_size=self.batch_size,
-            generator=torch.Generator(device=torch.get_default_device()),
-            shuffle=True,
-        )
+    def build_dataloader(self, batch_sampler=None):
+        data_loader_kwargs = {
+            "dataset": self.dataset,
+            "generator": torch.Generator(device=torch.get_default_device()),
+        }
+        if batch_sampler is not None:
+            data_loader_kwargs["batch_sampler"] = batch_sampler
+        else:
+            data_loader_kwargs["batch_size"] = self.batch_size
+            data_loader_kwargs["shuffle"] = True
+        
+        self.dataloader = DataLoader(**data_loader_kwargs)
         self.dataset.move_attributes_to_device(torch.get_default_device())
 
     def build_loss_tracker(self):
@@ -288,6 +296,14 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
     ) -> None:
         super().__init__(parameter_group, options=options, *args, **kwargs)
 
+    def build_dataloader(self):
+        batch_sampler = None
+        if self.options.batching_mode == enums.BatchingModes.COMPACT:
+            batch_sampler = io.PtychographyCompactBatchSampler(
+                self.parameter_group.probe_positions.data.cpu(), self.batch_size
+            )
+        return super().build_dataloader(batch_sampler=batch_sampler)
+
     def run_post_epoch_hooks(self) -> None:
         with torch.no_grad():
             probe = self.parameter_group.probe
@@ -309,10 +325,11 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
                 weights = self.parameter_group.opr_mode_weights
                 weights_data = probe.constrain_opr_mode_orthogonality(weights)
                 weights.set_data(weights_data)
-                
+
             # Regularize multislice reconstruction.
-            if (object_.is_multislice
-                and object_.multislice_regularization_enabled(self.current_epoch)):
+            if object_.is_multislice and object_.multislice_regularization_enabled(
+                self.current_epoch
+            ):
                 object_.regularize_multislice()
 
             # Apply smoothness constraint.
@@ -326,7 +343,7 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             # Remove grid artifacts.
             if object_.remove_grid_artifacts_enabled(self.current_epoch):
                 object_.remove_grid_artifacts()
-                
+
             # Apply position constraint.
             if positions.position_mean_constraint_enabled(self.current_epoch):
                 positions.constrain_position_mean()
@@ -446,8 +463,7 @@ class AnalyticalIterativePtychographyReconstructor(
 
     def build_forward_model(self):
         self.forward_model = fm.PlanarPtychographyForwardModel(
-            self.parameter_group, retain_intermediates=True,
-            wavelength_m=self.dataset.wavelength_m
+            self.parameter_group, retain_intermediates=True, wavelength_m=self.dataset.wavelength_m
         )
 
     def run_post_epoch_hooks(self) -> None:

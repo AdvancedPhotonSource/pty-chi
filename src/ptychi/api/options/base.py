@@ -136,6 +136,7 @@ class ObjectOptions(ParameterOptions):
     multislice_regularization_unwrap_image_grad_method: enums.ImageGradientMethods = enums.ImageGradientMethods.FOURIER_SHIFT
     """
     The method for calculating the phase gradient during phase unwrapping.
+    
         - FOURIER_SHIFT: Use Fourier shift to perform shift.
         - NEAREST: Use nearest neighbor to perform shift.
         - FOURIER_DIFFERENTIATION: Use Fourier differentiation.
@@ -158,6 +159,7 @@ class ProbeOptions(ParameterOptions):
     The first OPR mode of all incoherent modes are always optimized aslong as
     `optimizable` is `True`. In addition to thtat, eigenmodes (of the first
     incoherent mode) are optimized when:
+    
     - The probe has multiple OPR modes;
     - `OPRModeWeightsConfig` is given.
     """
@@ -301,6 +303,15 @@ class ReconstructorOptions(Options):
 
     batch_size: int = 1
     """The number of data to process in each minibatch."""
+    
+    batching_mode: enums.BatchingModes = enums.BatchingModes.RANDOM
+    """
+    The batching mode to use. 
+    
+    - `enums.BatchingModes.RANDOM`: load a random set of data in each minibatch.
+    - `enums.BatchingModes.COMPACT`: load a spatially close cluster of data in each minibatch.
+      This is equivalent to the compact mode in PtychoSheleves.
+    """
 
     default_device: enums.Devices = enums.Devices.GPU
     """The default device to use for computation."""

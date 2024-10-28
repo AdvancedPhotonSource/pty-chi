@@ -1,6 +1,11 @@
 from enum import StrEnum, auto
 
 
+class BatchingModes(StrEnum):
+    RANDOM = auto()
+    COMPACT = auto()
+
+
 class Optimizers(StrEnum):
     SGD = auto()
     ADAM = auto()
