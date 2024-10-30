@@ -122,13 +122,13 @@ def test_multislice_ptycho_lsqml_joint_step_size(generate_gold=False, debug=Fals
     
     options.reconstructor_options.metric_function = api.LossFunctions.MSE_SQRT
     options.reconstructor_options.batch_size = 101
-    options.reconstructor_options.num_epochs = 32
+    options.reconstructor_options.num_epochs = 100
     options.reconstructor_options.default_device = api.Devices.GPU
     options.reconstructor_options.random_seed = 123
     #options.reconstructor_options.noise_model = api.NoiseModels.POISSON
 
     task = PtychographyTask(options)
-    task.run( 500 )
+    task.run( )
 
     recon = task.get_data_to_cpu('object', as_numpy=True)
     
