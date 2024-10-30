@@ -25,7 +25,13 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
 
 @dataclasses.dataclass
 class LSQMLObjectOptions(base.ObjectOptions):
-    pass
+    solve_obj_prb_step_size_jointly_for_first_slice_in_multislice: bool = False
+    """
+    Whether to solve the simultaneous object/probe step length calculation;
+    in FoldSlice they use independent (non-joint) step length calculation, but 
+    we're adding the option of using simultaneous AND non-simultaneous step 
+    length calculation.
+    """
 
 
 @dataclasses.dataclass

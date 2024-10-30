@@ -17,6 +17,7 @@ from ptychi.image_proc import (
 )
 from ptychi.ptychotorch.utils import chunked_processing
 import ptychi.maths as pmath
+
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
     import ptychi.api as api
@@ -33,7 +34,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
     This implementation uses automatic differentiation to get necessary gradients,
     but other steps, including the solving of the step size, are done analytically.
     """
-    
+
     parameter_group: "pg.PlanarPtychographyParameterGroup"
 
     def __init__(
@@ -166,10 +167,14 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     def update_object_and_probe(self, indices, chi, obj_patches, positions, gamma=1e-5):
         # TODO: avoid unnecessary computations when not both of object and probe are optimizable
-        delta_p_i = self._calculate_probe_update_direction(chi, obj_patches, slice_index=0)  # Eq. 24a
+        delta_p_i = self._calculate_probe_update_direction(
+            chi, obj_patches, slice_index=0
+        )  # Eq. 24a
         delta_o_i = self._calculate_object_patch_update_direction(indices, chi)
         delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
-        delta_o_hat, delta_o_i = self._precondition_object_update_direction(delta_o_i, positions, slice_index=0)
+        delta_o_hat, delta_o_i = self._precondition_object_update_direction(
+            delta_o_i, positions, slice_index=0
+        )
         alpha_o_i, alpha_p_i = self.calculate_object_and_probe_update_step_sizes(
             indices, chi, obj_patches, delta_o_i, delta_p_i, gamma=gamma
         )
@@ -208,26 +213,49 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.parameter_group.object.initialize_grad()
 
         for i_slice in range(object_.n_slices - 1, -1, -1):
+
             psi_im1 = self._get_psi_im1(i_slice, indices)
+
             delta_o_i = self._calculate_object_patch_update_direction(indices, chi, psi_im1=psi_im1)
+
             delta_o_hat, delta_o_i = self._precondition_object_update_direction(
                 delta_o_i, positions
             )
+
             alpha_o_i = self.calculate_object_update_step_sizes(
                 indices, chi, delta_o_i, gamma=gamma
             )
+
             self._record_object_slice_gradient(i_slice, delta_o_hat, alpha_o_i)
 
             # Conjugate modulate and backpropagate.
-            chi = chi * obj_patches[:, i_slice].conj()[:, None, :, :]
             if i_slice > 0:
+                chi = chi * obj_patches[:, i_slice].conj()[:, None, :, :]
                 chi = self.forward_model.propagate_to_previous_slice(chi, slice_index=i_slice)
 
-        delta_p_i = self._calculate_probe_update_direction(chi, None)  # Eq. 24a
+        delta_p_i = self._calculate_probe_update_direction(chi, obj_patches = obj_patches, slice_index = 0 )  # Eq. 24a
         delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
-        alpha_p_i = self.calculate_probe_update_step_sizes(
-            chi, obj_patches, delta_p_i, gamma=gamma
-        )
+
+        if self.parameter_group.object.options.solve_obj_prb_step_size_jointly_for_first_slice_in_multislice:
+
+            (alpha_o_i, alpha_p_i) = self.calculate_object_and_probe_update_step_sizes(
+                indices, chi, obj_patches, delta_o_i, delta_p_i, gamma=gamma
+            )
+
+            self._record_object_slice_gradient(0, delta_o_hat, alpha_o_i)
+
+        else:
+
+            alpha_p_i = self.calculate_probe_update_step_sizes(
+                chi, obj_patches, delta_p_i, gamma=gamma
+            )
+
+
+
+
+
+
+
 
         if self.parameter_group.probe.optimization_enabled(self.current_epoch):
             self._apply_probe_update(alpha_p_i, delta_p_hat)
@@ -280,7 +308,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         obj_patches = obj_patches[:, slice_index]
         delta_o_i = delta_o_i[:, 0]
-        
+
         if self.parameter_group.probe.has_multiple_opr_modes:
             # Shape of probe:         (n_batch, n_modes, h, w)
             probe = self.parameter_group.probe.get_unique_probes(
@@ -294,18 +322,80 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_p_o = delta_p_i * obj_patches[:, None, :, :]
         delta_o_patches_p = delta_o_i[:, None, :, :] * probe
 
+
+
+
+
+        # INCORRECT MATH VERSION
+        # # Shape of aij:               (batch_size,)
+        # a11 = (delta_o_patches_p.abs() ** 2).sum(-1).sum(-1).sum(-1) + gamma
+        # a22 = (delta_p_o.abs() ** 2).sum(-1).sum(-1).sum(-1) + gamma
+
+        # a12 = (delta_o_patches_p * delta_p_o.conj()).sum(-1).sum(-1).sum(-1)
+        # a21 = a12.conj()
+
+        # b1 = torch.real(delta_o_patches_p.conj() * chi).sum(-1).sum(-1).sum(-1)
+        # b2 = torch.real(delta_p_o.conj() * chi).sum(-1).sum(-1).sum(-1)
+
+
+        # # INCORRECT MATH VERSION, ONLY DOMINANT PROBE MODE
+        # # Shape of aij:               (batch_size,)
+        # a11 = (delta_o_patches_p.abs() ** 2)[:, 0, ...].sum(-1).sum(-1) + gamma
+        # a11 += 0.5 * torch.mean( a11, dim = 0 )
+
+        # a22 = (delta_p_o.abs() ** 2)[:, 0, ...].sum(-1).sum(-1) + gamma
+        # a22 += 0.5 * torch.mean( a22, dim = 0 )
+
+        # a12 = (delta_o_patches_p * delta_p_o.conj())[:, 0, ...].sum(-1).sum(-1)
+        # a21 = a12.conj()
+
+        # b1 = torch.real(delta_o_patches_p.conj() * chi)[:, 0, ...].sum(-1).sum(-1)
+        # b2 = torch.real(delta_p_o.conj() * chi)[:, 0, ...].sum(-1).sum(-1)
+
+
+
+
+
+
+        # CORRECT MATH VERSION, USE ALL PROBE MODES
         # Shape of aij:               (batch_size,)
-        a11 = (delta_o_patches_p.abs() ** 2).sum(-1).sum(-1).sum(-1) + gamma
-        a12 = (delta_o_patches_p * delta_p_o.conj()).sum(-1).sum(-1).sum(-1)
-        a21 = a12.conj()
+        
+        a11 = (delta_o_patches_p.abs() ** 2).sum(-1).sum(-1).sum(-1) + gamma        # sum over r (spatial pixel index), p (incoherent mode index)
+        a11 += 0.5 * torch.mean( a11, dim = 0 )
+
         a22 = (delta_p_o.abs() ** 2).sum(-1).sum(-1).sum(-1) + gamma
+        a22 += 0.5 * torch.mean( a22, dim = 0 )
+
+        a12 = torch.real(delta_o_patches_p * delta_p_o.conj()).sum(-1).sum(-1).sum(-1)
+        a21 = a12
+
         b1 = torch.real(delta_o_patches_p.conj() * chi).sum(-1).sum(-1).sum(-1)
         b2 = torch.real(delta_p_o.conj() * chi).sum(-1).sum(-1).sum(-1)
+
+    
+        # # CORRECT MATH VERSION, ONLY DOMINANT PROBE MODE
+        # # Shape of aij:               (batch_size,)
+        # a11 = (delta_o_patches_p.abs() ** 2)[:, 0, ...].sum(-1).sum(-1) + gamma
+        # a11 += 0.5 * torch.mean( a11, dim = 0 )
+
+        # a22 = (delta_p_o.abs() ** 2)[:, 0, ...].sum(-1).sum(-1) + gamma
+        # a22 += 0.5 * torch.mean( a22, dim = 0 )
+
+        # a12 = torch.real(delta_o_patches_p * delta_p_o.conj())[:, 0, ...].sum(-1).sum(-1)
+        # a21 = a12
+
+        # b1 = torch.real(delta_o_patches_p.conj() * chi)[:, 0, ...].sum(-1).sum(-1)
+        # b2 = torch.real(delta_p_o.conj() * chi)[:, 0, ...].sum(-1).sum(-1)
+
+
+
+
 
         a_mat = torch.stack([a11, a12, a21, a22], dim=1).view(-1, 2, 2)
         b_vec = torch.stack([b1, b2], dim=1).view(-1, 2).type(a_mat.dtype)
         alpha_vec = torch.linalg.solve(a_mat, b_vec)
-        alpha_vec = alpha_vec.abs()
+
+        #alpha_vec = alpha_vec.abs()            # IF WE'RE DOING THE MATH CORRECTLY, THIS SHOULDN'T BE NEEEDED
 
         alpha_o_i = alpha_vec[:, 0]
         alpha_p_i = alpha_vec[:, 1]
@@ -321,7 +411,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         # Just take the first slice.
         delta_o_i = delta_o_i[:, 0]
-        
+
         if self.parameter_group.probe.has_multiple_opr_modes:
             # Shape of probe:         (n_batch, n_modes, h, w)
             probe = self.parameter_group.probe.get_unique_probes(
@@ -352,7 +442,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         # Just take the first slice.
         obj_patches = obj_patches[:, 0]
-        
+
         # Shape of delta_p_o/o_p:     (batch_size, n_probe_modes, h, w)
         delta_p_o = delta_p_i * obj_patches[:, None, :, :]
 
@@ -473,10 +563,12 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_o_patches = torch.sum(chi * p.conj(), dim=1)  # Eq. 24b
         return delta_o_patches[:, None, :, :]
 
-    def _precondition_object_update_direction(self, delta_o_patches, positions, alpha_mix=0.05, slice_index=0):
+    def _precondition_object_update_direction(
+        self, delta_o_patches, positions, alpha_mix=0.05, slice_index=0
+    ):
         """
         Eq. 25b of Odstrcil, 2018.
-        
+
         Returns
         -------
         Tensor
@@ -485,7 +577,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             A (batch_size, 1, h, w) tensor giving the preconditioned update direction for object patches.
         """
         delta_o_patches = delta_o_patches[:, slice_index]
-        
+
         # Stitch all delta O patches on the object buffer
         # Shape of delta_o_hat:  (h_whole, w_whole)
         delta_o_hat = self.parameter_group.object.place_patches_on_empty_buffer(
@@ -675,7 +767,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         # Shape of residue_update:          (batch_size, h, w)
         # Shape of eigenmode_i:             (h, w)
         # Shape of weights_i:               (batch_size,)
-        
+
         obj_patches = obj_patches[:, 0]
 
         # Update eigenmode.
@@ -718,7 +810,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         # Just take the first slice.
         obj_patches = obj_patches[:, 0]
-        
+
         mean_probe = self.parameter_group.probe.get_mode_and_opr_mode(mode=0, opr_mode=0)
         op = obj_patches * mean_probe
         num = torch.real(op.conj() * chi[:, 0, ...])
