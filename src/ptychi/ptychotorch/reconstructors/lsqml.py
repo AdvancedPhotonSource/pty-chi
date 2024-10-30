@@ -250,13 +250,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 chi, obj_patches, delta_p_i, gamma=gamma
             )
 
-
-
-
-
-
-
-
         if self.parameter_group.probe.optimization_enabled(self.current_epoch):
             self._apply_probe_update(alpha_p_i, delta_p_hat)
 
