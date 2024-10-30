@@ -322,44 +322,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_p_o = delta_p_i * obj_patches[:, None, :, :]
         delta_o_patches_p = delta_o_i[:, None, :, :] * probe
 
-
-
-
-
-        # INCORRECT MATH VERSION
-        # # Shape of aij:               (batch_size,)
-        # a11 = (delta_o_patches_p.abs() ** 2).sum(-1).sum(-1).sum(-1) + gamma
-        # a22 = (delta_p_o.abs() ** 2).sum(-1).sum(-1).sum(-1) + gamma
-
-        # a12 = (delta_o_patches_p * delta_p_o.conj()).sum(-1).sum(-1).sum(-1)
-        # a21 = a12.conj()
-
-        # b1 = torch.real(delta_o_patches_p.conj() * chi).sum(-1).sum(-1).sum(-1)
-        # b2 = torch.real(delta_p_o.conj() * chi).sum(-1).sum(-1).sum(-1)
-
-
-        # # INCORRECT MATH VERSION, ONLY DOMINANT PROBE MODE
-        # # Shape of aij:               (batch_size,)
-        # a11 = (delta_o_patches_p.abs() ** 2)[:, 0, ...].sum(-1).sum(-1) + gamma
-        # a11 += 0.5 * torch.mean( a11, dim = 0 )
-
-        # a22 = (delta_p_o.abs() ** 2)[:, 0, ...].sum(-1).sum(-1) + gamma
-        # a22 += 0.5 * torch.mean( a22, dim = 0 )
-
-        # a12 = (delta_o_patches_p * delta_p_o.conj())[:, 0, ...].sum(-1).sum(-1)
-        # a21 = a12.conj()
-
-        # b1 = torch.real(delta_o_patches_p.conj() * chi)[:, 0, ...].sum(-1).sum(-1)
-        # b2 = torch.real(delta_p_o.conj() * chi)[:, 0, ...].sum(-1).sum(-1)
-
-
-
-
-
-
-        # CORRECT MATH VERSION, USE ALL PROBE MODES
         # Shape of aij:               (batch_size,)
-        
         a11 = (delta_o_patches_p.abs() ** 2).sum(-1).sum(-1).sum(-1) + gamma        # sum over r (spatial pixel index), p (incoherent mode index)
         a11 += 0.5 * torch.mean( a11, dim = 0 )
 
@@ -372,30 +335,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         b1 = torch.real(delta_o_patches_p.conj() * chi).sum(-1).sum(-1).sum(-1)
         b2 = torch.real(delta_p_o.conj() * chi).sum(-1).sum(-1).sum(-1)
 
-    
-        # # CORRECT MATH VERSION, ONLY DOMINANT PROBE MODE
-        # # Shape of aij:               (batch_size,)
-        # a11 = (delta_o_patches_p.abs() ** 2)[:, 0, ...].sum(-1).sum(-1) + gamma
-        # a11 += 0.5 * torch.mean( a11, dim = 0 )
-
-        # a22 = (delta_p_o.abs() ** 2)[:, 0, ...].sum(-1).sum(-1) + gamma
-        # a22 += 0.5 * torch.mean( a22, dim = 0 )
-
-        # a12 = torch.real(delta_o_patches_p * delta_p_o.conj())[:, 0, ...].sum(-1).sum(-1)
-        # a21 = a12
-
-        # b1 = torch.real(delta_o_patches_p.conj() * chi)[:, 0, ...].sum(-1).sum(-1)
-        # b2 = torch.real(delta_p_o.conj() * chi)[:, 0, ...].sum(-1).sum(-1)
-
-
-
-
-
         a_mat = torch.stack([a11, a12, a21, a22], dim=1).view(-1, 2, 2)
         b_vec = torch.stack([b1, b2], dim=1).view(-1, 2).type(a_mat.dtype)
         alpha_vec = torch.linalg.solve(a_mat, b_vec)
-
-        #alpha_vec = alpha_vec.abs()            # IF WE'RE DOING THE MATH CORRECTLY, THIS SHOULDN'T BE NEEEDED
 
         alpha_o_i = alpha_vec[:, 0]
         alpha_p_i = alpha_vec[:, 1]
