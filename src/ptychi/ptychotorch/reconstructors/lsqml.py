@@ -85,7 +85,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.build_noise_model()
 
     def build_loss_tracker(self):
-        f = self.noise_model.nll if self.displayed_loss_function is None else self.displayed_loss_function
+        f = (
+            self.noise_model.nll
+            if self.displayed_loss_function is None
+            else self.displayed_loss_function
+        )
         self.loss_tracker = LossTracker(metric_function=f)
 
     def build_noise_model(self):
@@ -213,19 +217,14 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.parameter_group.object.initialize_grad()
 
         for i_slice in range(object_.n_slices - 1, -1, -1):
-
             psi_im1 = self._get_psi_im1(i_slice, indices)
-
             delta_o_i = self._calculate_object_patch_update_direction(indices, chi, psi_im1=psi_im1)
-
             delta_o_hat, delta_o_i = self._precondition_object_update_direction(
                 delta_o_i, positions
             )
-
             alpha_o_i = self.calculate_object_update_step_sizes(
                 indices, chi, delta_o_i, gamma=gamma
             )
-
             self._record_object_slice_gradient(i_slice, delta_o_hat, alpha_o_i)
 
             # Conjugate modulate and backpropagate.
@@ -233,19 +232,17 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 chi = chi * obj_patches[:, i_slice].conj()[:, None, :, :]
                 chi = self.forward_model.propagate_to_previous_slice(chi, slice_index=i_slice)
 
-        delta_p_i = self._calculate_probe_update_direction(chi, obj_patches = obj_patches, slice_index = 0 )  # Eq. 24a
+        delta_p_i = self._calculate_probe_update_direction(
+            chi, obj_patches=obj_patches, slice_index=0
+        )  # Eq. 24a
         delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
 
-        if self.parameter_group.object.options.solve_obj_prb_step_size_jointly_for_first_slice_in_multislice:
-
+        if self.options.solve_obj_prb_step_size_jointly_for_first_slice_in_multislice:
             (alpha_o_i, alpha_p_i) = self.calculate_object_and_probe_update_step_sizes(
-                indices, chi, obj_patches, delta_o_i, delta_p_i, gamma=gamma
+                indices, chi, obj_patches, delta_o_i, delta_p_i, gamma=gamma, slice_index=0
             )
-
             self._record_object_slice_gradient(0, delta_o_hat, alpha_o_i)
-
         else:
-
             alpha_p_i = self.calculate_probe_update_step_sizes(
                 chi, obj_patches, delta_p_i, gamma=gamma
             )
@@ -316,11 +313,13 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_o_patches_p = delta_o_i[:, None, :, :] * probe
 
         # Shape of aij:               (batch_size,)
-        a11 = (delta_o_patches_p.abs() ** 2).sum(-1).sum(-1).sum(-1) + gamma        # sum over r (spatial pixel index), p (incoherent mode index)
-        a11 += 0.5 * torch.mean( a11, dim = 0 )
+        a11 = (delta_o_patches_p.abs() ** 2).sum(-1).sum(-1).sum(
+            -1
+        ) + gamma  # sum over r (spatial pixel index), p (incoherent mode index)
+        a11 += 0.5 * torch.mean(a11, dim=0)
 
         a22 = (delta_p_o.abs() ** 2).sum(-1).sum(-1).sum(-1) + gamma
-        a22 += 0.5 * torch.mean( a22, dim = 0 )
+        a22 += 0.5 * torch.mean(a22, dim=0)
 
         a12 = torch.real(delta_o_patches_p * delta_p_o.conj()).sum(-1).sum(-1).sum(-1)
         a21 = a12
