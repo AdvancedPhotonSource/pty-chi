@@ -10,6 +10,8 @@ from ptychi.ptychotorch.utils import get_default_complex_dtype, to_tensor
 
 if TYPE_CHECKING:
     import ptychi.api as api
+    
+logger = logging.getLogger(__name__)
 
 
 class Object(ds.ReconstructParameter):
@@ -57,7 +59,7 @@ class Object(ds.ReconstructParameter):
         l1_grad = torch.sgn(data)
         data = data - self.l1_norm_constraint_weight * l1_grad
         self.set_data(data)
-        logging.debug("L1 norm constraint applied to object.")
+        logger.debug("L1 norm constraint applied to object.")
 
     def smoothness_constraint_enabled(self, current_epoch: int):
         if (
@@ -228,7 +230,7 @@ class PlanarObject(Object):
         Smooth the magnitude of the object.
         """
         if self.smoothness_constraint_alpha > 1.0 / 8:
-            logging.warning(
+            logger.warning(
                 f"Alpha = {self.smoothness_constraint_alpha} in smoothness constraint should be less than 1/8."
             )
         psf = torch.ones(3, 3, device=self.device) * self.smoothness_constraint_alpha

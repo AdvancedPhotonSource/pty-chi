@@ -59,13 +59,12 @@ def test_2d_ptycho_probe_power_constraint_lsqml(pytestconfig, generate_gold=Fals
     options.reconstructor_options.default_device = api.Devices.GPU
     options.reconstructor_options.gpu_indices = [0]
     options.reconstructor_options.displayed_loss_function = api.LossFunctions.MSE_SQRT
-    options.reconstructor_options.log_level = logging.INFO
     
     with PtychographyTask(options) as task:
         task.run()
         # This should be equivalent to:
         # for _ in range(64):
-        #     task.iterate(1)
+        #     task.run(1)
         
         recon = task.get_data_to_cpu(name='object', as_numpy=True)[0]
         
@@ -131,13 +130,12 @@ def test_2d_ptycho_probe_power_constraint_ad(pytestconfig, generate_gold=False, 
     options.reconstructor_options.default_device = api.Devices.GPU
     options.reconstructor_options.gpu_indices = [0]
     options.reconstructor_options.displayed_loss_function = api.LossFunctions.MSE_SQRT
-    options.reconstructor_options.log_level = logging.INFO
     
     with PtychographyTask(options) as task:
         task.run()
         # This should be equivalent to:
         # for _ in range(64):
-        #     task.iterate(1)
+        #     task.run(1)
         
         recon = task.get_data_to_cpu(name='object', as_numpy=True)[0]
         

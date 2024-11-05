@@ -16,6 +16,8 @@ from ptychi.propagate import FourierPropagator, WavefieldPropagator
 
 if TYPE_CHECKING:
     import ptychi.api as api
+    
+logger = logging.getLogger(__name__)
 
 
 class Probe(ds.ReconstructParameter):
@@ -371,7 +373,7 @@ class Probe(ds.ReconstructParameter):
         self.set_data(self.data * power_correction)
         object_.set_data(object_.data / power_correction)
 
-        logging.info("Probe and object scaled by {}.".format(power_correction))
+        logger.info("Probe and object scaled by {}.".format(power_correction))
 
     def post_update_hook(self) -> None:
         super().post_update_hook()

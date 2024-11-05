@@ -12,6 +12,8 @@ import ptychi.maps as maps
 import ptychi.api.options.base as obase
 if TYPE_CHECKING:
     import ptychi.api as api
+    
+logger = logging.getLogger(__name__)
 
 
 class ComplexTensor(Module):
@@ -245,7 +247,7 @@ class ReconstructParameter(Module):
             enabled = True
         else:
             enabled = False
-        logging.debug(f"{self.name} optimization enabled at epoch {epoch}: {enabled}")
+        logger.debug(f"{self.name} optimization enabled at epoch {epoch}: {enabled}")
         return enabled
 
     def get_config_dict(self):

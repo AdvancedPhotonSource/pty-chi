@@ -12,6 +12,8 @@ import numpy as np
 
 from ptychi.ptychotorch.utils import to_tensor, to_numpy
 
+logger = logging.getLogger(__name__)
+
 
 class PtychographyDataset(Dataset):
     def __init__(
@@ -28,7 +30,7 @@ class PtychographyDataset(Dataset):
         self.patterns = to_tensor(patterns, device="cpu")
         if fft_shift:
             self.patterns = torch.fft.fftshift(self.patterns, dim=(-2, -1))
-            logging.info("Diffraction data have been FFT-shifted.")
+            logger.info("Diffraction data have been FFT-shifted.")
 
         if valid_pixel_mask is None:
             valid_pixel_mask = torch.ones(self.patterns.shape[-2:])

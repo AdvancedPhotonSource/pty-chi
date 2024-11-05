@@ -21,6 +21,8 @@ import ptychi.maths as pmath
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
     import ptychi.api as api
+    
+logger = logging.getLogger(__name__)
 
 
 class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
@@ -69,7 +71,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     def check_inputs(self, *args, **kwargs):
         if self.parameter_group.opr_mode_weights.optimizer is not None:
-            logging.warning(
+            logger.warning(
                 "Selecting optimizer for OPRModeWeights is not supported for "
                 "LSQMLReconstructor and will be disregarded."
             )
@@ -103,7 +105,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     def prepare_data(self, *args, **kwargs):
         self.parameter_group.probe.normalize_eigenmodes()
-        logging.info("Probe eigenmodes normalized.")
+        logger.info("Probe eigenmodes normalized.")
 
     def get_psi_far_step_size(self, y_pred, y_true, indices, eps=1e-5):
         if isinstance(self.noise_model, fm.PtychographyGaussianNoiseModel):
@@ -123,7 +125,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             # Add perturbation.
             alpha = alpha + torch.randn(alpha.shape, device=alpha.device) * 1e-2
             self.alpha_psi_far_all_points[indices] = alpha
-            logging.debug("poisson alpha_psi_far: mean = {}".format(torch.mean(alpha)))
+            logger.debug("poisson alpha_psi_far: mean = {}".format(torch.mean(alpha)))
         return alpha
 
     def run_reciprocal_space_step(self, y_pred, y_true, indices):
@@ -335,8 +337,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         alpha_o_i = alpha_vec[:, 0]
         alpha_p_i = alpha_vec[:, 1]
 
-        logging.debug("alpha_p_i: min={}, max={}".format(alpha_p_i.min(), alpha_p_i.max()))
-        logging.debug("alpha_o_i: min={}, max={}".format(alpha_o_i.min(), alpha_o_i.max()))
+        logger.debug("alpha_p_i: min={}, max={}".format(alpha_p_i.min(), alpha_p_i.max()))
+        logger.debug("alpha_o_i: min={}, max={}".format(alpha_o_i.min(), alpha_o_i.max()))
 
         return alpha_o_i, alpha_p_i
 
@@ -367,7 +369,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         alpha_o_i = numerator / (denominator + gamma)
 
-        logging.debug(
+        logger.debug(
             "alpha_o_i: min={}, max={}, trim_mean={}".format(
                 alpha_o_i.min(), alpha_o_i.max(), pmath.trim_mean(alpha_o_i)
             )
@@ -393,7 +395,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         alpha_p_i = numerator / (denominator + gamma)
 
-        logging.debug("alpha_p_i: min={}, max={}".format(alpha_p_i.min(), alpha_p_i.max()))
+        logger.debug("alpha_p_i: min={}, max={}".format(alpha_p_i.min(), alpha_p_i.max()))
         return alpha_p_i
 
     def _calculate_probe_update_direction(self, chi, obj_patches=None, slice_index=0):

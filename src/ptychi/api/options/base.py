@@ -8,6 +8,7 @@ from torch import Tensor
 import ptychi.api.enums as enums
 from ptychi.api.options.plan import OptimizationPlan
 
+
 @dataclasses.dataclass
 class Options:
 
@@ -343,9 +344,6 @@ class ReconstructorOptions(Options):
     argument in some reconstructors, this function is only used for cost displaying
     and is not involved in the reconstruction math.
     """
-
-    log_level: int | str = logging.INFO
-    """The log level to use for logging."""
 
     def get_reconstructor_type(self) -> enums.Reconstructors:
         return enums.Reconstructors.base
