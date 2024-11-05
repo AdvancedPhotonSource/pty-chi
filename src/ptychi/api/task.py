@@ -18,6 +18,7 @@ import ptychi.data_structures.parameter_group as paramgrp
 import ptychi.maps as maps
 from ptychi.data_structures.base import DummyParameter
 from ptychi.ptychotorch.io_handles import PtychographyDataset
+from ptychi.ptychotorch.reconstructors.base import Reconstructor
 from ptychi.ptychotorch.utils import to_tensor
 import ptychi.ptychotorch.utils as utils
 
@@ -64,7 +65,7 @@ class PtychographyTask(Task):
         self.probe = None
         self.probe_positions = None
         self.opr_mode_weights = None
-        self.reconstructor = None
+        self.reconstructor: Reconstructor | None = None
 
         self.build()
 
