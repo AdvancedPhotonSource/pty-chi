@@ -6,7 +6,6 @@ from .api import (
     IterativeAlgorithm,
 )
 from .dm import DifferenceMap
-from .pie import PtychographicIterativeEngine
 from .raar import RelaxedAveragedAlternatingReflections
 
 __all__ = [
@@ -16,6 +15,5 @@ __all__ = [
     "DetectorData",
     "DifferenceMap",
     "IterativeAlgorithm",
-    "PtychographicIterativeEngine",
     "RelaxedAveragedAlternatingReflections",
 ]
