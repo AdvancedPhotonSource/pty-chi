@@ -202,10 +202,10 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             self.parameter_group.object.optimization_enabled(self.current_epoch)
             and self.options.batching_mode == enums.BatchingModes.RANDOM
         ):
-            self._apply_object_update(self.alpha_object_all_slices[0], delta_o_precond)
+            self._apply_object_update(self.alpha_object_all_slices, delta_o_precond)
         else:
             self._record_object_slice_gradient(
-                0, delta_o_comb, alpha_o_i=None, add_to_existing=True
+                0, delta_o_comb, add_to_existing=True
             )
 
         self.update_variable_probe(indices, chi, delta_p_i, delta_p_hat, obj_patches)
@@ -253,11 +253,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             # accumulated over all minibatches.
             if self.options.batching_mode == enums.BatchingModes.RANDOM:
                 self._record_object_slice_gradient(
-                    i_slice, delta_o_precond, alpha_o_i=alpha_o_i, add_to_existing=False
+                    i_slice, delta_o_precond, add_to_existing=False
                 )
             else:
                 self._record_object_slice_gradient(
-                    i_slice, delta_o_comb, alpha_o_i=None, add_to_existing=True
+                    i_slice, delta_o_comb, add_to_existing=True
                 )
 
             delta_p_i = self._calculate_probe_update_direction(
@@ -272,7 +272,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                         indices, chi, obj_patches, delta_o_i, delta_p_i, gamma=gamma, slice_index=0
                     )
                     if self.options.batching_mode == enums.BatchingModes.RANDOM:
-                        self._record_object_slice_gradient(0, delta_o_precond, alpha_o_i)
+                        self._record_object_slice_gradient(0, delta_o_precond)
                 else:
                     alpha_p_i = self.calculate_probe_update_step_sizes(
                         chi, obj_patches, delta_p_i, gamma=gamma
@@ -288,7 +288,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             self.parameter_group.object.optimization_enabled(self.current_epoch)
             and self.options.batching_mode == enums.BatchingModes.RANDOM
         ):
-            self._apply_object_update(None, None)
+            self._apply_object_update(self.alpha_object_all_slices, None)
 
         self.update_variable_probe(indices, chi, delta_p_i, delta_p_hat, obj_patches)
 
@@ -642,30 +642,37 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 self.alpha_object_all_slices[...] = 0
 
     def _record_object_slice_gradient(
-        self, i_slice, delta_o_hat, alpha_o_i=None, add_to_existing=False
+        self, i_slice, delta_o_hat, add_to_existing=False
     ):
         """
         Record the gradient of one slice of a multislice object.
         """
-        if alpha_o_i is not None:
-            alpha_mean = pmath.trim_mean(alpha_o_i, 0.1)
         if not add_to_existing:
-            self.parameter_group.object.set_grad(-alpha_mean * delta_o_hat[0], slicer=i_slice)
+            self.parameter_group.object.set_grad(-delta_o_hat[0], slicer=i_slice)
         else:
             self.parameter_group.object.set_grad(
                 self.parameter_group.object.get_grad()[i_slice] - delta_o_hat[0], slicer=i_slice
             )
 
-    def _apply_object_update(self, alpha_o_mean=None, delta_o_hat=None):
+    def _apply_object_update(self, alpha_o_mean_all_slices, delta_o_hat=None):
         """
         Apply object update using Eq. 27b of Odstrcil, 2018.
 
         If both `alpha_o_mean` and `delta_o_hat` are given, the object's gradient is set
         using averaged step size and `delta_o_hat`. Otherwise, we assume the gradient
         is already set previously, and just simply run the optimizer step.
+        
+        Parameters
+        ----------
+        alpha_o_mean_all_slices : Tensor
+            A (n_slices,) tensor giving the averaged step size for each object slice.
+        delta_o_hat : Tensor
+            A (n_slices, h, w) tensor giving the update direction for the whole object. If None,
+            then the (negative) update direction should be stored in `object.grad`.
         """
-        if delta_o_hat is not None and alpha_o_mean is not None:
-            self.parameter_group.object.set_grad(-alpha_o_mean * delta_o_hat)
+        if delta_o_hat is None:
+            delta_o_hat = -self.parameter_group.object.get_grad()
+        self.parameter_group.object.set_grad(-alpha_o_mean_all_slices[:, None, None] * delta_o_hat)
         self.parameter_group.object.optimizer.step()
 
     def update_probe_positions(self, chi, indices, obj_patches, delta_o_patches):
