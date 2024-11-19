@@ -67,6 +67,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.alpha_psi_far = 0.5
         self.alpha_psi_far_all_points = None
         self.alpha_object_all_slices = torch.tensor([1.0 for _ in range(self.parameter_group.object.n_slices)])
+        self.alpha_probe_all_minibatches = []
+        
 
     def check_inputs(self, *args, **kwargs):
         if self.parameter_group.opr_mode_weights.optimizer is not None:
@@ -175,6 +177,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         # TODO: avoid unnecessary computations when not both of object and probe are optimizable
         self._initialize_object_gradient()
         self._initialize_object_step_size_buffer()
+        self.alpha_probe_all_minibatches = []
         
         delta_p_i = self._calculate_probe_update_direction(
             chi, obj_patches, slice_index=0
@@ -231,6 +234,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         object_ = self.parameter_group.object
         self._initialize_object_gradient()
         self._initialize_object_step_size_buffer()
+        self.alpha_probe_all_minibatches = []
 
         for i_slice in range(object_.n_slices - 1, -1, -1):
             if i_slice < object_.n_slices - 1:
@@ -350,17 +354,19 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_o_patches_p = delta_o_i[:, None, :, :] * probe
 
         # Shape of aij:               (batch_size,)
-        a11 = (delta_o_patches_p.abs() ** 2).sum(-1).sum(-1).sum(-1) + gamma
+        a11 = (delta_o_patches_p.abs() ** 2).sum(-1).sum(-1).sum(-1) 
+        a11 = a11 + 0.1 * torch.mean(a11, dim=0)
         a12 = (delta_o_patches_p * delta_p_o.conj()).sum(-1).sum(-1).sum(-1)
         a21 = a12.conj()
-        a22 = (delta_p_o.abs() ** 2).sum(-1).sum(-1).sum(-1) + gamma
+        a22 = (delta_p_o.abs() ** 2).sum(-1).sum(-1).sum(-1)
+        a22 = a22 + 0.1 * torch.mean(a22, dim=0)
         b1 = torch.real(delta_o_patches_p.conj() * chi).sum(-1).sum(-1).sum(-1)
         b2 = torch.real(delta_p_o.conj() * chi).sum(-1).sum(-1).sum(-1)
 
         a_mat = torch.stack([a11, a12, a21, a22], dim=1).view(-1, 2, 2)
         b_vec = torch.stack([b1, b2], dim=1).view(-1, 2).type(a_mat.dtype)
         alpha_vec = torch.linalg.solve(a_mat, b_vec)
-        alpha_vec = alpha_vec.abs()
+        alpha_vec = alpha_vec.real.clip(0, None)
 
         alpha_o_i = alpha_vec[:, 0]
         alpha_p_i = alpha_vec[:, 1]
@@ -496,7 +502,13 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 value=0.0,
             )
 
-        self.parameter_group.probe.set_grad(-delta_p_hat * torch.mean(alpha_p_i))
+        if self.options.batching_mode == enums.BatchingModes.COMPACT:
+            # In compact mode, object is updated only once per epoch. To match the probe to this,
+            # we divide the probe step size by the number of minibatches before each probe update.
+            alpha_p_i = alpha_p_i / len(self.dataloader)
+        alpha_p_mean = torch.mean(alpha_p_i)
+        self.alpha_probe_all_minibatches.append(alpha_p_mean)
+        self.parameter_group.probe.set_grad(-delta_p_hat * alpha_p_mean)
         self.parameter_group.probe.optimizer.step()
 
     def _calculate_object_patch_update_direction(self, indices, chi, psi_im1=None):
@@ -572,7 +584,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         )
         return delta_o_hat[None, ...]
 
-    def _precondition_object_update_direction(self, delta_o_hat, positions=None, alpha_mix=0.05, slice_index=0):
+    def _precondition_object_update_direction(self, delta_o_hat, positions=None, alpha_mix=0.1, slice_index=0):
         """
         Eq. 25b of Odstrcil, 2018.
 
