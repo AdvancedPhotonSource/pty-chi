@@ -31,6 +31,9 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
     """
     If True, object and probe step sizes will only be calculated using the first probe mode.
     """
+    
+    momentum_acceleration_gain: float = 0.0
+    """The gain of momentum acceleration. If 0, momentum acceleration is not used."""
 
     beta_LSQ: float = 0.9
     """

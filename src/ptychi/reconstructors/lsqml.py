@@ -69,6 +69,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.alpha_object_all_slices = torch.tensor([1.0 for _ in range(self.parameter_group.object.n_slices)])
         self.alpha_probe_all_minibatches = []
         
+        self.object_momentum_params = {}
+        self.probe_momentum_params = {}
 
     def check_inputs(self, *args, **kwargs):
         if self.parameter_group.opr_mode_weights.optimizer is not None:
@@ -178,11 +180,13 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self._initialize_object_gradient()
         self._initialize_object_step_size_buffer()
         self.alpha_probe_all_minibatches = []
+        self._initialize_momentum_buffers()
         
         delta_p_i = self._calculate_probe_update_direction(
             chi, obj_patches, slice_index=0
         )  # Eq. 24a
         delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
+        self._update_momentum_buffers(delta_p_hat)
 
         delta_o_i = self._calculate_object_patch_update_direction(indices, chi)
         delta_o_comb = self._combine_object_patch_update_directions(delta_o_i, positions)
@@ -235,6 +239,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self._initialize_object_gradient()
         self._initialize_object_step_size_buffer()
         self.alpha_probe_all_minibatches = []
+        self._initialize_momentum_buffers()
 
         for i_slice in range(object_.n_slices - 1, -1, -1):
             if i_slice < object_.n_slices - 1:
@@ -266,6 +271,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
             if i_slice == 0:
                 delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
+                self._update_momentum_buffers(delta_p_hat)
 
                 if self.options.solve_obj_prb_step_size_jointly_for_first_slice_in_multislice:
                     (alpha_o_i, alpha_p_i) = self.calculate_object_and_probe_update_step_sizes(
@@ -510,6 +516,65 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.alpha_probe_all_minibatches.append(alpha_p_mean)
         self.parameter_group.probe.set_grad(-delta_p_hat * alpha_p_mean)
         self.parameter_group.probe.optimizer.step()
+        
+    def _apply_probe_momentum(self, alpha_p_mean, delta_p_hat):
+        """
+        Apply momentum acceleration to the probe (only the first OPR mode). This is a
+        special momentum acceleration used in PtychoShelves, which behaves somewhat
+        differently from the momentum in `torch.optim.SGD`.
+        
+        Parameters
+        ----------
+        alpha_p_mean: float
+            A scalar giving the mean probe step size.
+        delta_p_hat: torch.Tensor
+            A (n_probe_modes, h, w) tensor giving the accumulated probe update direction
+            of the first OPR mode.
+        """
+        
+        probe = self.parameter_group.probe
+        if self.current_epoch == probe.optimization_plan.start:
+            self.probe_momentum_params["update_direction_history"] = []
+            self.probe_momentum_params["velocity_map"] = torch.zeros_like(delta_p_hat)
+        
+        upd = delta_p_hat * alpha_p_mean
+        upd = upd / pmath.norm(upd, dim=(-1, -2), keepdims=True)
+        self.probe_momentum_params["update_direction_history"].append(upd)
+        
+        momentum_memory = 3
+        
+        if self.current_epoch > momentum_memory + probe.optimization_plan.start:
+            # Remove the oldest momentum update.
+            self.probe_momentum_params["update_direction_history"].pop(0)
+            for i_mode in range(probe.n_modes):
+                # Project older updates to the latest one.
+                projected_updates = [
+                    (self.probe_momentum_params["update_direction_history"][i][i_mode] * 
+                    self.probe_momentum_params["update_direction_history"][-1][i_mode].conj()) 
+                    for i in range(len(self.probe_momentum_params["update_direction_history"]) - 1)
+                ]
+                # Shape of corr_level: (momentum_memory, n_probe_modes)
+                corr_level = [torch.mean(projected_updates[k]).real for k in range(len(projected_updates))]
+                corr_level = torch.tensor(corr_level, device=delta_p_hat.device)
+                
+                if torch.all(corr_level > 0):
+                    # Estimate optimal friction.
+                    p = pmath.polyfit(
+                        torch.arange(0.0, momentum_memory + 1)[None].repeat(1, 1).reshape(-1),
+                        torch.concat([torch.zeros([1]), torch.log(corr_level)], dim=0).T.reshape(-1),
+                        deg=1
+                    )
+                    friction = 0.5 * (-p[0]).clip(0, None)
+                    
+                    self.probe_momentum_params["velocity_map"][i_mode] = (
+                        (1 - friction) * self.probe_momentum_params["velocity_map"][i_mode] + delta_p_hat[i_mode]
+                    )
+                    probe.set_data(
+                        probe.data[0, i_mode] + self.options.momentum_acceleration_gain * self.probe_momentum_params["velocity_map"][i_mode], 
+                        slicer=(0, i_mode)
+                    )
+                else:
+                    self.probe_momentum_params["velocity_map"][i_mode] = self.probe_momentum_params["velocity_map"][i_mode] / 2.0
 
     def _calculate_object_patch_update_direction(self, indices, chi, psi_im1=None):
         r"""
@@ -640,6 +705,25 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         else:
             if self.current_minibatch == 0:
                 self.alpha_object_all_slices[...] = 0
+                
+    def _initialize_momentum_buffers(self):
+        self.object_momentum_params["accumulated_update_direction"] = 0
+        self.probe_momentum_params["accumulated_update_direction"] = 0
+        
+    def _update_momentum_buffers(self, delta_p_hat):
+        """
+        Update momentum buffer for probe after each minibatch using the update direction calculated
+        in that minibatch. 
+        
+        We do not track the update direction for the object here, because it is already recorded in
+        `object.grad`.
+        
+        Parameters
+        ----------
+        delta_p_hat : Tensor
+            A (n_opr_modes, n_probe_modes, h, w) tensor giving the update direction for the probe.
+        """
+        self.probe_momentum_params["accumulated_update_direction"] += delta_p_hat / len(self.dataloader)
 
     def _record_object_slice_gradient(
         self, i_slice, delta_o_hat, add_to_existing=False
@@ -674,6 +758,55 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             delta_o_hat = -self.parameter_group.object.get_grad()
         self.parameter_group.object.set_grad(-alpha_o_mean_all_slices[:, None, None] * delta_o_hat)
         self.parameter_group.object.optimizer.step()
+        
+    def _apply_object_momentum(self, alpha_o_mean_all_slices, delta_o_hat):
+        """
+        Apply momentum acceleration to the object. This is a special momentum acceleration used
+        in PtychoShelves, which behaves somewhat differently from the momentum in `torch.optim.SGD`.
+        """
+        object_ = self.parameter_group.object
+        if self.current_epoch == object_.optimization_plan.start:
+            self.object_momentum_params["update_direction_history"] = []
+            self.object_momentum_params["velocity_map"] = torch.zeros_like(object_.data)
+        
+        upd = delta_o_hat * alpha_o_mean_all_slices[:, None, None]
+        upd = upd / pmath.norm(upd, dim=(-1, -2), keepdims=True)
+        self.object_momentum_params["update_direction_history"].append(upd)
+        
+        momentum_memory = 2
+        
+        if self.current_epoch > momentum_memory + object_.optimization_plan.start:
+            self.object_momentum_params["update_direction_history"].pop(0)
+            for i_slice in range(object_.n_slices):
+                # Remove the oldest momentum update.
+                # Project older updates to the latest one.
+                projected_updates = [
+                    (self.object_momentum_params["update_direction_history"][i][i_slice] * 
+                    self.object_momentum_params["update_direction_history"][-1][i_slice].conj()) 
+                    for i in range(len(self.object_momentum_params["update_direction_history"]) - 1)
+                ]
+                corr_level = [torch.mean(projected_updates[k]).real for k in range(len(projected_updates))]
+                corr_level = torch.tensor(corr_level, device=delta_o_hat.device)
+                
+                if torch.all(corr_level > 0):
+                    # Estimate optimal friction.
+                    p = pmath.polyfit(
+                        torch.arange(0.0, momentum_memory + 1.0, device=delta_o_hat.device),
+                        torch.tensor([0, *torch.log(corr_level)], device=delta_o_hat.device),
+                        deg=1
+                    )
+                    friction = 0.5 * (-p[0]).clip(0, None)
+                    
+                    w = object_.preconditioner / (0.1 * object_.preconditioner.max() + object_.preconditioner)
+                    self.object_momentum_params["velocity_map"][i_slice] = (
+                        (1 - friction) * self.object_momentum_params["velocity_map"][i_slice] + delta_o_hat[i_slice]
+                    )
+                    object_.set_data(
+                        object_.data[i_slice] + w * self.options.momentum_acceleration_gain * self.object_momentum_params["velocity_map"][i_slice], 
+                        slicer=i_slice
+                    )
+                else:
+                    self.object_momentum_params["velocity_map"][i_slice] = self.object_momentum_params["velocity_map"][i_slice] / 2.0
 
     def update_probe_positions(self, chi, indices, obj_patches, delta_o_patches):
         delta_pos = self.parameter_group.probe_positions.position_correction.get_update(
@@ -905,7 +1038,16 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 )
                 delta_o_hat_full.append(delta_o_hat)
             delta_o_hat_full = torch.cat(delta_o_hat_full, dim=0)
-            self._apply_object_update(self.alpha_object_all_slices[:, None, None], delta_o_hat_full)
+            self._apply_object_update(self.alpha_object_all_slices, delta_o_hat_full)
+            if self.options.momentum_acceleration_gain > 0:
+                # Momentum acceleration for object is only applied for compact batching.
+                self._apply_object_momentum(self.alpha_object_all_slices, delta_o_hat_full)
+
+        if self.options.batching_mode == enums.BatchingModes.COMPACT and self.options.momentum_acceleration_gain > 0:
+            self._apply_probe_momentum(
+                torch.mean(torch.tensor(self.alpha_probe_all_minibatches)), 
+                self.probe_momentum_params["accumulated_update_direction"]
+            )
         return super().run_post_epoch_hooks()
 
     def run_minibatch(self, input_data, y_true, *args, **kwargs) -> None:

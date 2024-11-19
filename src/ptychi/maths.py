@@ -214,3 +214,26 @@ def _prepare_data_for_orthogonalization(
         else:
             x = torch.moveaxis(x, group_dim, move_group_dim_to)
     return x, dim, group_dim
+
+
+def polyfit(x: torch.Tensor, y: torch.Tensor, deg: int = 1):
+    """
+    Fit a polynomial to the data and return the coefficients
+    from high to low order.
+    
+    Parameters
+    ----------
+    x : torch.Tensor
+        The independent variable.
+    y : torch.Tensor
+        The dependent variable.
+    deg : int
+        The degree of the polynomial to fit.
+    
+    Returns
+    -------
+    torch.Tensor
+        The coefficients of the polynomial.
+    """
+    x_powers = x[:, None] ** torch.arange(deg, -1, -1)
+    return torch.linalg.lstsq(x_powers, y, rcond=None)[0]

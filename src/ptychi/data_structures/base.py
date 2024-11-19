@@ -57,11 +57,15 @@ class ComplexTensor(Module):
     def shape(self) -> Tuple[int, ...]:
         return self.data.shape[:-1]
 
-    def set_data(self, data: Union[Tensor, ndarray]):
+    def set_data(self, data: Union[Tensor, ndarray], slicer=None):
+        if slicer is None:
+            slicer = (slice(None),)
+        elif not isinstance(slicer, Sequence):
+            slicer = (slicer,)
         data = to_tensor(data)
         data = torch.stack([data.real, data.imag], dim=-1)
         data = data.type(torch.get_default_dtype())
-        self.data.copy_(to_tensor(data))
+        self.data[*slicer].copy_(to_tensor(data))
 
 
 class ReconstructParameter(Module):
@@ -177,11 +181,15 @@ class ReconstructParameter(Module):
             var = var[..., dev_id]
         return var
 
-    def set_data(self, data):
+    def set_data(self, data, slicer: Optional[Union[slice, int] | tuple[Union[slice, int], ...]] = None):
+        if slicer is None:
+            slicer = (slice(None),)
+        elif not isinstance(slicer, Sequence):
+            slicer = (slicer,)
         if isinstance(self.tensor, ComplexTensor):
-            self.tensor.set_data(data)
+            self.tensor.set_data(data, slicer=slicer)
         else:
-            self.tensor.copy_(to_tensor(data))
+            self.tensor[*slicer].copy_(to_tensor(data))
 
     def get_grad(self):
         if isinstance(self.tensor, ComplexTensor):
