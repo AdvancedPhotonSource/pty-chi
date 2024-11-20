@@ -27,18 +27,14 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
     length calculation.
     """
     
-    solve_step_sizes_only_using_first_probe_mode: bool = False
+    solve_step_sizes_only_using_first_probe_mode: bool = True
     """
     If True, object and probe step sizes will only be calculated using the first probe mode.
+    This is how it is done in PtychoShelves.
     """
     
     momentum_acceleration_gain: float = 0.0
     """The gain of momentum acceleration. If 0, momentum acceleration is not used."""
-
-    beta_LSQ: float = 0.9
-    """
-    A step length damping constant when computing optimal step sizes in LSTSQ; 0 < beta_LSQ <= 1.0
-    """
     
     def get_reconstructor_type(self) -> enums.Reconstructors:
         return enums.Reconstructors.LSQML
@@ -47,7 +43,7 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
 @dataclasses.dataclass
 class LSQMLObjectOptions(base.ObjectOptions):
     
-    solved_step_size_upper_bound: float = 1.0
+    solved_step_size_upper_bound: float = None
     """
     The upper bound on the solved step size for object. If None,
     no upper bound is used.
@@ -57,7 +53,7 @@ class LSQMLObjectOptions(base.ObjectOptions):
 @dataclasses.dataclass
 class LSQMLProbeOptions(base.ProbeOptions):
     
-    solved_step_size_upper_bound: float = 1.0
+    solved_step_size_upper_bound: float = None
     """
     The upper bound on the solved step size for probe. If None,
     no upper bound is used.
