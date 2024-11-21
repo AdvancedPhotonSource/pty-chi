@@ -32,6 +32,11 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
     If True, object and probe step sizes will only be calculated using the first probe mode.
     """
 
+    beta_LSQ: float = 0.9
+    """
+    A step length damping constant when computing optimal step sizes in LSTSQ; 0 < beta_LSQ <= 1.0
+    """
+    
     def get_reconstructor_type(self) -> enums.Reconstructors:
         return enums.Reconstructors.LSQML
     

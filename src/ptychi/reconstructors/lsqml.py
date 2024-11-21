@@ -365,6 +365,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         alpha_o_i = alpha_vec[:, 0]
         alpha_p_i = alpha_vec[:, 1]
 
+        alpha_o_i = self.options.beta_LSQ * alpha_o_i / ( self.parameter_group.object.n_slices * self.parameter_group.probe.n_modes )
+        alpha_p_i = self.options.beta_LSQ * alpha_p_i
+
         logger.debug("alpha_p_i: min={}, max={}".format(alpha_p_i.min(), alpha_p_i.max()))
         logger.debug("alpha_o_i: min={}, max={}".format(alpha_o_i.min(), alpha_o_i.max()))
 
@@ -392,10 +395,13 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         # Shape of delta_p_o/o_p:     (batch_size, n_probe_modes or 1, h, w)
         delta_o_patches_p = delta_o_i[:, None, :, :] * probe
 
-        numerator = torch.sum(torch.real(delta_o_patches_p.conj() * chi), dim=(-1, -2, -3))
+        numerator = 0.5 * torch.sum(torch.real(delta_o_patches_p.conj() * chi), dim=(-1, -2, -3))
         denominator = torch.sum(delta_o_patches_p.abs() ** 2, dim=(-1, -2, -3))
 
         alpha_o_i = numerator / (denominator + gamma)
+
+        alpha_o_i = self.options.beta_LSQ * alpha_o_i / ( self.parameter_group.object.n_slices * self.parameter_group.probe.n_modes )
+
         alpha_o_i = alpha_o_i.clamp(
             0, self.parameter_group.object.options.solved_step_size_upper_bound
         )
@@ -421,10 +427,12 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_p_o = delta_p_i * obj_patches[:, None, :, :]
 
         # Shape of aij:               (batch_size,)
-        numerator = torch.sum(torch.real(delta_p_o.conj() * chi), dim=(-1, -2, -3))
+        numerator = 0.5 * torch.sum(torch.real(delta_p_o.conj() * chi), dim=(-1, -2, -3))
         denominator = torch.sum(delta_p_o.abs() ** 2, dim=(-1, -2, -3))
 
         alpha_p_i = numerator / (denominator + gamma)
+        alpha_p_i = self.options.beta_LSQ * alpha_p_i
+        
         alpha_p_i = alpha_p_i.clamp(
             0, self.parameter_group.object.options.solved_step_size_upper_bound
         )
