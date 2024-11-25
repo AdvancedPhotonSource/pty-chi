@@ -104,7 +104,7 @@ class WavefieldPropagator(ABC, torch.nn.Module):
 
 
 class FourierPropagator(WavefieldPropagator):
-    def __init__(self, norm='ortho') -> None:
+    def __init__(self, norm=None) -> None:
         super().__init__()
         self.norm = norm
 
