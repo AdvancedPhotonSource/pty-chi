@@ -1,4 +1,5 @@
 from typing import Union, Literal, Callable, Optional
+import math
 
 import torch
 from torch import Tensor
@@ -71,11 +72,120 @@ def rescale_probe(
     return probe
 
 
+def orthogonalize_initial_probe(
+    probe: Tensor, 
+    secondary_mode_energy: float = 0.02, 
+    method: Literal["hermite"] = "hermite"
+) -> Tensor:
+    """
+    Orthogonalize initial probe. 
+    
+    Parameters
+    ----------
+    probe : Tensor
+        A (n_opr_modes, n_modes, h, w) tensor of the probe.
+    secondary_mode_energy : float, optional
+        The energy of the secondary mode relative to the principal mode, which is
+        always 1.0.
+    method: Literal["hermite"], optional
+        The method to use for orthogonalization.
+    
+    Returns
+    -------
+    Tensor
+        The orthogonalized probe.
+    """
+    n_modes = probe.shape[1]
+    mode_energies = torch.zeros(n_modes)
+    mode_energies[1:] = secondary_mode_energy
+    mode_energies[0] = 1.0 - mode_energies.sum()
+    
+    e_total = torch.sum(torch.abs(probe[0, 0]) ** 2)
+    mode_energies = mode_energies * e_total
+    
+    if method == "hermite":
+        m = math.ceil(math.sqrt(n_modes)) - 1
+        n = math.ceil(n_modes / (m + 1)) - 1
+        h = generate_secondary_probe_modes_hermite(probe[0, 0], m, n)
+        probe[0, 1:, :, :] = h[1:n_modes, :, :]
+    else:
+        raise ValueError(f"Unknown orthogonalization method: {method}")
+    
+    # Normalize.
+    for i_mode in range(n_modes):
+        probe[0, i_mode] = probe[0, i_mode] * torch.sqrt(mode_energies[i_mode] / torch.sum(torch.abs(probe[0, i_mode] ** 2)))
+    return probe
+
+
+def generate_secondary_probe_modes_hermite(probe: Tensor, m: int, n: int) -> Tensor:
+    """
+    Generate secondary probe modes using Hermite polynomials.
+    
+    Parameters
+    ----------
+    probe : Tensor
+        A (h, w) tensor of the primary mode of the probe.
+    m, n : int
+        The orders of the Hermite polynomial.
+    
+    Returns
+    -------
+    Tensor
+        A ((m + 1) * (n + 1), h, w) tensor of the secondary probe modes.
+    """
+    x = torch.arange(probe.shape[-1]) - probe.shape[-1] / 2 + 1
+    y = torch.arange(probe.shape[-2]) - probe.shape[-2] / 2 + 1
+    xx, yy = torch.meshgrid(x, y, indexing="xy")
+    
+    cenx = torch.sum(xx * torch.abs(probe) ** 2) / torch.sum(torch.abs(probe) ** 2)
+    ceny = torch.sum(yy * torch.abs(probe) ** 2) / torch.sum(torch.abs(probe) ** 2)
+    varx = torch.sum((xx - cenx) ** 2 * torch.abs(probe) ** 2) / torch.sum(torch.abs(probe) ** 2)
+    vary = torch.sum((yy - ceny) ** 2 * torch.abs(probe) ** 2) / torch.sum(torch.abs(probe) ** 2)
+    
+    counter = 0
+    h = torch.empty([(m + 1) * (n + 1), *probe.shape], dtype=probe.dtype)
+    for nii in range(n + 1):
+        for mii in range(m + 1):
+            auxfunc = ((xx - cenx) ** mii) * ((yy - ceny) ** nii) * probe
+            if counter > 0:
+                auxfunc = auxfunc * torch.exp(-((xx - cenx) ** 2 / (2 * varx)) - ((yy - ceny) ** 2 / (2 * vary)))
+            auxfunc = auxfunc / torch.sqrt(torch.sum(torch.abs(auxfunc) ** 2))    
+
+            # Orthogonalize the current mode to the previous ones.
+            for ii in range(counter):
+                auxfunc = auxfunc - h[ii] * torch.sum(h[ii] * auxfunc.conj(), dim=(-1, -2))
+            auxfunc = auxfunc / torch.sqrt(torch.sum(torch.abs(auxfunc) ** 2))
+            h[counter] = auxfunc
+            counter += 1
+    return h
+
+
+def get_probe_renormalization_factor(patterns: Tensor | ndarray) -> float:
+    """
+    Calculate the renormalization factor that should be applied to the probe
+    to match the maximum power of the diffraction patterns.
+    
+    Parameters
+    ----------
+    patterns : Tensor | ndarray
+        A (n, h, w) buffer of diffraction patterns.
+    
+    Returns
+    -------
+    float
+        The renormalization factor.
+    """
+    if isinstance(patterns, Tensor):
+        patterns = patterns.detach().cpu().numpy()
+    max_power = np.max(np.sum((patterns), axis=(1, 2))) / (patterns[0].size)
+    return np.sqrt(1 / max_power)
+            
+
 def generate_initial_object(shape: tuple[int, ...], method: Literal["random"] = "random") -> Tensor:
     if method == "random":
-        obj_mag = generate_gaussian_random_image(shape, loc=0.9, sigma=0.1, smoothing=3.0)
+        obj_mag = generate_gaussian_random_image(shape, loc=0.98, sigma=0.02, smoothing=3.0)
         obj_mag = obj_mag.clamp(0.0, 1.0)
-        obj_phase = generate_gaussian_random_image(shape, loc=0.0, sigma=0.5, smoothing=3.0)
+        obj_phase = generate_gaussian_random_image(shape, loc=0.0, sigma=0.02, smoothing=3.0)
         obj_phase = obj_phase.clamp(-torch.pi, torch.pi)
         obj = obj_mag * torch.exp(1j * obj_phase)
     else:

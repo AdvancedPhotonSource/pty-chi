@@ -1115,3 +1115,32 @@ def unwrap_phase_2d(
     if return_phase_grads:
         return phase, (gy, gx)
     return phase
+
+
+def find_center_of_mass(img: Tensor):
+    """
+    Find the center of mass of one or a stack of 2D images.
+    
+    Parameters
+    ----------
+    img : Tensor
+        A (N, H, W) or (H, W) tensor giving a batch of images or a single image.
+    
+    Returns
+    -------
+    Tensor
+        A (N, 2) or (2,) tensor giving the centers of mass.
+    """
+    if img.ndim == 2:
+        img = img[None]
+    
+    if img.is_complex():
+        img = torch.abs(img)
+    
+    # Find the centers of mass of the last 2 dimensions.
+    y, x = torch.meshgrid(torch.arange(img.shape[-2]), torch.arange(img.shape[-1]), indexing="ij")
+    y = y.to(img.device)
+    x = x.to(img.device)
+    r = torch.stack((y, x), dim=-1)
+    com = (r[None] * img[..., None]).sum(dim=(-3, -2)) / img.sum(dim=(-2, -1))[..., None]
+    return com
