@@ -204,24 +204,27 @@ def add_additional_opr_probe_modes_to_probe(
         [n_opr_modes_to_add, n_modes, probe.shape[-2], probe.shape[-1]],
         dtype=get_default_complex_dtype(),
     )
+    
     for i in range(n_opr_modes_to_add):
         for j in range(n_modes):
-            mag = generate_gaussian_random_image(
-                probe.shape[-2:], loc=0.01, sigma=0.01, smoothing=3.0
-            ).clamp(0.0, 1.0)
-            phase = generate_gaussian_random_image(
-                probe.shape[-2:], loc=0.0, sigma=0.05, smoothing=3.0
-            ).clamp(-torch.pi, torch.pi)
-            opr_mode = mag * torch.exp(1j * phase)
-            if normalize:
-                opr_mode = opr_mode / pmath.mnorm(opr_mode, dim=(-2, -1))
+            real = generate_gaussian_random_image(
+                probe.shape[-2:], loc=0, sigma=1, smoothing=0
+            )
+            imag = generate_gaussian_random_image(
+                probe.shape[-2:], loc=0, sigma=1, smoothing=0
+            )
+            opr_mode = real + 1j * imag
             opr_modes[i, j, ...] = opr_mode
     probe = torch.cat([probe, opr_modes], dim=0)
+    
+    if normalize:
+        pnorm = pmath.mnorm(probe, dim=(-2, -1), keepdims=True)
+        probe[1:] = probe[1:] / pnorm[1:, :]
     return probe
 
 
 def generate_initial_opr_mode_weights(
-    n_points: int, n_opr_modes: int, eigenmode_weight: float = 0.0
+    n_points: int, n_opr_modes: int, eigenmode_weight: Optional[float] = None, probe: Optional[Tensor] = None
 ) -> Tensor:
     """
     Generate initial weights for OPR modes, where the weights of the main OPR mode are set to 1,
@@ -235,16 +238,26 @@ def generate_initial_opr_mode_weights(
         number of OPR modes.
     eigenmode_weight : float
         initial weight for eigenmodes.
+    probe: Tensor
+        The probe. If provided, the weights will be normalized to match the power of the probe.
 
     Returns
     -------
     weights : Tensor
         a (n_points, n_opr_modes) tensor of weights.
     """
-    return torch.cat(
-        [torch.ones([n_points, 1]), torch.full([n_points, n_opr_modes - 1], eigenmode_weight)],
+    if eigenmode_weight is None:
+        eigenmode_weights = torch.randn([n_points, n_opr_modes - 1]) * 1e-6
+    else:
+        eigenmode_weights = torch.full([n_points, n_opr_modes - 1], eigenmode_weight)
+    weights = torch.cat(
+        [torch.ones([n_points, 1]), eigenmode_weights],
         dim=1,
     )
+    if probe is not None:
+        pnorm = pmath.mnorm(probe, dim=(-2, -1), keepdims=False)
+        weights[:, 1:] = weights[:, 1:] / torch.mean(pnorm[1:], dim=1)
+    return weights
 
 
 def generate_gaussian_random_image(
