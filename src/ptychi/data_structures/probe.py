@@ -189,9 +189,9 @@ class Probe(ds.ReconstructParameter):
                 unique_probe = p_orig[0, ...]
             else:
                 # Shape of unique_probe:     (n_points, 1, h, w)
-                p_orig = p_orig[None, ...].repeat(weights.shape[0], 1, 1, 1, 1)
-                p_orig[:, 0, [mode_to_apply], :, :] = unique_probe
-                unique_probe = p_orig[:, 0, ...]
+                p_orig = p_orig[0:1, ...].repeat(weights.shape[0], 1, 1, 1)
+                p_orig[:, [mode_to_apply], :, :] = unique_probe
+                unique_probe = p_orig
         return unique_probe
 
     def incoherent_mode_orthogonality_constraint_enabled(self, current_epoch: int) -> bool:

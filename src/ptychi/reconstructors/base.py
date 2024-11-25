@@ -310,21 +310,24 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             )
         return super().build_dataloader(batch_sampler=batch_sampler)
     
-    def update_preconditioners(self):
+    def update_preconditioners(self, use_all_probe_modes_for_object_preconditioner=False):
         # Update preconditioner of the object only if the probe has been updated in the previous
         # epoch, or when the preconditioner is None.
         if (
             self.parameter_group.probe.optimization_enabled(self.current_epoch - 1)
             or self.parameter_group.object.preconditioner is None
         ):
-            self.update_object_preconditioner()
+            self.update_object_preconditioner(use_all_modes=use_all_probe_modes_for_object_preconditioner)
 
-    def update_object_preconditioner(self):
+    def update_object_preconditioner(self, use_all_modes=False):
         positions_all = self.parameter_group.probe_positions.tensor
         # Shape of probe:        (n_probe_modes, h, w)
         object_ = self.parameter_group.object.get_slice(0)
 
-        probe_int = self.parameter_group.probe.get_all_mode_intensity(opr_mode=0)[None, :, :]
+        if use_all_modes:
+            probe_int = self.parameter_group.probe.get_all_mode_intensity(opr_mode=0)[None, :, :]
+        else:
+            probe_int = self.parameter_group.probe.get_mode_and_opr_mode(mode=0, opr_mode=0)[None, ...].abs() ** 2
         # Shape of probe_int:    (n_scan_points, h, w)
         probe_int = probe_int.repeat(len(positions_all), 1, 1)
 

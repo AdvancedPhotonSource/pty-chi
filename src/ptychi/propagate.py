@@ -18,10 +18,16 @@ class WavefieldPropagatorParameters:
     """number of pixels in the x-direction"""
     height_px: int
     """number of pixels in the y-direction"""
+    wavelength_m: float
+    """illumination wavelength in meters"""
+    pixel_width_m: float
+    """pixel width in meters"""
     pixel_width_wlu: float
     """pixel width in wavelengths"""
     pixel_aspect_ratio: float
     """pixel aspect ratio (width / height)"""
+    propagation_distance_m: float
+    """propagation distance in meters"""
     propagation_distance_wlu: float
     """propagation distance in wavelengths"""
 
@@ -61,8 +67,11 @@ class WavefieldPropagatorParameters:
         return cls(
             width_px,
             height_px,
+            wavelength_m,
+            pixel_width_m,
             pixel_width_m / wavelength_m,
             pixel_width_m / pixel_height_m,
+            propagation_distance_m,
             propagation_distance_m / wavelength_m,
         )
 
@@ -119,32 +128,30 @@ class AngularSpectrumPropagator(WavefieldPropagator):
     def __init__(self, parameters: WavefieldPropagatorParameters) -> None:
         super().__init__()
 
-        ar = parameters.pixel_aspect_ratio
-
-        i2piz = 2j * torch.pi * parameters.propagation_distance_wlu
-
-        FY, FX = parameters.get_frequency_coordinates()
-        F2 = torch.square(FX) + torch.square(ar * FY)
-        self.register_buffer('F2', F2)
-
-        ratio = self.F2 / (parameters.pixel_width_wlu**2)
-        tf = torch.exp(i2piz * torch.sqrt(1 - ratio))
-
-        _transfer_function = torch.where(ratio < 1, tf, 1)
+        _transfer_function = self.get_transfer_function(parameters)
+        
         # Separate registered buffer into real and imaginary parts to prevent it
         # from breaking in DataParallel.
         self.register_buffer('_transfer_function_real', _transfer_function.real)
         self.register_buffer('_transfer_function_imag', _transfer_function.imag)
 
     def update(self, parameters: WavefieldPropagatorParameters) -> None:
-        i2piz = 2j * torch.pi * parameters.propagation_distance_wlu
-
-        ratio = self.F2 / (parameters.pixel_width_wlu**2)
-        tf = torch.exp(i2piz * torch.sqrt(1 - ratio))
-
-        _transfer_function = torch.where(ratio < 1, tf, 1)
+        _transfer_function = self.get_transfer_function(parameters)
         self._transfer_function_real[...] = _transfer_function.real
         self._transfer_function_imag[...] = _transfer_function.imag
+        
+    def get_transfer_function(self, parameters: WavefieldPropagatorParameters) -> ComplexTensor:
+        k = 2 * torch.pi / parameters.wavelength_m
+        nx = parameters.width_px
+        ny = parameters.height_px
+        ygrid, xgrid = torch.fft.fftfreq(ny), torch.fft.fftfreq(nx)
+        kx = 2 * torch.pi * xgrid / parameters.pixel_width_m
+        ky = 2 * torch.pi * ygrid / (parameters.pixel_width_m * parameters.pixel_aspect_ratio)
+        kyy, kxx = torch.meshgrid(ky, kx, indexing="ij")
+        sqrt_arg = k ** 2 - kxx ** 2 - kyy ** 2
+        tf = torch.exp(1j * parameters.propagation_distance_m * torch.sqrt(sqrt_arg))
+        tf = torch.where(sqrt_arg < 0, 0, tf)
+        return tf
 
     def propagate_forward(self, wavefield: ComplexTensor) -> ComplexTensor:
         tf = self._transfer_function_real + 1j * self._transfer_function_imag

@@ -129,7 +129,7 @@ def test_2d_ptycho_lsqml_opr(pytestconfig, generate_gold=False, debug=False, hig
     options.probe_position_options.position_y_px = positions_px[:, 0]
     options.probe_position_options.optimizable = False
     
-    options.opr_mode_weight_options.initial_weights = generate_initial_opr_mode_weights(len(positions_px), probe.shape[0], eigenmode_weight=0.1)
+    options.opr_mode_weight_options.initial_weights = generate_initial_opr_mode_weights(len(positions_px), probe.shape[0])
     options.opr_mode_weight_options.optimizable = True
     options.opr_mode_weight_options.update_relaxation = 0.1
     

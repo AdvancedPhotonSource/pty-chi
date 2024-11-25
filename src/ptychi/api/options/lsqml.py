@@ -43,26 +43,31 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
 @dataclasses.dataclass
 class LSQMLObjectOptions(base.ObjectOptions):
     
-    solved_step_size_upper_bound: float = None
+    optimal_step_size_scaler: float = 0.9
     """
-    The upper bound on the solved step size for object. If None,
-    no upper bound is used.
+    A scaler for the solved optimal step size (beta_LSQ in PtychoShelves).
+    """
+    
+    multimodal_update: bool = True
+    """
+    If True, object update direction is calculated and summed over all probe modes. 
+    Otherwise, only the first mode will be used for object update. However, forward
+    propagation always uses all probe modes regardless of this option.
     """
 
 
 @dataclasses.dataclass
 class LSQMLProbeOptions(base.ProbeOptions):
     
-    solved_step_size_upper_bound: float = None
-    """
-    The upper bound on the solved step size for probe. If None,
-    no upper bound is used.
-    """
-    
-    eigenmode_update_relaxation: float = 0.1
+    eigenmode_update_relaxation: float = 1.0
     """
     A separate step size for eigenmode update. For now, this is only used by 
     LSQMLReconstructor.
+    """
+    
+    optimal_step_size_scaler: float = 0.9
+    """
+    A scaler for the solved optimal step size (beta_LSQ in PtychoShelves).
     """
     
     
@@ -74,7 +79,7 @@ class LSQMLProbePositionOptions(base.ProbePositionOptions):
 @dataclasses.dataclass
 class LSQMLOPRModeWeightsOptions(base.OPRModeWeightsOptions):
     
-    update_relaxation: float = 0.1
+    update_relaxation: float = 1.0
     """
     A separate step size for eigenmode weight update. For now, this is only used by
     LSQMLReconstructor.

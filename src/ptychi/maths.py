@@ -3,7 +3,7 @@ from typing import Literal, Optional, Tuple, Union
 import torch
 
 
-def trim_mean(x: torch.Tensor, fraction: float = 0.1) -> torch.Tensor:
+def trim_mean(x: torch.Tensor, fraction: float = 0.1, dim: Optional[Union[int, Tuple[int, ...]]] = None) -> torch.Tensor:
     """
     Calculate the mean of a tensor after removing a certain percentage of the
     lowest and highest values.
@@ -14,20 +14,26 @@ def trim_mean(x: torch.Tensor, fraction: float = 0.1) -> torch.Tensor:
         Input tensor.
     fraction : float, optional
         The fraction of trim, between 0 and 1. Default is 0.1.
+    dim : int or tuple of int, optional
+        The axis/axes along which to calculate the mean.
 
     Returns
     -------
     trimmed_mean : tensor
         The trimmed mean.
     """
-    lb = torch.quantile(x, fraction)
-    ub = torch.quantile(x, 1 - fraction)
+    lb = torch.quantile(x, fraction, dim=dim, keepdim=True)
+    ub = torch.quantile(x, 1 - fraction, dim=dim, keepdim=True)
     mask = (x >= lb) & (x <= ub)
 
-    if torch.count_nonzero(mask) > 0:
-        return torch.mean(x[mask])
+    mask_check = torch.sum(mask, dim=dim)
+    mask_check = torch.all(mask_check > 0)
+    if mask_check:
+        x = x.clone()
+        x[~mask] = torch.nan
+        return torch.nanmean(x, dim=dim)
     else:
-        return torch.mean(x)
+        return torch.mean(x, dim=dim)
     
     
 def angle(x: torch.Tensor, eps=1e-5) -> torch.Tensor:
@@ -162,11 +168,10 @@ def orthogonalize_svd(
     return x
 
 
-def project(a, b, dim=None, eps=1e-5):
+def project(a, b, dim=None):
     """Return complex vector projection of a onto b for along given axis."""
-    bh = b / (inner(b, b, dim=dim, keepdims=True) + eps)
-    return inner(a, b, dim=dim, keepdims=True) * bh
-
+    projected_length = inner(a, b, dim=dim, keepdims=True) / inner(b, b, dim=dim, keepdims=True)
+    return projected_length * b
 
 def inner(x, y, dim=None, keepdims=False):
     """Return the complex inner product; the order of the operands matters."""
