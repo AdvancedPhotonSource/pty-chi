@@ -938,6 +938,12 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         batch_size = len(delta_p_i)
         n_points_total = self.parameter_group.probe_positions.shape[0]
+        
+        # If there is only one sample in the batch, `residue_update` would become 0
+        # which causes division by zero error. We skip the update if that's the case.
+        if batch_size == 1:
+            return
+        
         # FIXME: reduced relax_u/v by a factor of 10 for stability, but PtychoShelves works without this.
         relax_u = (
             min(0.1, batch_size / n_points_total)
