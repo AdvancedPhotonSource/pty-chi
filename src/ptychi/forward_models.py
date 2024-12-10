@@ -1,3 +1,5 @@
+import math
+
 from typing import Optional, TYPE_CHECKING
 import torch
 from torch import Tensor
@@ -31,6 +33,8 @@ class ForwardModel(torch.nn.Module):
         self.optimizable_parameters: ModuleList[ds.ReconstructParameter] = ModuleList()
         self.propagator = None
         self.intermediate_variables = {}
+        
+        self.register_optimizable_parameters()
 
     def register_optimizable_parameters(self):
         for var in self.parameter_group.__dict__.values():
@@ -383,7 +387,20 @@ class PlanarPtychographyForwardModel(ForwardModel):
             return returns
 
     def post_differentiation_hook(self, indices, y_true, **kwargs):
+        self.compensate_for_fft_scaler()
         self.scale_gradients(y_true)
+        
+    def compensate_for_fft_scaler(self):
+        """
+        Compensate for the scaling of the FFT. If the normalization of FFT is "ortho",
+        nothing is done. If the normalization is "backward" (default in `torch.fft`),
+        all gradients are scaled by 1 / sqrt(N).
+        """
+        if self.far_field_propagator.norm == "backward" or self.far_field_propagator.norm is None:
+            factor = self.probe.shape[-2] * self.probe.shape[-1]
+            for var in self.optimizable_parameters:
+                if var.get_grad() is not None:
+                    var.set_grad(var.get_grad() / factor)
 
     def scale_gradients(self, patterns):
         """
