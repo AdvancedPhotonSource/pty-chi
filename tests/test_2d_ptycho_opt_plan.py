@@ -39,7 +39,7 @@ def test_2d_ptycho_opt_plan(pytestconfig, generate_gold=False, debug=False, high
     options.probe_options.optimizable = True
     options.probe_options.optimization_plan.start = 2
     options.probe_options.optimization_plan.end = None
-    options.probe_options.optimizer = 'sgd'
+    options.probe_options.optimizer = api.Optimizers.SGD
     options.probe_options.step_size = 1
     
     options.probe_position_options.position_x_px = positions_px[:, 1]
@@ -52,7 +52,7 @@ def test_2d_ptycho_opt_plan(pytestconfig, generate_gold=False, debug=False, high
     options.probe_position_options.optimizer = api.Optimizers.ADAM
     options.probe_position_options.step_size = 1e-1
     
-    options.opr_mode_weight_options.initial_weights = np.array([1, 0.1, 0.1, 0.1])
+    options.opr_mode_weight_options.initial_weights = np.array([1, 1e-6, 1e-6, 1e-6])
     options.opr_mode_weight_options.optimize_intensity_variation = True
     options.opr_mode_weight_options.optimizable = True
     

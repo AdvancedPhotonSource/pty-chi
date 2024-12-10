@@ -116,7 +116,7 @@ def test_2d_ptycho_autodiff_opr(generate_gold=False, debug=False):
     options.opr_mode_weight_options.initial_weights = generate_initial_opr_mode_weights(len(positions_px), probe.shape[0])
     options.opr_mode_weight_options.optimizable = True
     options.opr_mode_weight_options.optimizer = api.Optimizers.ADAM
-    options.opr_mode_weight_options.step_size = 1e-2
+    options.opr_mode_weight_options.step_size = 1e-3
     
     options.reconstructor_options.batch_size = 96
     options.reconstructor_options.num_epochs = 32

@@ -37,7 +37,7 @@ def test_multislice_ptycho_lsqml_joint_step_size(pytestconfig, generate_gold=Fal
     options.probe_position_options.position_y_px = positions_px[:, 0]
     options.probe_position_options.optimizable = False
     
-    options.opr_mode_weight_options.initial_weights = generate_initial_opr_mode_weights(len(positions_px), probe.shape[0], eigenmode_weight=0.1)
+    options.opr_mode_weight_options.initial_weights = generate_initial_opr_mode_weights(len(positions_px), probe.shape[0])
     options.opr_mode_weight_options.optimizable = True
     options.opr_mode_weight_options.update_relaxation = 0.1
     
