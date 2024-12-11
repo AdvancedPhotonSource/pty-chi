@@ -55,6 +55,7 @@ jobs:
         pip install pytest
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         pip install -e .
+        pip install torch==2.4.1 torchvision==0.19.1 numpy==2.1.2
 
     - name: List build environment
       run: $CONDA_EXE list -n $ENVNAME
@@ -67,6 +68,7 @@ jobs:
         pytest -s --high-tol
 
     - name: Remove environment
+      if: always()
       run: |
         $CONDA_EXE remove -n $ENVNAME --all --yes --force
   
