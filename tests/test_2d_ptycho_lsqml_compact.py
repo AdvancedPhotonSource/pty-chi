@@ -77,13 +77,11 @@ def test_2d_ptycho_lsqml_compact_multislice(pytestconfig, generate_gold=False, d
     options.object_options.optimizer = api.Optimizers.SGD
     options.object_options.step_size = 0.5
     options.object_options.slice_spacings_m = np.array([2e-7])
-    options.object_options.solved_step_size_upper_bound = 1
     
     options.probe_options.initial_guess = probe
     options.probe_options.optimizable = True
     options.probe_options.optimizer = api.Optimizers.SGD
     options.probe_options.step_size = 0.5
-    options.probe_options.solved_step_size_upper_bound = 1
 
     options.probe_position_options.position_x_px = positions_px[:, 1]
     options.probe_position_options.position_y_px = positions_px[:, 0]
