@@ -62,5 +62,5 @@ if __name__ == '__main__':
 
     tester = Test2dPtychoEpieOPR()
     tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=True)
-    tester.test_2d_ptycho_epie_opr(generate_gold=args.generate_gold, debug=True, high_tol=args.high_tol)
+    tester.test_2d_ptycho_epie_opr()
     
