@@ -59,7 +59,7 @@ class Test2dPtychoAutodiff(tutils.TungstenDataTester):
         options.object_options.optimizable = True
         options.object_options.optimizer = api.Optimizers.SGD
         options.object_options.step_size = 0.1
-        options.object_options.l1_norm_constraint_weight = 1e-3
+        options.object_options.l1_norm_constraint.weight = 1e-3
         
         options.probe_options.initial_guess = probe
         options.probe_options.optimizable = True

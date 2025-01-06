@@ -30,10 +30,10 @@ class Object(ds.ReconstructParameter):
     ):
         super().__init__(*args, name=name, options=options, is_complex=True, **kwargs)
         self.pixel_size_m = options.pixel_size_m
-        self.l1_norm_constraint_weight = options.l1_norm_constraint_weight
-        self.l1_norm_constraint_stride = options.l1_norm_constraint_stride
-        self.smoothness_constraint_alpha = options.smoothness_constraint_alpha
-        self.smoothness_constraint_stride = options.smoothness_constraint_stride
+        self.l1_norm_constraint_weight = options.l1_norm_constraint.weight
+        self.l1_norm_constraint_stride = options.l1_norm_constraint.stride
+        self.smoothness_constraint_alpha = options.smoothness_constraint.alpha
+        self.smoothness_constraint_stride = options.smoothness_constraint.stride
         self.total_variation_weight = options.total_variation_weight
         self.total_variation_stride = options.total_variation_stride
         center_pixel = torch.tensor(self.shape, device=torch.get_default_device()) / 2.0

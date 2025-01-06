@@ -117,23 +117,17 @@ class ObjectMultisliceRegularizationOptions:
 
 
 @dataclasses.dataclass
-class ObjectOptions(ParameterOptions):
-    initial_guess: Union[ndarray, Tensor] = None
-    """A (h, w) complex tensor of the object initial guess."""
-
-    slice_spacings_m: Optional[ndarray] = None
-    """Slice spacing in meters. This should be provided if the object is multislice."""
-
-    pixel_size_m: float = 1.0
-    """The pixel size in meters."""
-
-    l1_norm_constraint_weight: float = 0
+class ObjectL1NormConstraintOptions:
+    weight: float = 0
     """The weight of the L1 norm constraint. Disabled if equal or less than 0."""
 
-    l1_norm_constraint_stride: int = 1
+    stride: int = 1
     """The number of epochs between L1 norm constraint updates."""
 
-    smoothness_constraint_alpha: float = 0
+
+@dataclasses.dataclass
+class ObjectSmoothnessConstraintOptions:
+    alpha: float = 0
     """
     The relaxation smoothing constant. If greater than 0, the magnitude (but not phase)
     of the object will be smoothed every `smoothness_constraint_stride` epochs.
@@ -148,8 +142,30 @@ class ObjectOptions(ParameterOptions):
     is maximal. The value of alpha should not be larger than 1 / 8.
     """
 
-    smoothness_constraint_stride: int = 1
+    stride: int = 1
     """The number of epochs between smoothness constraint updates."""
+
+
+@dataclasses.dataclass
+class ObjectOptions(ParameterOptions):
+    initial_guess: Union[ndarray, Tensor] = None
+    """A (h, w) complex tensor of the object initial guess."""
+
+    slice_spacings_m: Optional[ndarray] = None
+    """Slice spacing in meters. This should be provided if the object is multislice."""
+
+    pixel_size_m: float = 1.0
+    """The pixel size in meters."""
+
+    l1_norm_constraint: ObjectL1NormConstraintOptions = field(
+        default_factory=ObjectL1NormConstraintOptions
+    )
+    """L1 norm constraint options."""
+
+    smoothness_constraint: ObjectSmoothnessConstraintOptions = field(
+        default_factory=ObjectSmoothnessConstraintOptions
+    )
+    """Smoothness constraint options."""
 
     total_variation_weight: float = 0
     """The weight of the total variation constraint. Disabled if equal or less than 0."""
