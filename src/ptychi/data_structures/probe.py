@@ -390,7 +390,7 @@ class Probe(ds.ReconstructParameter):
         mask = ip.gaussian_filter(data, sigma=3, size=5).abs()
         thresh = (
             mask.max(-1, keepdim=True).values.max(-2, keepdim=True).values
-            * self.options.support_constraint_threshold
+            * self.options.support_constraint.threshold
         )
         mask = torch.where(mask > thresh, 1.0, 0.0)
         mask = ip.gaussian_filter(mask, sigma=2, size=3).abs()
@@ -399,10 +399,10 @@ class Probe(ds.ReconstructParameter):
 
     def support_constraint_enabled(self, current_epoch: int) -> bool:
         if (
-            self.options.support_constraint
+            self.options.support_constraint.enabled
             and current_epoch >= self.optimization_plan.start
             and (current_epoch - self.optimization_plan.start)
-            % self.options.support_constraint_stride
+            % self.options.support_constraint.stride
             == 0
         ):
             return True

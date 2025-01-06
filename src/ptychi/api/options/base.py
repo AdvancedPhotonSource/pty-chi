@@ -79,6 +79,7 @@ class ParameterOptions(Options):
         d = self.__dict__.copy()
         return d
 
+
 @dataclasses.dataclass
 class ObjectMultisliceRegularizationOptions:
     weight: float = 0
@@ -264,6 +265,24 @@ class ProbeOrthogonalizeOPRModesOptions:
 
 
 @dataclasses.dataclass
+class ProbeSupportConstraintOptions:
+    enabled: bool = False
+    """
+    When enabled, the probe will be shrinkwrapped every `stride` epochs,
+    where small values are set to 0.
+    """
+
+    threshold: float = 0.005
+    """
+    The threshold for the probe support constraint. The value of a pixel (x, y) is set to 0
+    if `p(x, y) < [max(blur(p)) * `threshold`](x, y)`.
+    """
+
+    stride: int = 1
+    """The number of epochs between probe support constraint updates."""
+
+
+@dataclasses.dataclass
 class ProbeOptions(ParameterOptions):
     """
     The probe configuration.
@@ -291,21 +310,9 @@ class ProbeOptions(ParameterOptions):
         default_factory=ProbeOrthogonalizeOPRModesOptions
     )
 
-    support_constraint: bool = False
-    """
-    When enabled, the probe will be shrinkwrapped every `probe_support_constraint_stride` epochs,
-    where small values are set to 0.
-    """
-    
-    support_constraint_threshold: float = 0.005
-    """
-    The threshold for the probe support constraint. The value of a pixel (x, y) is set to 0
-    if `p(x, y) < [max(blur(p)) * `support_constraint_threshold`](x, y)`.
-    """
-
-    support_constraint_stride: int = 1
-    """The number of epochs between probe support constraint updates."""
-
+    support_constraint: ProbeSupportConstraintOptions = field(
+        default_factory=ProbeSupportConstraintOptions
+    )
 
     eigenmode_update_relaxation: float = 1.0
     """
