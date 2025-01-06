@@ -37,8 +37,8 @@ class Tester2DPtychoProbePowerConstraint(tutils.TungstenDataTester):
         options.probe_options.optimizable = True
         options.probe_options.optimizer = 'sgd'
         options.probe_options.step_size = 1
-        options.probe_options.probe_power = data[0].sum()
-        options.probe_options.probe_power_constraint_stride = 1
+        options.probe_options.power_constraint.target_power = data[0].sum()
+        options.probe_options.power_constraint.stride = 1
         
         options.probe_position_options.position_x_px = positions_px[:, 1]
         options.probe_position_options.position_y_px = positions_px[:, 0]
@@ -88,8 +88,8 @@ class Tester2DPtychoProbePowerConstraint(tutils.TungstenDataTester):
         options.probe_options.optimizable = True
         options.probe_options.optimizer = api.Optimizers.SGD
         options.probe_options.step_size = 1e-1
-        options.probe_options.probe_power = data[0].sum()
-        options.probe_options.probe_power_constraint_stride = 1
+        options.probe_options.power_constraint.target_power = data[0].sum()
+        options.probe_options.power_constraint.stride = 1
         
         options.probe_position_options.position_x_px = positions_px[:, 1]
         options.probe_position_options.position_y_px = positions_px[:, 0]

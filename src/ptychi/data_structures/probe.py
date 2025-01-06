@@ -44,8 +44,8 @@ class Probe(ds.ReconstructParameter):
         if len(self.shape) != 4:
             raise ValueError("Probe tensor must be of shape (n_opr_modes, n_modes, h, w).")
 
-        self.probe_power = options.probe_power
-        self.probe_power_constraint_stride = options.probe_power_constraint_stride
+        self.probe_power = options.power_constraint.target_power
+        self.probe_power_constraint_stride = options.power_constraint.stride
         self.orthogonalize_incoherent_modes = options.orthogonalize_incoherent_modes
         self.orthogonalize_incoherent_modes_stride = options.orthogonalize_incoherent_modes_stride
         self.orthogonalize_incoherent_modes_method = options.orthogonalize_incoherent_modes_method
