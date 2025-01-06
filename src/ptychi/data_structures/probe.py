@@ -49,8 +49,8 @@ class Probe(ds.ReconstructParameter):
         self.orthogonalize_incoherent_modes = options.orthogonalize_incoherent_modes.enabled
         self.orthogonalize_incoherent_modes_stride = options.orthogonalize_incoherent_modes.stride
         self.orthogonalize_incoherent_modes_method = options.orthogonalize_incoherent_modes.method
-        self.orthogonalize_opr_modes = options.orthogonalize_opr_modes
-        self.orthogonalize_opr_modes_stride = options.orthogonalize_opr_modes_stride
+        self.orthogonalize_opr_modes = options.orthogonalize_opr_modes.enabled
+        self.orthogonalize_opr_modes_stride = options.orthogonalize_opr_modes.stride
 
     def shift(self, shifts: Tensor):
         """

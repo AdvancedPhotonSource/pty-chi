@@ -252,6 +252,18 @@ class ProbeOrthogonalizeIncoherentModesOptions:
 
 
 @dataclasses.dataclass
+class ProbeOrthogonalizeOPRModesOptions:
+    enabled: bool = False
+    """
+    Whether to orthogonalize OPR modes. If True, the OPR modes are orthogonalized
+    every `stride` epochs.
+    """
+
+    stride: int = 1
+    """The number of epochs between orthogonalizing the OPR modes."""
+
+
+@dataclasses.dataclass
 class ProbeOptions(ParameterOptions):
     """
     The probe configuration.
@@ -275,14 +287,9 @@ class ProbeOptions(ParameterOptions):
         default_factory=ProbeOrthogonalizeIncoherentModesOptions
     )
 
-    orthogonalize_opr_modes: bool = False
-    """
-    Whether to orthogonalize OPR modes. If True, the OPR modes are orthogonalized
-    every `orthogonalize_opr_modes_stride` epochs.
-    """
-
-    orthogonalize_opr_modes_stride: int = 1
-    """The number of epochs between orthogonalizing the OPR modes."""
+    orthogonalize_opr_modes: ProbeOrthogonalizeOPRModesOptions = field(
+        default_factory=ProbeOrthogonalizeOPRModesOptions
+    )
 
     support_constraint: bool = False
     """
