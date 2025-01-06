@@ -260,8 +260,7 @@ class ProbeOrthogonalizeOPRModesOptions:
     every `stride` epochs.
     """
 
-    stride: int = 1
-    """The number of epochs between orthogonalizing the OPR modes."""
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
 
 @dataclasses.dataclass

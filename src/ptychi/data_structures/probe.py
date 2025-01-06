@@ -25,6 +25,8 @@ class Probe(ds.ReconstructParameter):
     # TODO: eigenmode_update_relaxation is only used for LSQML. We should create dataclasses
     # to contain additional options for ReconstructParameter classes, and subclass them for specific
     # reconstruction algorithms - for example, ProbeOptions -> LSQMLProbeOptions.
+    options: "api.options.base.ProbeOptions"
+
     def __init__(
         self,
         name: str = "probe",
@@ -49,8 +51,6 @@ class Probe(ds.ReconstructParameter):
         self.orthogonalize_incoherent_modes = options.orthogonalize_incoherent_modes.enabled
         self.orthogonalize_incoherent_modes_stride = options.orthogonalize_incoherent_modes.stride
         self.orthogonalize_incoherent_modes_method = options.orthogonalize_incoherent_modes.method
-        self.orthogonalize_opr_modes = options.orthogonalize_opr_modes.enabled
-        self.orthogonalize_opr_modes_stride = options.orthogonalize_opr_modes.stride
 
     def shift(self, shifts: Tensor):
         """
@@ -242,13 +242,11 @@ class Probe(ds.ReconstructParameter):
         self.set_data(probe)
 
     def opr_mode_orthogonalization_enabled(self, current_epoch: int) -> bool:
-        enabled = self.optimization_enabled(current_epoch)
         return (
-            enabled
+            self.optimization_enabled(current_epoch)
             and self.has_multiple_opr_modes
-            and self.orthogonalize_opr_modes
-            and (current_epoch - self.optimization_plan.start) % self.orthogonalize_opr_modes_stride
-            == 0
+            and self.options.orthogonalize_opr_modes.enabled
+            and self.options.orthogonalize_opr_modes.optimization_plan.is_enabled(current_epoch)
         )
 
     def constrain_opr_mode_orthogonality(
