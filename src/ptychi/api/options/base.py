@@ -224,7 +224,7 @@ class ObjectOptions(ParameterOptions):
 
 
 @dataclasses.dataclass
-class ProbePowerConstraint:
+class ProbePowerConstraintOptions:
     target_power: float = 0.0
     """
     The target probe power. If greater than 0, probe power constraint
@@ -234,6 +234,21 @@ class ProbePowerConstraint:
 
     stride: int = 1
     """The number of epochs between probe power constraint updates."""
+
+
+@dataclasses.dataclass
+class ProbeOrthogonalizeIncoherentModesOptions:
+    enabled: bool = False
+    """
+    Whether to orthogonalize incoherent probe modes. If True, the incoherent probe
+    modes are orthogonalized every `stride` epochs.
+    """
+
+    stride: int = 1
+    """The number of epochs between orthogonalizing the incoherent probe modes."""
+
+    method: enums.OrthogonalizationMethods = enums.OrthogonalizationMethods.GS
+    """The method to use for incoherent_mode orthogonalization."""
 
 
 @dataclasses.dataclass
@@ -252,23 +267,13 @@ class ProbeOptions(ParameterOptions):
     initial_guess: Union[ndarray, Tensor] = None
     """A (n_opr_modes, n_modes, h, w) complex tensor of the probe initial guess."""
 
-    power_constraint: ProbePowerConstraint = field(
-        default_factory=ProbePowerConstraint
+    power_constraint: ProbePowerConstraintOptions = field(
+        default_factory=ProbePowerConstraintOptions
     )
 
-    orthogonalize_incoherent_modes: bool = False
-    """
-    Whether to orthogonalize incoherent probe modes. If True, the incoherent probe
-    modes are orthogonalized every `orthogonalize_incoherent_modes_stride` epochs.
-    """
-
-    orthogonalize_incoherent_modes_stride: int = 1
-    """The number of epochs between orthogonalizing the incoherent probe modes."""
-
-    orthogonalize_incoherent_modes_method: enums.OrthogonalizationMethods = (
-        enums.OrthogonalizationMethods.GS
+    orthogonalize_incoherent_modes: ProbeOrthogonalizeIncoherentModesOptions = field(
+        default_factory=ProbeOrthogonalizeIncoherentModesOptions
     )
-    """The method to use for incoherent_mode orthogonalization."""
 
     orthogonalize_opr_modes: bool = False
     """
