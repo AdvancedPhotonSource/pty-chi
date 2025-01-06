@@ -4,7 +4,7 @@ import torch
 import numpy as np
 
 from ptychi.data_structures.object import PlanarObject
-from ptychi.api.options.base import ObjectOptions
+from ptychi.api.options.base import ObjectOptions, RemoveGridArtifactsOptions
 import ptychi.api as api
 
 import test_utils as tutils
@@ -20,11 +20,13 @@ class TestRemoveGridArtifacts(tutils.BaseTester):
             data=data,
             options=ObjectOptions(
                 pixel_size_m=1,
-                remove_grid_artifacts=True,
-                remove_grid_artifacts_period_x_m=10,
-                remove_grid_artifacts_period_y_m=10,
-                remove_grid_artifacts_window_size=3,
-                remove_grid_artifacts_direction=api.Directions.XY,
+                remove_grid_artifacts=RemoveGridArtifactsOptions(
+                    enabled=True,
+                    period_x_m=10,
+                    period_y_m=10,
+                    window_size=3,
+                    direction=api.Directions.XY,
+                ),
             ),
         )
         with torch.no_grad():

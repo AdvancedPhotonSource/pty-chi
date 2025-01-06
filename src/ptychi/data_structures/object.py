@@ -34,8 +34,8 @@ class Object(ds.ReconstructParameter):
         self.l1_norm_constraint_stride = options.l1_norm_constraint.stride
         self.smoothness_constraint_alpha = options.smoothness_constraint.alpha
         self.smoothness_constraint_stride = options.smoothness_constraint.stride
-        self.total_variation_weight = options.total_variation_weight
-        self.total_variation_stride = options.total_variation_stride
+        self.total_variation_weight = options.total_variation.weight
+        self.total_variation_stride = options.total_variation.stride
         center_pixel = torch.tensor(self.shape, device=torch.get_default_device()) / 2.0
         self.roi_bbox: ds.BoundingBox = None
 
@@ -93,10 +93,10 @@ class Object(ds.ReconstructParameter):
 
     def remove_grid_artifacts_enabled(self, current_epoch: int):
         if (
-            self.options.remove_grid_artifacts
+            self.options.remove_grid_artifacts.enabled
             and self.optimization_enabled(current_epoch)
             and (current_epoch - self.optimization_plan.start)
-            % self.options.remove_grid_artifacts_stride
+            % self.options.remove_grid_artifacts.stride
             == 0
         ):
             return True
@@ -289,10 +289,10 @@ class PlanarObject(Object):
             phase = ip.remove_grid_artifacts(
                 phase,
                 pixel_size_m=self.pixel_size_m,
-                period_x_m=self.options.remove_grid_artifacts_period_x_m,
-                period_y_m=self.options.remove_grid_artifacts_period_y_m,
-                window_size=self.options.remove_grid_artifacts_window_size,
-                direction=self.options.remove_grid_artifacts_direction,
+                period_x_m=self.options.remove_grid_artifacts.period_x_m,
+                period_y_m=self.options.remove_grid_artifacts.period_y_m,
+                window_size=self.options.remove_grid_artifacts.window_size,
+                direction=self.options.remove_grid_artifacts.direction,
             )
             data = data[i_slice].abs() * torch.exp(1j * phase)
         self.set_data(data)

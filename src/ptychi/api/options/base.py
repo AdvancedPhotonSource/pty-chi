@@ -147,6 +147,36 @@ class ObjectSmoothnessConstraintOptions:
 
 
 @dataclasses.dataclass
+class ObjectTotalVariationOptions:
+    weight: float = 0
+    """The weight of the total variation constraint. Disabled if equal or less than 0."""
+
+    stride: int = 1
+    """The number of epochs between total variation constraint updates."""
+
+
+@dataclasses.dataclass
+class RemoveGridArtifactsOptions:
+    enabled: bool = False
+    """Whether to remove grid artifacts in the object's phase at the end of an epoch."""
+
+    period_x_m: float = 1e-7
+    """The horizontal period of grid artifacts in meters."""
+
+    period_y_m: float = 1e-7
+    """The vertical period of grid artifacts in meters."""
+
+    window_size: int = 5
+    """The window size for grid artifact removal in pixels."""
+
+    direction: enums.Directions = enums.Directions.XY
+    """The direction of grid artifact removal."""
+
+    stride: int = 1
+    """The number of epochs between grid artifact removal updates."""
+
+
+@dataclasses.dataclass
 class ObjectOptions(ParameterOptions):
     initial_guess: Union[ndarray, Tensor] = None
     """A (h, w) complex tensor of the object initial guess."""
@@ -167,29 +197,15 @@ class ObjectOptions(ParameterOptions):
     )
     """Smoothness constraint options."""
 
-    total_variation_weight: float = 0
-    """The weight of the total variation constraint. Disabled if equal or less than 0."""
+    total_variation: ObjectTotalVariationOptions = field(
+        default_factory=ObjectTotalVariationOptions
+    )
+    """Total variation options."""
 
-    total_variation_stride: int = 1
-    """The number of epochs between total variation constraint updates."""
-
-    remove_grid_artifacts: bool = False
-    """Whether to remove grid artifacts in the object's phase at the end of an epoch."""
-
-    remove_grid_artifacts_period_x_m: float = 1e-7
-    """The horizontal period of grid artifacts in meters."""
-
-    remove_grid_artifacts_period_y_m: float = 1e-7
-    """The vertical period of grid artifacts in meters."""
-
-    remove_grid_artifacts_window_size: int = 5
-    """The window size for grid artifact removal in pixels."""
-
-    remove_grid_artifacts_direction: enums.Directions = enums.Directions.XY
-    """The direction of grid artifact removal."""
-
-    remove_grid_artifacts_stride: int = 1
-    """The number of epochs between grid artifact removal updates."""
+    remove_grid_artifacts: RemoveGridArtifactsOptions = field(
+        default_factory=RemoveGridArtifactsOptions
+    )
+    """Grid artifact removal options."""
 
     multislice_regularization: ObjectMultisliceRegularizationOptions = field(
         default_factory=ObjectMultisliceRegularizationOptions
