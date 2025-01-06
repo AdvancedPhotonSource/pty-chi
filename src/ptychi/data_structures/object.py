@@ -299,10 +299,10 @@ class PlanarObject(Object):
 
     def multislice_regularization_enabled(self, current_epoch: int):
         if (
-            self.options.multislice_regularization_weight > 0
+            self.options.multislice_regularization.weight > 0
             and self.optimization_enabled(current_epoch)
             and (current_epoch - self.optimization_plan.start)
-            % self.options.multislice_regularization_stride
+            % self.options.multislice_regularization.stride
             == 0
         ):
             return True
@@ -328,7 +328,7 @@ class PlanarObject(Object):
         # Calculate force of regularization based on the idea that DoF = resolution^2/lambda
         w = 1 - torch.atan(
             (
-                self.options.multislice_regularization_weight
+                self.options.multislice_regularization.weight
                 * torch.abs(fourier_coords[0])
                 / torch.sqrt(fourier_coords[1] ** 2 + fourier_coords[2] ** 2 + 1e-3)
             )
@@ -357,14 +357,14 @@ class PlanarObject(Object):
         w_phase = torch.clip(10 * (self.preconditioner / self.preconditioner.max()), max=1)
         w_phase_clipped = torch.clip(w_phase, min=0.1)
 
-        if self.options.multislice_regularization_unwrap_phase:
+        if self.options.multislice_regularization.unwrap_phase:
             pobj = [
                 ip.unwrap_phase_2d(
                     obj[i_slice],
                     weight_map=w_phase_clipped,
                     fourier_shift_step=0.5,
-                    image_grad_method=self.options.multislice_regularization_unwrap_image_grad_method,
-                    image_integration_method=self.options.multislice_regularization_unwrap_image_integration_method,
+                    image_grad_method=self.options.multislice_regularization.unwrap_image_grad_method,
+                    image_integration_method=self.options.multislice_regularization.unwrap_image_integration_method,
                 )
                 for i_slice in range(self.n_slices)
             ]

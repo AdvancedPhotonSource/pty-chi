@@ -33,8 +33,8 @@ class TestMultislicePtychoAutodiffRegularized(tutils.BaseTester):
         options.object_options.optimizable = True
         options.object_options.optimizer = api.Optimizers.ADAM
         options.object_options.step_size = 1e-3
-        options.object_options.multislice_regularization_weight = 0.1
-        options.object_options.multislice_regularization_unwrap_image_grad_method = api.enums.ImageGradientMethods.FOURIER_DIFFERENTIATION
+        options.object_options.multislice_regularization.weight = 0.1
+        options.object_options.multislice_regularization.unwrap_image_grad_method = api.enums.ImageGradientMethods.FOURIER_DIFFERENTIATION
         
         options.probe_options.initial_guess = probe
         options.probe_options.optimizable = True

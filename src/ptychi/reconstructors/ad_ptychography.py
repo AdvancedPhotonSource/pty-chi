@@ -39,7 +39,7 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
     def run_pre_epoch_hooks(self) -> None:
         if (
             self.parameter_group.object.is_multislice
-            and self.parameter_group.object.options.multislice_regularization_weight > 0
+            and self.parameter_group.object.options.multislice_regularization.weight > 0
         ):
             self.update_preconditioners()
         return super().run_pre_epoch_hooks()

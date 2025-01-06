@@ -1,5 +1,6 @@
 from typing import Optional, Union, Sequence
 import dataclasses
+from dataclasses import field
 import logging
 
 from numpy import ndarray
@@ -78,6 +79,42 @@ class ParameterOptions(Options):
         d = self.__dict__.copy()
         return d
 
+@dataclasses.dataclass
+class ObjectMultisliceRegularizationOptions:
+    weight: float = 0
+    """
+    The weight for multislice regularization. Disabled if 0, or if `type != ObjectTypes.MULTISLICE`. 
+    When enabled, multislice objects are regularized using cross-slice smoothing.
+    """
+
+    unwrap_phase: bool = True
+    """Whether to unwrap the phase of the object during multislice regularization."""
+
+    unwrap_image_grad_method: enums.ImageGradientMethods = (
+        enums.ImageGradientMethods.FOURIER_SHIFT
+    )
+    """
+    The method for calculating the phase gradient during phase unwrapping.
+    
+        - FOURIER_SHIFT: Use Fourier shift to perform shift.
+        - NEAREST: Use nearest neighbor to perform shift.
+        - FOURIER_DIFFERENTIATION: Use Fourier differentiation.
+    """
+
+    unwrap_image_integration_method: enums.ImageIntegrationMethods = (
+        enums.ImageIntegrationMethods.DECONVOLUTION
+    )
+    """
+    The method for integrating the phase gradient during phase unwrapping.
+    
+        - FOURIER: Use Fourier integration as implemented in PtychoShelves.
+        - DECONVOLUTION: Deconvolve a ramp filter.
+        - DISCRETE: Use cumulative sum.
+    """
+
+    stride: int = 1
+    """The number of epochs between multislice regularization updates."""
+
 
 @dataclasses.dataclass
 class ObjectOptions(ParameterOptions):
@@ -138,39 +175,10 @@ class ObjectOptions(ParameterOptions):
     remove_grid_artifacts_stride: int = 1
     """The number of epochs between grid artifact removal updates."""
 
-    multislice_regularization_weight: float = 0
-    """
-    The weight for multislice regularization. Disabled if 0, or if `type != ObjectTypes.MULTISLICE`. 
-    When enabled, multislice objects are regularized using cross-slice smoothing.
-    """
-
-    multislice_regularization_unwrap_phase: bool = True
-    """Whether to unwrap the phase of the object during multislice regularization."""
-
-    multislice_regularization_unwrap_image_grad_method: enums.ImageGradientMethods = (
-        enums.ImageGradientMethods.FOURIER_SHIFT
+    multislice_regularization: ObjectMultisliceRegularizationOptions = field(
+        default_factory=ObjectMultisliceRegularizationOptions
     )
-    """
-    The method for calculating the phase gradient during phase unwrapping.
-    
-        - FOURIER_SHIFT: Use Fourier shift to perform shift.
-        - NEAREST: Use nearest neighbor to perform shift.
-        - FOURIER_DIFFERENTIATION: Use Fourier differentiation.
-    """
-
-    multislice_regularization_unwrap_image_integration_method: enums.ImageIntegrationMethods = (
-        enums.ImageIntegrationMethods.DECONVOLUTION
-    )
-    """
-    The method for integrating the phase gradient during phase unwrapping.
-    
-        - FOURIER: Use Fourier integration as implemented in PtychoShelves.
-        - DECONVOLUTION: Deconvolve a ramp filter.
-        - DISCRETE: Use cumulative sum.
-    """
-
-    multislice_regularization_stride: int = 1
-    """The number of epochs between multislice regularization updates."""
+    """Multi-slice regularization options."""
 
     patch_interpolation_method: enums.PatchInterpolationMethods = (
         enums.PatchInterpolationMethods.FOURIER
