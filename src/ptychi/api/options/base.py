@@ -342,9 +342,20 @@ class ProbeOptions(ParameterOptions):
         default_factory=ProbeSupportConstraintOptions
     )
 
+
     eigenmode_update_relaxation: float = 1.0
     """
     A separate step size for eigenmode update.
+    """
+    
+    center_constraint: bool = False
+    """
+    Whether to constrain the probe's center of mass to the center of the probe array.
+    """
+    
+    center_constraint_stride: int = 1
+    """
+    The number of epochs between probe center constraint updates.
     """
 
     def check(self):

@@ -9,10 +9,10 @@ from torch import Tensor
 
 import ptychi.image_proc as ip
 import ptychi.maths as pmath
+import ptychi.utils as utils
 import ptychi.data_structures.base as ds
 import ptychi.data_structures.object as object
 import ptychi.data_structures.opr_mode_weights as oprweights
-import ptychi.api.enums as enums
 from ptychi.propagate import FourierPropagator, WavefieldPropagator
 
 if TYPE_CHECKING:
@@ -67,7 +67,7 @@ class Probe(ds.ReconstructParameter):
         if shifts.ndim == 1:
             probe_straightened = self.tensor.complex().view(-1, *self.shape[-2:])
             shifted_probe = ip.fourier_shift(
-                probe_straightened, shifts[None, :].repeat([[probe_straightened.shape[0], 1, 1]])
+                probe_straightened, shifts[None, :].repeat([probe_straightened.shape[0], 1])
             )
             shifted_probe = shifted_probe.view(*self.shape)
         else:
@@ -365,6 +365,39 @@ class Probe(ds.ReconstructParameter):
         mask = ip.gaussian_filter(mask, sigma=2, size=3).abs()
         data = data * mask
         self.set_data(data)
+
+    def support_constraint_enabled(self, current_epoch: int) -> bool:
+        if (
+            self.options.support_constraint
+            and current_epoch >= self.optimization_plan.start
+            and (current_epoch - self.optimization_plan.start)
+            % self.options.support_constraint_stride
+            == 0
+        ):
+            return True
+        else:
+            return False
+
+    def center_constraint_enabled(self, current_epoch: int) -> bool:
+        if (
+            self.options.center_constraint
+            and current_epoch >= self.optimization_plan.start
+            and (current_epoch - self.optimization_plan.start)
+            % self.options.center_constraint_stride
+            == 0
+        ):
+            return True
+        else:
+            return False
+        
+    def center_probe(self):
+        """
+        Move the probe's center of mass to the center of the probe array.
+        """
+        com = ip.find_center_of_mass(self.get_mode_and_opr_mode(0, 0))
+        shift = utils.to_tensor(self.shape[-2:]) // 2 - com
+        shifted_probe = self.shift(shift)
+        self.set_data(shifted_probe)
 
     def post_update_hook(self) -> None:
         super().post_update_hook()

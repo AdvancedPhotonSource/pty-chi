@@ -6,6 +6,7 @@
 
 Welcome to the repository of Pty-chi, a PyTorch-based ptychography reconstruction library!
 
+
 ============
 Installation
 ============
@@ -19,6 +20,7 @@ Then install the package using::
 
     pip install -e .
 
+
 =======================
 How to run test scripts 
 =======================
@@ -30,6 +32,22 @@ How to run test scripts
 3. Set ``PTYCHO_CI_DATA_DIR`` to the ``ci_data`` directory of the data
    repository: ``export PTYCHO_CI_DATA_DIR="path_to_data_repo/ci_data"``.
 4. Run any test scripts in ``tests`` with Python.
+
+
+=====================
+How to build the docs
+=====================
+
+To build the docs, install the dependencies as the first step::
+
+   pip install -e .[docs]
+
+Then::
+
+   cd docs
+   make html
+
+You can then view the docs by opening ``docs/build/html/index.html`` in your browser.
 
 
 =================

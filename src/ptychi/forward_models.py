@@ -12,6 +12,7 @@ from ptychi.propagate import (
     FourierPropagator,
 )
 from ptychi.metrics import MSELossOfSqrt
+import ptychi.image_proc as ip
 
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group
@@ -23,15 +24,30 @@ class ForwardModel(torch.nn.Module):
         self,
         parameter_group: "ptychi.data_structures.parameter_group.ParameterGroup",
         retain_intermediates: bool = False,
+        detector_size: Optional[tuple[int, int]] = None,
         *args,
         **kwargs,
     ) -> None:
+        """
+        The base forward model class.
+        
+        Parameters
+        ----------
+        parameter_group : ptychi.data_structures.parameter_group.ParameterGroup
+            The parameter group.
+        retain_intermediates : bool
+            If True, intermediate variables are retained in `self.intermediate_variables`.
+        detector_size : tuple[int, int], optional
+            The size of the detector. If given and if the detector size is smaller than
+            the size of the probe, the probe is cropped to the detector size.
+        """
         super().__init__()
 
         self.parameter_group = parameter_group
         self.retain_intermediates = retain_intermediates
         self.optimizable_parameters: ModuleList[ds.ReconstructParameter] = ModuleList()
         self.propagator = None
+        self.detector_size = detector_size
         self.intermediate_variables = {}
         
         self.register_optimizable_parameters()
@@ -57,16 +73,39 @@ class PlanarPtychographyForwardModel(ForwardModel):
         self,
         parameter_group: "ptychi.data_structures.parameter_group.PlanarPtychographyParameterGroup",
         retain_intermediates: bool = False,
+        detector_size: Optional[tuple[int, int]] = None,
         wavelength_m: Optional[float] = None,
+        free_space_propagation_distance_m: Optional[float] = torch.inf,
         low_memory_mode: bool = False,
         *args,
         **kwargs,
     ) -> None:
-        super().__init__(parameter_group, *args, **kwargs)
-        self.retain_intermediates = retain_intermediates
-        self.low_mem_mode = low_memory_mode
+        """
+        The forward model for planar ptychography, which supports multislice propagation
+        but does not work for dense 3D objects that requires rotation. 
 
-        self.far_field_propagator = FourierPropagator()
+        Parameters
+        ----------
+        parameter_group : ptychi.data_structures.parameter_group.PlanarPtychographyParameterGroup
+            The parameter group.
+        retain_intermediates : bool
+            If True, intermediate variables are retained in `self.intermediate_variables`.
+        detector_size : tuple[int, int], optional
+            The size of the detector. If given and if the detector size is smaller than
+            the size of the probe, the probe is cropped to the detector size.
+        wavelength_m : float, optional
+            The wavelength of the probe in meters.
+        free_space_propagation_distance_m : float, optional
+            The free-space propagation distance in meters, or `inf` for far-field.
+        low_memory_mode : bool
+            If True, incoherent probe modes are propagated sequentially rather than in parallel
+            which reduces the memory usage.
+        """
+        super().__init__(
+            parameter_group, retain_intermediates=retain_intermediates, detector_size=detector_size, 
+            *args, **kwargs
+        )
+        self.low_mem_mode = low_memory_mode
 
         # This step is essential as it sets the variables to be attributes of
         # the forward modelobject. Only with this can these buffers be copied
@@ -77,10 +116,16 @@ class PlanarPtychographyForwardModel(ForwardModel):
         self.opr_mode_weights = parameter_group.opr_mode_weights
 
         self.wavelength_m = wavelength_m
-        self.prop_params = None
+        self.free_space_propagation_distance_m = free_space_propagation_distance_m
+        
+        # Build free space propagator.
+        self.free_space_propagator = None
+        self.build_free_space_propagator()
 
-        self.near_field_propagator = None
-        self.build_propagator()
+        # Build in-object (multislice) propagator.
+        self.in_object_propagator = None
+        self.in_object_prop_params = None
+        self.build_in_object_propagator()
 
         # Intermediate variables. Only used if retain_intermediate is True.
         self.intermediate_variables = {
@@ -102,10 +147,10 @@ class PlanarPtychographyForwardModel(ForwardModel):
             if self.wavelength_m is None:
                 raise ValueError("Wavelength must be given when the object is multislice.")
 
-    def build_propagator(self):
+    def build_in_object_propagator(self):
         if not self.object.is_multislice:
             return
-        self.prop_params = WavefieldPropagatorParameters.create_simple(
+        self.in_object_prop_params = WavefieldPropagatorParameters.create_simple(
             wavelength_m=self.wavelength_m,
             width_px=self.probe.shape[-1],
             height_px=self.probe.shape[-2],
@@ -113,7 +158,23 @@ class PlanarPtychographyForwardModel(ForwardModel):
             pixel_height_m=self.object.pixel_size_m,
             propagation_distance_m=self.object.slice_spacings_m[0],
         )
-        self.near_field_propagator = AngularSpectrumPropagator(self.prop_params)
+        self.in_object_propagator = AngularSpectrumPropagator(self.in_object_prop_params)
+        
+    def build_free_space_propagator(self):
+        if self.free_space_propagation_distance_m == torch.inf:
+            self.free_space_propagator = FourierPropagator()
+        else:
+            params = WavefieldPropagatorParameters.create_simple(
+                wavelength_m=self.wavelength_m,
+                width_px=self.probe.shape[-1],
+                height_px=self.probe.shape[-2],
+                pixel_width_m=self.object.pixel_size_m,
+                pixel_height_m=self.object.pixel_size_m,
+                propagation_distance_m=self.free_space_propagation_distance_m,
+            )
+            # TODO: AngularSpectrumPropagator uses analytical transfer function. Using the FFT
+            # of real-space impulse response might offer better sampling for large propagation distances.
+            self.free_space_propagator = AngularSpectrumPropagator(params)
 
     def get_probe(self, indices: Tensor) -> Tensor:
         """
@@ -233,7 +294,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         Tensor
             A (batch_size, n_probe_modes, h, w) tensor of far field waves.
         """
-        psi_far = self.far_field_propagator.propagate_forward(psi)
+        psi_far = self.free_space_propagator.propagate_forward(psi)
         self.record_intermediate_variable("psi_far", psi_far)
         return psi_far
 
@@ -255,7 +316,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         Tensor
             The wavefield propagated to the next slice.
         """
-        self.prop_params = WavefieldPropagatorParameters.create_simple(
+        self.in_object_prop_params = WavefieldPropagatorParameters.create_simple(
             wavelength_m=self.wavelength_m,
             width_px=self.probe.shape[-1],
             height_px=self.probe.shape[-2],
@@ -263,8 +324,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
             pixel_height_m=self.object.pixel_size_m,
             propagation_distance_m=self.object.slice_spacings_m[slice_index],
         )
-        self.near_field_propagator.update(self.prop_params)
-        slice_psi_prop = self.near_field_propagator.propagate_forward(psi)
+        self.in_object_propagator.update(self.in_object_prop_params)
+        slice_psi_prop = self.in_object_propagator.propagate_forward(psi)
         return slice_psi_prop
 
     def propagate_to_previous_slice(self, psi: Tensor, slice_index: int):
@@ -287,7 +348,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         """
         if slice_index == 0:
             return psi
-        self.prop_params = WavefieldPropagatorParameters.create_simple(
+        self.in_object_prop_params = WavefieldPropagatorParameters.create_simple(
             wavelength_m=self.wavelength_m,
             width_px=self.probe.shape[-1],
             height_px=self.probe.shape[-2],
@@ -295,8 +356,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
             pixel_height_m=self.object.pixel_size_m,
             propagation_distance_m=self.object.slice_spacings_m[slice_index - 1],
         )
-        self.near_field_propagator.update(self.prop_params)
-        slice_psi_prop = self.near_field_propagator.propagate_backward(psi)
+        self.in_object_propagator.update(self.in_object_prop_params)
+        slice_psi_prop = self.in_object_propagator.propagate_backward(psi)
         return slice_psi_prop
 
     def forward(self, indices: Tensor, return_object_patches: bool = False) -> Tensor:
@@ -327,6 +388,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
         y = torch.abs(psi_far) ** 2
         # Sum along probe modes
         y = y.sum(1)
+        
+        y = self.conform_to_detector_size(y)
 
         returns = [y]
         if return_object_patches:
@@ -335,6 +398,22 @@ class PlanarPtychographyForwardModel(ForwardModel):
             return returns[0]
         else:
             return returns
+        
+    def conform_to_detector_size(self, y: Tensor) -> Tensor:
+        if (
+            self.detector_size is None
+        ) or (
+            self.detector_size[0] == y.shape[-2] and self.detector_size[1] == y.shape[-1]
+        ):
+            return y
+        if self.detector_size[0] > y.shape[-2] or self.detector_size[1] > y.shape[-1]:
+            raise ValueError(
+                f"Detector size ({self.detector_size}) should not be larger than the probe size ({y.shape[-2:]})."
+            )
+        y = torch.fft.fftshift(y, dim=(-2, -1))
+        y = ip.central_crop(y, self.detector_size)
+        y = torch.fft.ifftshift(y, dim=(-2, -1))
+        return y
 
     def forward_low_memory(self, indices: Tensor, return_object_patches: bool = False) -> Tensor:
         """
@@ -369,10 +448,12 @@ class PlanarPtychographyForwardModel(ForwardModel):
             if slice_psis_current_mode is not None:
                 slice_psis.append(slice_psis_current_mode)
             
-            psi_far = self.far_field_propagator.propagate_forward(exit_psi)
+            psi_far = self.free_space_propagator.propagate_forward(exit_psi)
             self.record_intermediate_variable("psi_far", psi_far)
             
             y = y + psi_far[..., 0, :, :].abs() ** 2
+
+        y = self.conform_to_detector_size(y)
 
         # Concatenate all the modes.
         if len(slice_psis) > 0:
@@ -396,7 +477,9 @@ class PlanarPtychographyForwardModel(ForwardModel):
         nothing is done. If the normalization is "backward" (default in `torch.fft`),
         all gradients are scaled by 1 / sqrt(N).
         """
-        if self.far_field_propagator.norm == "backward" or self.far_field_propagator.norm is None:
+        if not isinstance(self.free_space_propagator, FourierPropagator):
+            return
+        if self.free_space_propagator.norm == "backward" or self.free_space_propagator.norm is None:
             factor = self.probe.shape[-2] * self.probe.shape[-1]
             for var in self.optimizable_parameters:
                 if var.get_grad() is not None:
@@ -462,6 +545,26 @@ class NoiseModel(torch.nn.Module):
 
     def backward(self, *args, **kwargs):
         raise NotImplementedError
+    
+    def conform_to_exit_wave_size(
+        self, 
+        y_pred: Tensor, 
+        y_true: Tensor, 
+        valid_pixel_mask: Tensor,
+        psi_shape: tuple[int, int], 
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        if psi_shape[-2] != y_pred.shape[-2] or psi_shape[-1] != y_pred.shape[-1]:
+            y_pred = torch.fft.fftshift(y_pred, dim=(-2, -1))
+            y_true = torch.fft.fftshift(y_true, dim=(-2, -1))
+            y_pred = ip.central_crop_or_pad(y_pred, psi_shape[-2:])
+            y_true = ip.central_crop_or_pad(y_true, psi_shape[-2:])
+            y_pred = torch.fft.ifftshift(y_pred, dim=(-2, -1))
+            y_true = torch.fft.ifftshift(y_true, dim=(-2, -1))
+            if valid_pixel_mask is not None:
+                valid_pixel_mask = torch.fft.fftshift(valid_pixel_mask, dim=(-2, -1))
+                valid_pixel_mask = ip.central_crop_or_pad(valid_pixel_mask, psi_shape[-2:])
+                valid_pixel_mask = torch.fft.ifftshift(valid_pixel_mask, dim=(-2, -1))
+        return y_pred, y_true, valid_pixel_mask
 
 
 class GaussianNoiseModel(NoiseModel):
@@ -488,9 +591,12 @@ class PtychographyGaussianNoiseModel(GaussianNoiseModel):
         """
         # Shape of g:       (batch_size, h, w)
         # Shape of psi_far: (batch_size, n_probe_modes, h, w)
+        y_pred, y_true, valid_pixel_mask = self.conform_to_exit_wave_size(
+            y_pred, y_true, self.valid_pixel_mask, psi_far.shape[-2:]
+        )
         g = 1 - torch.sqrt(y_true) / (torch.sqrt(y_pred) + self.eps)  # Eq. 12b
-        if self.valid_pixel_mask is not None:
-            g[:, torch.logical_not(self.valid_pixel_mask)] = 0
+        if valid_pixel_mask is not None:
+            g[:, torch.logical_not(valid_pixel_mask)] = 0
         w = 1 / (2 * self.sigma) ** 2
         g = 2 * w * g[:, None, :, :] * psi_far
         return g
@@ -517,8 +623,11 @@ class PtychographyPoissonNoiseModel(PoissonNoiseModel):
         """
         Compute the gradient of the NLL with respect to far field wavefront.
         """
+        y_pred, y_true, valid_pixel_mask = self.conform_to_exit_wave_size(
+            y_pred, y_true, self.valid_pixel_mask, psi_far.shape[-2:]
+        )
         g = 1 - y_true / (y_pred + self.eps)  # Eq. 12b
-        if self.valid_pixel_mask is not None:
-            g[:, torch.logical_not(self.valid_pixel_mask)] = 0
+        if valid_pixel_mask is not None:
+            g[:, torch.logical_not(valid_pixel_mask)] = 0
         g = g[:, None, :, :] * psi_far
         return g

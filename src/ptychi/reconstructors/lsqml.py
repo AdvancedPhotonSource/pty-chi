@@ -5,15 +5,12 @@ import math
 import torch
 from torch.utils.data import Dataset
 
-from ptychi import maps
-import ptychi.data_structures.object
 from ptychi.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
     LossTracker,
 )
 import ptychi.data_structures.base as ds
 import ptychi.forward_models as fm
-from ptychi.utils import chunked_processing
 import ptychi.maths as pmath
 import ptychi.api.enums as enums
 
@@ -152,7 +149,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.alpha_psi_far = self.get_psi_far_step_size(y_pred, y_true, indices)
         psi_far = psi_far_0 - self.alpha_psi_far.view(-1, 1, 1, 1) * dl_dpsi_far  # Eq. 14
 
-        psi_opt = self.forward_model.far_field_propagator.propagate_backward(psi_far)
+        psi_opt = self.forward_model.free_space_propagator.propagate_backward(psi_far)
         return psi_opt
 
     def run_real_space_step(self, psi_opt, indices):
@@ -283,7 +280,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             
             # In compact batching mode, object is updated at the end of an epoch using gradients
             # accumulated over all minibatches.
-            if self.options.batching_mode == enums.BatchingModes.RANDOM:
+            if self.options.batching_mode in [enums.BatchingModes.RANDOM, enums.BatchingModes.PSEUDORANDOM]:
                 self._record_object_slice_gradient(
                     i_slice, delta_o_precond, add_to_existing=False
                 )
@@ -298,7 +295,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         mean_alpha_o_all_slices = pmath.trim_mean(self.alpha_object_all_pos_all_slices[indices], 0.1, dim=0)
         if (
             self.parameter_group.object.optimization_enabled(self.current_epoch)
-            and self.options.batching_mode == enums.BatchingModes.RANDOM
+            and self.options.batching_mode in [enums.BatchingModes.RANDOM, enums.BatchingModes.PSEUDORANDOM]
         ):
             self._apply_object_update(mean_alpha_o_all_slices, None)
 
@@ -726,11 +723,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
     def _initialize_object_gradient(self):
         """
         Initialize object gradient with zeros. This method is called at the beginning of the
-        real-space step of a minibatch. If batching mode is "random", the gradient is always
+        real-space step of a minibatch. If batching mode is "(pseudo)random", the gradient is always
         re-initialized when this method is called. If batching mode is "compact", gradient
         is only initialized if the current minibatch is the first in the current epoch.
         """
-        if self.options.batching_mode == enums.BatchingModes.RANDOM:
+        if self.options.batching_mode in [enums.BatchingModes.RANDOM, enums.BatchingModes.PSEUDORANDOM]:
             self.parameter_group.object.initialize_grad()
         else:
             if self.current_minibatch == 0:

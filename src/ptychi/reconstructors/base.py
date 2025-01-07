@@ -315,6 +315,10 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             batch_sampler = io.PtychographyCompactBatchSampler(
                 self.parameter_group.probe_positions.data.cpu(), self.batch_size
             )
+        elif self.options.batching_mode == enums.BatchingModes.PSEUDORANDOM:
+            batch_sampler = io.PtychographyPseudorandomBatchSampler(
+                self.parameter_group.probe_positions.data.cpu(), self.batch_size
+            )
         return super().build_dataloader(batch_sampler=batch_sampler)
 
     def update_preconditioners(self, use_all_probe_modes_for_object_preconditioner=False):
@@ -414,6 +418,10 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             # Apply probe support constraint.
             if probe.options.support_constraint.is_enabled_on_this_epoch(self.current_epoch):
                 probe.constrain_support()
+                
+            # Apply probe center constraint.
+            if probe.center_constraint_enabled(self.current_epoch):
+                probe.center_probe()
                 
             # Smooth OPR weights.
             opr_mode_weights = self.parameter_group.opr_mode_weights
@@ -537,7 +545,11 @@ class AnalyticalIterativePtychographyReconstructor(
 
     def build_forward_model(self):
         self.forward_model = fm.PlanarPtychographyForwardModel(
-            self.parameter_group, retain_intermediates=True, wavelength_m=self.dataset.wavelength_m
+            parameter_group=self.parameter_group, 
+            retain_intermediates=True,
+            detector_size=tuple(self.dataset.patterns.shape[-2:]),
+            wavelength_m=self.dataset.wavelength_m,
+            free_space_propagation_distance_m=self.dataset.free_space_propagation_distance_m,
         )
 
     def run_post_epoch_hooks(self) -> None:

@@ -111,7 +111,9 @@ class PtychographyTask(Task):
 
     def build_data(self):
         self.dataset = PtychographyDataset(
-            self.data_options.data, wavelength_m=self.data_options.wavelength_m
+            self.data_options.data, 
+            wavelength_m=self.data_options.wavelength_m,
+            free_space_propagation_distance_m=self.data_options.free_space_propagation_distance_m,
         )
 
     def build_object(self):

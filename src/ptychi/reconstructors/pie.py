@@ -95,7 +95,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         psi_prime = torch.where(
             valid_pixel_mask.repeat(psi_prime.shape[0], probe.n_modes, 1, 1), psi_prime, psi_far
         )
-        psi_prime = self.forward_model.far_field_propagator.propagate_backward(psi_prime)
+        psi_prime = self.forward_model.free_space_propagator.propagate_backward(psi_prime)
 
         delta_o = None
         if object_.optimization_enabled(self.current_epoch):

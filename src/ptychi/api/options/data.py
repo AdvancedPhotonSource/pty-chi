@@ -1,6 +1,6 @@
 from typing import Union, Optional
 
-from numpy import ndarray
+from numpy import ndarray, inf
 from torch import Tensor
 
 
@@ -16,8 +16,8 @@ class PtychographyDataOptions:
     or square-rooted.
     """
 
-    propagation_distance_m: float = 1.0
-    """The propagation distance in meters."""
+    free_space_propagation_distance_m: float = inf
+    """The free-space propagation distance in meters, or `inf` for far-field."""
 
     wavelength_m: float = 1e-9
     """The wavelength in meters."""

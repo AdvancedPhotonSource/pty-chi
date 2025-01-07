@@ -4,6 +4,7 @@ from enum import StrEnum, auto
 class BatchingModes(StrEnum):
     RANDOM = auto()
     COMPACT = auto()
+    PSEUDORANDOM = auto()
 
 
 class Optimizers(StrEnum):

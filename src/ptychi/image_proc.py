@@ -1151,6 +1151,7 @@ def find_center_of_mass(img: Tensor):
     Tensor
         A (N, 2) or (2,) tensor giving the centers of mass.
     """
+    orig_ndim = img.ndim
     if img.ndim == 2:
         img = img[None]
     
@@ -1163,4 +1164,82 @@ def find_center_of_mass(img: Tensor):
     x = x.to(img.device)
     r = torch.stack((y, x), dim=-1)
     com = (r[None] * img[..., None]).sum(dim=(-3, -2)) / img.sum(dim=(-2, -1))[..., None]
+    if orig_ndim == 2:
+        return com[0]
     return com
+
+
+def central_crop(img: Tensor, crop_size: tuple[int, int]) -> Tensor:
+    """
+    Crop the center of an image.
+    
+    Parameters
+    ----------
+    img : Tensor
+        A (..., H, W) tensor giving the input image(s).
+    crop_size : tuple[int, int]
+        crop size.
+    
+    Returns
+    -------
+    Tensor
+        The image cropped to the target size.
+    """
+    return img[
+        ..., 
+        img.shape[-2] // 2 - crop_size[0] // 2 : img.shape[-2] // 2 - crop_size[0] // 2 + crop_size[0], 
+        img.shape[-1] // 2 - crop_size[1] // 2 : img.shape[-1] // 2 - crop_size[1] // 2 + crop_size[1]
+    ]
+
+
+def central_pad(
+    img: Tensor, 
+    target_size: tuple[int, int], 
+    mode: Literal["constant", "reflect", "replicate", "circular"] = "constant", 
+    value: float = 0.0
+) -> Tensor:
+    """
+    Pad the center of an image.
+    
+    Parameters
+    ----------
+    img : Tensor
+        A (..., H, W) tensor giving the input image(s).
+    target_size : tuple[int, int]
+        target size.
+    
+    Returns
+    -------
+    Tensor
+        The image padded to the target size.
+    """
+    pad_size = [
+        (target_size[0] - img.shape[-2]) // 2, target_size[-2] - (target_size[0] - img.shape[-2]) // 2 - img.shape[-2],
+        (target_size[1] - img.shape[-1]) // 2, target_size[-1] - (target_size[1] - img.shape[-1]) // 2 - img.shape[-1]
+    ]
+    return torch.nn.functional.pad(img, (pad_size[2], pad_size[3], pad_size[0], pad_size[1]), mode=mode, value=value)
+
+
+def central_crop_or_pad(img: Tensor, target_size: tuple[int, int]) -> Tensor:
+    """
+    Crop or pad the center of an image to the target size.
+    
+    Parameters
+    ----------
+    img : Tensor
+        A (..., H, W) tensor giving the input image(s).
+    target_size : tuple[int, int]
+        target size.
+    
+    Returns
+    -------
+    Tensor
+        The image cropped or padded to the target size.
+    """
+    for i in range(2):
+        target_size_current_dim = [img.shape[-2]] * (i == 1) + [target_size[i]] + [img.shape[-1]] * (i == 0)
+        if img.shape[-2 + i] > target_size[-2 + i]:
+            img = central_crop(img, target_size_current_dim)
+        elif img.shape[-2 + i] < target_size[-2 + i]:
+            img = central_pad(img, target_size_current_dim)
+    return img

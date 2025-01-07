@@ -217,7 +217,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             start_pt, end_pt, return_obj_patches=True
         )
         # Propagate to detector plane
-        revised_psi = self.forward_model.far_field_propagator.propagate_forward(
+        revised_psi = self.forward_model.free_space_propagator.propagate_forward(
             2 * new_psi - self.psi[start_pt:end_pt]
         )
         # Replace intensities
@@ -227,7 +227,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             revised_psi,
         )
         # Propagate back to sample plane
-        revised_psi = self.forward_model.far_field_propagator.propagate_backward(revised_psi)
+        revised_psi = self.forward_model.free_space_propagator.propagate_backward(revised_psi)
         # Update the exit wave
         psi_update = (revised_psi - new_psi) * self.options.exit_wave_update_relaxation
         self.psi[start_pt:end_pt] += psi_update

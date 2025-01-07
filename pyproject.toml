@@ -24,6 +24,12 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[docs]
+dependencies = [
+    "sphinx",
+    "sphinx-rtd-theme",
+]
+
 [tool.setuptools_scm]
 
 [tool.mypy]
