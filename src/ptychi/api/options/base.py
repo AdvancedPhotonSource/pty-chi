@@ -413,6 +413,35 @@ class OPRModeWeightsSmoothingOptions(FeatureOptions):
 
 
 @dataclasses.dataclass
+class OPRModeWeightsEigenmodeWeightsOptions(FeatureOptions):
+    """
+    Whether to optimize eigenmode weights, i.e., the weights of the second and
+    following OPR modes.
+
+    At least one of `optimize_eigenmode_weights` and `optimize_intensity_variation`
+    should be set to `True` if `optimizable` is `True`.
+    """
+
+    enabled: bool = True
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+
+
+@dataclasses.dataclass
+class OPRModeWeightsIntensityVariationOptions(FeatureOptions):
+    """
+    Whether to optimize intensity variation, i.e., the weight of the first OPR mode.
+
+    At least one of `optimize_eigenmode_weights` and `optimize_intensity_variation`
+    should be set to `True` if `optimizable` is `True`.
+    """
+
+    enabled: bool = False
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+
+
+@dataclasses.dataclass
 class OPRModeWeightsOptions(ParameterOptions):
     initial_weights: Union[ndarray] = None
     """
@@ -422,22 +451,13 @@ class OPRModeWeightsOptions(ParameterOptions):
         will be duplicated for every point.
     """
 
-    optimize_eigenmode_weights: bool = True
-    """
-    Whether to optimize eigenmode weights, i.e., the weights of the second and
-    following OPR modes.
+    optimize_eigenmode_weights: OPRModeWeightsEigenmodeWeightsOptions = dataclasses.field(
+        default_factory=OPRModeWeightsEigenmodeWeightsOptions
+    )
 
-    At least one of `optimize_eigenmode_weights` and `optimize_intensity_variation`
-    should be set to `True` if `optimizable` is `True`.
-    """
-
-    optimize_intensity_variation: bool = False
-    """
-    Whether to optimize intensity variation, i.e., the weight of the first OPR mode.
-
-    At least one of `optimize_eigenmode_weights` and `optimize_intensity_variation`
-    should be set to `True` if `optimizable` is `True`.
-    """
+    optimize_intensity_variation: OPRModeWeightsIntensityVariationOptions = dataclasses.field(
+        default_factory=OPRModeWeightsIntensityVariationOptions
+    )
 
     smoothing: OPRModeWeightsSmoothingOptions = dataclasses.field(
         default_factory=OPRModeWeightsSmoothingOptions

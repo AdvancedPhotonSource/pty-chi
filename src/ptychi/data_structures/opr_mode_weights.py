@@ -50,9 +50,6 @@ class OPRModeWeights(ds.ReconstructParameter):
                     "should be set to True."
                 )
 
-        self.optimize_eigenmode_weights = options.optimize_eigenmode_weights
-        self.optimize_intensity_variation = options.optimize_intensity_variation
-
     @property
     def n_opr_modes(self):
         return self.tensor.shape[1]
@@ -79,15 +76,18 @@ class OPRModeWeights(ds.ReconstructParameter):
 
     def optimization_enabled(self, epoch: int):
         enabled = super().optimization_enabled(epoch)
-        return enabled and (self.optimize_eigenmode_weights or self.optimize_intensity_variation)
+        return enabled and (
+            self.options.optimize_eigenmode_weights.is_enabled_on_this_epoch(epoch)
+            or self.options.optimize_intensity_variation.is_enabled_on_this_epoch(epoch)
+        )
 
     def eigenmode_weight_optimization_enabled(self, epoch: int):
         enabled = super().optimization_enabled(epoch)
-        return enabled and self.optimize_eigenmode_weights
+        return enabled and self.options.optimize_eigenmode_weights.is_enabled_on_this_epoch(epoch)
 
     def intensity_variation_optimization_enabled(self, epoch: int):
         enabled = super().optimization_enabled(epoch)
-        return enabled and self.optimize_intensity_variation
+        return enabled and self.options.optimize_intensity_variation.is_enabled_on_this_epoch(epoch)
 
     def update_variable_probe(
         self,
