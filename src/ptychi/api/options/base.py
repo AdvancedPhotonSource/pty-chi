@@ -83,9 +83,9 @@ class ParameterOptions(Options):
 
 @dataclasses.dataclass
 class FeatureOptions(ABC):
-    enabled: bool = False
+    enabled: bool
 
-    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+    optimization_plan: OptimizationPlan
 
     def is_enabled_on_this_epoch(self, current_epoch: int):
         if self.enabled and self.optimization_plan.is_enabled(current_epoch):
@@ -130,9 +130,6 @@ class ObjectMultisliceRegularizationOptions(FeatureOptions):
         - DECONVOLUTION: Deconvolve a ramp filter.
         - DISCRETE: Use cumulative sum.
     """
-
-    stride: int = 1
-    """The number of epochs between multislice regularization updates."""
 
 
 @dataclasses.dataclass
