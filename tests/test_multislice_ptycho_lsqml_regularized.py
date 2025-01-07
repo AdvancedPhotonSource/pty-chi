@@ -48,7 +48,8 @@ class TestMultislicePtychoLSQMLRegularized(tutils.BaseTester):
         options.probe_position_options.optimizable = False
         options.probe_position_options.optimizer = api.Optimizers.SGD
         options.probe_position_options.step_size = 1e-1
-        options.probe_position_options.update_magnitude_limit = 1.0
+        options.probe_position_options.magnitude_limit.enabled = True
+        options.probe_position_options.magnitude_limit.limit = 1.0
         
         options.reconstructor_options.displayed_loss_function = api.LossFunctions.MSE_SQRT
         options.reconstructor_options.batch_size = 101

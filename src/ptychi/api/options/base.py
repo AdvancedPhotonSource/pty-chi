@@ -362,6 +362,16 @@ class PositionCorrectionOptions:
 
 
 @dataclasses.dataclass
+class ProbePositionMagnitudeLimitOptions(FeatureOptions):
+    enabled: bool = False
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+
+    limit: Optional[float] = 0
+    """Magnitude limit of the probe update. No limit is imposed if it is 0."""
+
+
+@dataclasses.dataclass
 class ProbePositionOptions(ParameterOptions):
     position_x_px: Union[ndarray, Tensor] = None
     """The x position in pixel."""
@@ -369,8 +379,9 @@ class ProbePositionOptions(ParameterOptions):
     position_y_px: Union[ndarray, Tensor] = None
     """The y position in pixel."""
 
-    update_magnitude_limit: Optional[float] = 0
-    """Magnitude limit of the probe update. No limit is imposed if it is 0."""
+    magnitude_limit: ProbePositionMagnitudeLimitOptions = dataclasses.field(
+        default_factory=ProbePositionMagnitudeLimitOptions
+    )
 
     constrain_position_mean: bool = False
     """
@@ -405,7 +416,7 @@ class OPRModeWeightsSmoothingOptions(FeatureOptions):
     
     POLYNOMIAL: fit the weights of each mode with a polynomial of selected degree.
     """
-    
+
     polynomial_degree: int = 4
     """
     The degree of the polynomial used for smoothing OPR mode weights.

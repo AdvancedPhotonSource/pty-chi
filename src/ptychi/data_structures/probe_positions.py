@@ -7,6 +7,8 @@ if TYPE_CHECKING:
 
 
 class ProbePositions(ds.ReconstructParameter):
+    options: "api.options.base.ProbePositionOptions"
+
     def __init__(
         self,
         *args,
@@ -21,7 +23,6 @@ class ProbePositions(ds.ReconstructParameter):
             Input positions should be in row-major order, i.e., y-positions come first.
         """
         super().__init__(*args, name=name, options=options, is_complex=False, **kwargs)
-        self.update_magnitude_limit = options.update_magnitude_limit
         self.position_correction = position_correction.PositionCorrection(
             options=options.correction_options
         )

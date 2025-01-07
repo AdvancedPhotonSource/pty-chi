@@ -42,7 +42,7 @@ class Test2dPtychoOptPlan(tutils.TungstenDataTester):
         
         options.probe_position_options.position_x_px = positions_px[:, 1]
         options.probe_position_options.position_y_px = positions_px[:, 0]
-        options.probe_position_options.update_magnitude_limit = 1.0
+        options.probe_position_options.magnitude_limit.limit = 1.0
         options.probe_position_options.optimizable = True
         options.probe_position_options.optimization_plan.start = 1
         options.probe_position_options.optimization_plan.end = 3

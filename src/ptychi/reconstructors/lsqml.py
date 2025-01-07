@@ -877,8 +877,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     def _apply_probe_position_update(self, delta_pos, indices):
         # TODO: allow setting step size or use adaptive step size
-        if self.parameter_group.probe_positions.update_magnitude_limit > 0:
-            lim = self.parameter_group.probe_positions.update_magnitude_limit
+        # if self.parameter_group.probe_positions.options.update_magnitude_limit > 0:
+        if self.parameter_group.probe_positions.options.magnitude_limit.enabled:
+            lim = self.parameter_group.probe_positions.options.magnitude_limit.limit
             delta_pos = torch.clamp(delta_pos, -lim, lim)
 
         delta_pos_full = torch.zeros_like(self.parameter_group.probe_positions.tensor)
