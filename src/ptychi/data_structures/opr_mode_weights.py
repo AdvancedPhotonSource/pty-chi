@@ -151,7 +151,7 @@ class OPRModeWeights(ds.ReconstructParameter):
 
         # FIXME: reduced relax_u/v by a factor of 10 for stability, but PtychoShelves works without this.
         relax_u = min(0.1, batch_size / n_points_total) * probe.options.eigenmode_update_relaxation
-        relax_v = self.options.update_relaxation
+        relax_v = self.options.optimize_eigenmode_weights.update_relaxation
         # Shape of delta_p_i:       (batch_size, n_probe_modes, h, w)
         # Use only the first incoherent mode
         delta_p_i = delta_p_i[:, 0, :, :]

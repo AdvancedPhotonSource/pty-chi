@@ -111,7 +111,7 @@ class Test2dPtychoLsqml(tutils.TungstenDataTester):
         
         options.opr_mode_weight_options.initial_weights = generate_initial_opr_mode_weights(len(positions_px), probe.shape[0])
         options.opr_mode_weight_options.optimizable = True
-        options.opr_mode_weight_options.update_relaxation = 0.1
+        options.opr_mode_weight_options.optimize_eigenmode_weights.update_relaxation = 0.1
         
         options.reconstructor_options.batch_size = 44
         options.reconstructor_options.noise_model = api.NoiseModels.GAUSSIAN

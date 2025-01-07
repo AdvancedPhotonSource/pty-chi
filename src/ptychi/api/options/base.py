@@ -450,6 +450,11 @@ class OPRModeWeightsEigenmodeWeightsOptions(FeatureOptions):
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
+    update_relaxation: float = 1.0
+    """
+    A separate step size for eigenmode weight update.
+    """
+
 
 @dataclasses.dataclass
 class OPRModeWeightsIntensityVariationOptions(FeatureOptions):
@@ -490,11 +495,6 @@ class OPRModeWeightsOptions(ParameterOptions):
     smoothing: OPRModeWeightsSmoothingOptions = dataclasses.field(
         default_factory=OPRModeWeightsSmoothingOptions
     )
-
-    update_relaxation: float = 1.0
-    """
-    A separate step size for eigenmode weight update.
-    """
 
     def check(self):
         if self.optimizable:

@@ -41,7 +41,7 @@ class Test2dPtychoEpieOPR(tutils.TungstenDataTester):
 
         options.opr_mode_weight_options.initial_weights = generate_initial_opr_mode_weights(len(positions_px), probe.shape[0], eigenmode_weight=0.1)
         options.opr_mode_weight_options.optimizable = True
-        options.opr_mode_weight_options.update_relaxation = 0.1
+        options.opr_mode_weight_options.optimize_eigenmode_weights.update_relaxation = 0.1
         
         options.reconstructor_options.batch_size = 96
         options.reconstructor_options.num_epochs = 8
