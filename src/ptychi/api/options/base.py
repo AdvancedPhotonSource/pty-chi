@@ -95,7 +95,11 @@ class FeatureOptions(ABC):
 
 
 @dataclasses.dataclass
-class ObjectMultisliceRegularizationOptions:
+class ObjectMultisliceRegularizationOptions(FeatureOptions):
+    enabled: bool = False
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+
     weight: float = 0
     """
     The weight for multislice regularization. Disabled if 0, or if `type != ObjectTypes.MULTISLICE`. 
@@ -132,20 +136,25 @@ class ObjectMultisliceRegularizationOptions:
 
 
 @dataclasses.dataclass
-class ObjectL1NormConstraintOptions:
+class ObjectL1NormConstraintOptions(FeatureOptions):
+    enabled: bool = False
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+
     weight: float = 0
     """The weight of the L1 norm constraint. Disabled if equal or less than 0."""
 
-    stride: int = 1
-    """The number of epochs between L1 norm constraint updates."""
-
 
 @dataclasses.dataclass
-class ObjectSmoothnessConstraintOptions:
+class ObjectSmoothnessConstraintOptions(FeatureOptions):
+    enabled: bool = False
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+
     alpha: float = 0
     """
     The relaxation smoothing constant. If greater than 0, the magnitude (but not phase)
-    of the object will be smoothed every `smoothness_constraint_stride` epochs.
+    of the object will be smoothed according to `optimization_plan`
 
     Smoothing is done by constructing a 3x3 kernel of
     ```
@@ -157,23 +166,23 @@ class ObjectSmoothnessConstraintOptions:
     is maximal. The value of alpha should not be larger than 1 / 8.
     """
 
-    stride: int = 1
-    """The number of epochs between smoothness constraint updates."""
-
 
 @dataclasses.dataclass
-class ObjectTotalVariationOptions:
+class ObjectTotalVariationOptions(FeatureOptions):
+    enabled: bool = False
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+
     weight: float = 0
     """The weight of the total variation constraint. Disabled if equal or less than 0."""
 
-    stride: int = 1
-    """The number of epochs between total variation constraint updates."""
-
 
 @dataclasses.dataclass
-class RemoveGridArtifactsOptions:
+class RemoveGridArtifactsOptions(FeatureOptions):
     enabled: bool = False
     """Whether to remove grid artifacts in the object's phase at the end of an epoch."""
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
     period_x_m: float = 1e-7
     """The horizontal period of grid artifacts in meters."""
@@ -186,9 +195,6 @@ class RemoveGridArtifactsOptions:
 
     direction: enums.Directions = enums.Directions.XY
     """The direction of grid artifact removal."""
-
-    stride: int = 1
-    """The number of epochs between grid artifact removal updates."""
 
 
 @dataclasses.dataclass

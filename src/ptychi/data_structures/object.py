@@ -30,12 +30,6 @@ class Object(ds.ReconstructParameter):
     ):
         super().__init__(*args, name=name, options=options, is_complex=True, **kwargs)
         self.pixel_size_m = options.pixel_size_m
-        self.l1_norm_constraint_weight = options.l1_norm_constraint.weight
-        self.l1_norm_constraint_stride = options.l1_norm_constraint.stride
-        self.smoothness_constraint_alpha = options.smoothness_constraint.alpha
-        self.smoothness_constraint_stride = options.smoothness_constraint.stride
-        self.total_variation_weight = options.total_variation.weight
-        self.total_variation_stride = options.total_variation.stride
         center_pixel = torch.tensor(self.shape, device=torch.get_default_device()) / 2.0
         self.roi_bbox: ds.BoundingBox = None
 
@@ -47,61 +41,20 @@ class Object(ds.ReconstructParameter):
     def place_patches(self, positions, patches, *args, **kwargs):
         raise NotImplementedError
 
-    def l1_norm_constraint_enabled(self, current_epoch: int):
-        if (
-            self.l1_norm_constraint_weight > 0
-            and self.optimization_enabled(current_epoch)
-            and (current_epoch - self.optimization_plan.start) % self.l1_norm_constraint_stride == 0
-        ):
-            return True
-        else:
-            return False
-
     def constrain_l1_norm(self):
+        if self.options.l1_norm_constraint.weight <= 0:
+            return
         data = self.data
         l1_grad = torch.sgn(data)
-        data = data - self.l1_norm_constraint_weight * l1_grad
+        data = data - self.options.l1_norm_constraint.weight * l1_grad
         self.set_data(data)
         logger.debug("L1 norm constraint applied to object.")
-
-    def smoothness_constraint_enabled(self, current_epoch: int):
-        if (
-            self.smoothness_constraint_alpha > 0
-            and self.optimization_enabled(current_epoch)
-            and (current_epoch - self.optimization_plan.start) % self.smoothness_constraint_stride
-            == 0
-        ):
-            return True
-        else:
-            return False
 
     def constrain_smoothness(self):
         raise NotImplementedError
 
-    def total_variation_enabled(self, current_epoch: int):
-        if (
-            self.total_variation_weight > 0
-            and self.optimization_enabled(current_epoch)
-            and (current_epoch - self.optimization_plan.start) % self.total_variation_stride == 0
-        ):
-            return True
-        else:
-            return False
-
     def constrain_total_variation(self) -> None:
         raise NotImplementedError
-
-    def remove_grid_artifacts_enabled(self, current_epoch: int):
-        if (
-            self.options.remove_grid_artifacts.enabled
-            and self.optimization_enabled(current_epoch)
-            and (current_epoch - self.optimization_plan.start)
-            % self.options.remove_grid_artifacts.stride
-            == 0
-        ):
-            return True
-        else:
-            return False
 
     def remove_grid_artifacts(self, *args, **kwargs):
         raise NotImplementedError
@@ -260,12 +213,13 @@ class PlanarObject(Object):
         """
         Smooth the magnitude of the object.
         """
-        if self.smoothness_constraint_alpha > 1.0 / 8:
-            logger.warning(
-                f"Alpha = {self.smoothness_constraint_alpha} in smoothness constraint should be less than 1/8."
-            )
-        psf = torch.ones(3, 3, device=self.device) * self.smoothness_constraint_alpha
-        psf[2, 2] = 1 - 8 * self.smoothness_constraint_alpha
+        if self.options.smoothness_constraint.alpha <= 0:
+            return
+        alpha = self.options.smoothness_constraint.alpha
+        if alpha > 1.0 / 8:
+            logger.warning(f"Alpha = {alpha} in smoothness constraint should be less than 1/8.")
+        psf = torch.ones(3, 3, device=self.device) * alpha
+        psf[2, 2] = 1 - 8 * alpha
 
         data = self.data
         for i_slice in range(self.n_slices):
@@ -275,10 +229,12 @@ class PlanarObject(Object):
         self.set_data(data)
 
     def constrain_total_variation(self) -> None:
+        if self.options.total_variation.weight <= 0:
+            return
         data = self.data
         for i_slice in range(self.n_slices):
             data[i_slice] = ip.total_variation_2d_chambolle(
-                data[i_slice], lmbda=self.total_variation_weight, niter=2
+                data[i_slice], lmbda=self.options.total_variation.weight, niter=2
             )
         self.set_data(data)
 
@@ -297,18 +253,6 @@ class PlanarObject(Object):
             data = data[i_slice].abs() * torch.exp(1j * phase)
         self.set_data(data)
 
-    def multislice_regularization_enabled(self, current_epoch: int):
-        if (
-            self.options.multislice_regularization.weight > 0
-            and self.optimization_enabled(current_epoch)
-            and (current_epoch - self.optimization_plan.start)
-            % self.options.multislice_regularization.stride
-            == 0
-        ):
-            return True
-        else:
-            return False
-
     def regularize_multislice(self):
         """
         Regularize multislice by applying a low-pass transfer function to the
@@ -316,6 +260,8 @@ class PlanarObject(Object):
 
         Adapted from fold_slice (regulation_multilayers.m).
         """
+        if not self.is_multislice or self.options.multislice_regularization.weight <= 0:
+            return
         if self.preconditioner is None:
             raise ValueError("Regularization requires a preconditioner.")
 

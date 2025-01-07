@@ -379,21 +379,21 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
                 weights.set_data(weights_data)
 
             # Regularize multislice reconstruction.
-            if object_.is_multislice and object_.multislice_regularization_enabled(
+            if object_.options.multislice_regularization.is_enabled_on_this_epoch(
                 self.current_epoch
             ):
                 object_.regularize_multislice()
 
             # Apply smoothness constraint.
-            if object_.smoothness_constraint_enabled(self.current_epoch):
+            if object_.options.smoothness_constraint.is_enabled_on_this_epoch(self.current_epoch):
                 object_.constrain_smoothness()
 
             # Apply total variation constraint.
-            if object_.total_variation_enabled(self.current_epoch):
+            if object_.options.total_variation.is_enabled_on_this_epoch(self.current_epoch):
                 object_.constrain_total_variation()
 
             # Remove grid artifacts.
-            if object_.remove_grid_artifacts_enabled(self.current_epoch):
+            if object_.options.remove_grid_artifacts.is_enabled_on_this_epoch(self.current_epoch):
                 object_.remove_grid_artifacts()
 
             # Apply position constraint.
@@ -546,7 +546,7 @@ class AnalyticalIterativePtychographyReconstructor(
             object_ = self.parameter_group.object
 
             # Apply object L1-norm constraint.
-            if object_.l1_norm_constraint_enabled(self.current_epoch):
+            if object_.options.l1_norm_constraint.is_enabled_on_this_epoch(self.current_epoch):
                 object_.constrain_l1_norm()
 
     def run_pre_run_hooks(self) -> None:
