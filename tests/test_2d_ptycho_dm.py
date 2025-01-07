@@ -26,7 +26,8 @@ class Test2DPtychoDM(tutils.TungstenDataTester):
         options.object_options.optimizable = True
         
         options.probe_options.initial_guess = probe
-        options.probe_options.power_constraint.target_power = np.sum(np.max(data, axis=-3), axis=(-2, -1))
+        options.probe_options.power_constraint.probe_power = np.sum(np.max(data, axis=-3), axis=(-2, -1))
+        options.probe_options.power_constraint.enabled = True
         options.probe_options.optimizable = True
 
         options.probe_position_options.position_x_px = positions_px[:, 1]

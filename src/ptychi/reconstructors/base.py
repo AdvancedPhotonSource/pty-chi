@@ -361,17 +361,19 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             positions = self.parameter_group.probe_positions
 
             # Apply probe power constraint.
-            if probe.probe_power_constraint_enabled(self.current_epoch):
+            if probe.options.power_constraint.is_enabled_on_this_epoch(self.current_epoch):
                 probe.constrain_probe_power(
                     self.parameter_group.object, self.parameter_group.opr_mode_weights
                 )
 
             # Apply incoherent mode orthogonality constraint.
-            if probe.incoherent_mode_orthogonality_constraint_enabled(self.current_epoch):
+            if probe.options.orthogonalize_incoherent_modes.is_enabled_on_this_epoch(
+                self.current_epoch
+            ):
                 probe.constrain_incoherent_modes_orthogonality()
 
             # Apply OPR orthogonality constraint.
-            if probe.opr_mode_orthogonalization_enabled(self.current_epoch):
+            if probe.options.orthogonalize_opr_modes.is_enabled_on_this_epoch(self.current_epoch):
                 weights = self.parameter_group.opr_mode_weights
                 weights_data = probe.constrain_opr_mode_orthogonality(weights)
                 weights.set_data(weights_data)
@@ -410,7 +412,7 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
                 self.dataloader.batch_sampler.update_clusters(positions.data.detach().cpu())
                 
             # Apply probe support constraint.
-            if probe.support_constraint_enabled(self.current_epoch):
+            if probe.options.support_constraint.is_enabled_on_this_epoch(self.current_epoch):
                 probe.constrain_support()
                 
             # Smooth OPR weights.

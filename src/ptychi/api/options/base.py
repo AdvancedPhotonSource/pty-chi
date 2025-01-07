@@ -1,3 +1,4 @@
+from abc import ABC
 from typing import Optional, Union, Sequence
 import dataclasses
 from dataclasses import field
@@ -78,6 +79,19 @@ class ParameterOptions(Options):
     def get_non_data_fields(self) -> dict:
         d = self.__dict__.copy()
         return d
+
+
+@dataclasses.dataclass
+class FeatureOptions(ABC):
+    enabled: bool = False
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+
+    def is_enabled_on_this_epoch(self, current_epoch: int):
+        if self.enabled and self.optimization_plan.is_enabled(current_epoch):
+            return True
+        else:
+            return False
 
 
 @dataclasses.dataclass
@@ -225,60 +239,59 @@ class ObjectOptions(ParameterOptions):
 
 
 @dataclasses.dataclass
-class ProbePowerConstraintOptions:
-    target_power: float = 0.0
+class ProbePowerConstraintOptions(FeatureOptions):
+    enabled: bool = False
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+
+    probe_power: float = 0.0
     """
     The target probe power. If greater than 0, probe power constraint
-    is run every `probe_power_constraint_stride` epochs, where it scales the probe
+    is run according to `optimization_plan`, and it scales the probe
     and object intensity such that the power of the far-field probe is `probe_power`.
     """
 
-    stride: int = 1
-    """The number of epochs between probe power constraint updates."""
-
 
 @dataclasses.dataclass
-class ProbeOrthogonalizeIncoherentModesOptions:
+class ProbeOrthogonalizeIncoherentModesOptions(FeatureOptions):
     enabled: bool = False
     """
     Whether to orthogonalize incoherent probe modes. If True, the incoherent probe
-    modes are orthogonalized every `stride` epochs.
+    modes are orthogonalized according to `optimization_plan`.
     """
 
-    stride: int = 1
-    """The number of epochs between orthogonalizing the incoherent probe modes."""
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
     method: enums.OrthogonalizationMethods = enums.OrthogonalizationMethods.GS
     """The method to use for incoherent_mode orthogonalization."""
 
 
 @dataclasses.dataclass
-class ProbeOrthogonalizeOPRModesOptions:
+class ProbeOrthogonalizeOPRModesOptions(FeatureOptions):
     enabled: bool = False
     """
     Whether to orthogonalize OPR modes. If True, the OPR modes are orthogonalized
-    every `stride` epochs.
+    according to `optimization_plan`.
     """
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
 
 @dataclasses.dataclass
-class ProbeSupportConstraintOptions:
+class ProbeSupportConstraintOptions(FeatureOptions):
     enabled: bool = False
     """
-    When enabled, the probe will be shrinkwrapped every `stride` epochs,
+    When enabled, the probe will be shrinkwrapped according to `optimization_plan`,
     where small values are set to 0.
     """
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
     threshold: float = 0.005
     """
     The threshold for the probe support constraint. The value of a pixel (x, y) is set to 0
     if `p(x, y) < [max(blur(p)) * `threshold`](x, y)`.
     """
-
-    stride: int = 1
-    """The number of epochs between probe support constraint updates."""
 
 
 @dataclasses.dataclass

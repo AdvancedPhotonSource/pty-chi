@@ -46,10 +46,7 @@ class Probe(ds.ReconstructParameter):
         if len(self.shape) != 4:
             raise ValueError("Probe tensor must be of shape (n_opr_modes, n_modes, h, w).")
 
-        self.probe_power = options.power_constraint.target_power
-        self.probe_power_constraint_stride = options.power_constraint.stride
-        self.orthogonalize_incoherent_modes = options.orthogonalize_incoherent_modes.enabled
-        self.orthogonalize_incoherent_modes_stride = options.orthogonalize_incoherent_modes.stride
+        self.probe_power = options.power_constraint.probe_power
         self.orthogonalize_incoherent_modes_method = options.orthogonalize_incoherent_modes.method
 
     def shift(self, shifts: Tensor):
@@ -201,21 +198,11 @@ class Probe(ds.ReconstructParameter):
         else:
             return slice(mode_index, mode_index + 1)
 
-    def incoherent_mode_orthogonality_constraint_enabled(self, current_epoch: int) -> bool:
-        if (
-            self.has_multiple_incoherent_modes
-            and self.orthogonalize_incoherent_modes
-            and current_epoch >= self.optimization_plan.start
-            and (current_epoch - self.optimization_plan.start)
-            % self.orthogonalize_incoherent_modes_stride
-            == 0
-        ):
-            return True
-        else:
-            return False
-
     def constrain_incoherent_modes_orthogonality(self):
         """Orthogonalize the incoherent probe modes for the first OPR mode."""
+        if not self.has_multiple_incoherent_modes:
+            return
+
         probe = self.data
 
         norm_first_mode_orig = pmath.norm(probe[0, 0], dim=(-2, -1))
@@ -240,14 +227,6 @@ class Probe(ds.ReconstructParameter):
         probe = probe * norm_first_mode_orig / norm_first_mode_new
 
         self.set_data(probe)
-
-    def opr_mode_orthogonalization_enabled(self, current_epoch: int) -> bool:
-        return (
-            self.optimization_enabled(current_epoch)
-            and self.has_multiple_opr_modes
-            and self.options.orthogonalize_opr_modes.enabled
-            and self.options.orthogonalize_opr_modes.optimization_plan.is_enabled(current_epoch)
-        )
 
     def constrain_opr_mode_orthogonality(
         self, weights: Union[Tensor, ds.ReconstructParameter], eps=1e-5
@@ -279,6 +258,9 @@ class Probe(ds.ReconstructParameter):
         Tensor
             Normalized and sorted OPR mode weights.
         """
+        if not self.has_multiple_opr_modes:
+            return
+
         if isinstance(weights, oprweights.OPRModeWeights):
             weights = weights.data
 
@@ -336,17 +318,6 @@ class Probe(ds.ReconstructParameter):
         self.set_data(probe)
         return weights
 
-    def probe_power_constraint_enabled(self, current_epoch: int) -> bool:
-        if (
-            self.probe_power > 0.0
-            and current_epoch >= self.optimization_plan.start
-            and (current_epoch - self.optimization_plan.start) % self.probe_power_constraint_stride
-            == 0
-        ):
-            return True
-        else:
-            return False
-
     def constrain_probe_power(
         self,
         object_: "object.Object",
@@ -394,18 +365,6 @@ class Probe(ds.ReconstructParameter):
         mask = ip.gaussian_filter(mask, sigma=2, size=3).abs()
         data = data * mask
         self.set_data(data)
-
-    def support_constraint_enabled(self, current_epoch: int) -> bool:
-        if (
-            self.options.support_constraint.enabled
-            and current_epoch >= self.optimization_plan.start
-            and (current_epoch - self.optimization_plan.start)
-            % self.options.support_constraint.stride
-            == 0
-        ):
-            return True
-        else:
-            return False
 
     def post_update_hook(self) -> None:
         super().post_update_hook()
