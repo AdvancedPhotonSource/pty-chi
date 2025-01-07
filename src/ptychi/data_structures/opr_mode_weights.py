@@ -19,6 +19,8 @@ class OPRModeWeights(ds.ReconstructParameter):
     # TODO: update_relaxation is only used for LSQML. We should create dataclasses
     # to contain additional options for ReconstructParameter classes, and subclass them for specific
     # reconstruction algorithms - for example, OPRModeWeightsOptions -> LSQMLOPRModeWeightsOptions.
+    options: "api.options.base.OPRModeWeightsOptions"
+
     def __init__(
         self,
         *args,
@@ -266,15 +268,14 @@ class OPRModeWeights(ds.ReconstructParameter):
     def _apply_variable_intensity_updates(self, delta_weights_int: Tensor):
         self.set_data(self.data + 0.1 * delta_weights_int)
 
-    def weight_smoothing_enabled(self, epoch: int):
-        return self.optimization_enabled(epoch) and self.options.smoothing_method is not None
-
     def smooth_weights(self):
         """
         Smooth the weights with a median filter.
         """
+        if self.options.smoothing.method is None:
+            return
         weights = self.data
-        if self.options.smoothing_method == "median":
+        if self.options.smoothing.method == "median":
             if self.n_scan_points < 81:
                 logger.warning(
                     "OPR weight smoothing with median filter could "
@@ -282,13 +283,13 @@ class OPRModeWeights(ds.ReconstructParameter):
                 )
                 return
             weights = ip.median_filter_1d(weights.T, window_size=81).T
-        elif self.options.smoothing_method == "polynomial":
-            if self.n_scan_points < self.options.polynomial_smoothing_degree:
+        elif self.options.smoothing.method == "polynomial":
+            if self.n_scan_points < self.options.smoothing.polynomial_degree:
                 logger.warning(
                     "OPR weight smoothing with polynomial filter could "
                     "not run because the number of scan points is less than the "
                     "polynomial smoothing degree ({}).".format(
-                        self.options.polynomial_smoothing_degree
+                        self.options.smoothing.polynomial_degree
                     )
                 )
                 return
@@ -296,7 +297,7 @@ class OPRModeWeights(ds.ReconstructParameter):
             for i_opr_mode in range(1, self.n_opr_modes):
                 weights_current_mode = weights[:, i_opr_mode]
                 fit_coeffs = pmath.polyfit(
-                    inds, weights_current_mode, deg=self.options.polynomial_smoothing_degree
+                    inds, weights_current_mode, deg=self.options.smoothing.polynomial_degree
                 )
                 weights_smoothed = pmath.polyval(inds, fit_coeffs)
                 weights[:, i_opr_mode] = 0.5 * weights_current_mode + 0.5 * weights_smoothed

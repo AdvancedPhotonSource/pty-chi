@@ -395,6 +395,27 @@ class ProbePositionOptions(ParameterOptions):
 
 
 @dataclasses.dataclass
+class OPRModeWeightsSmoothingOptions(FeatureOptions):
+    enabled: bool = False
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+    
+    method: Optional[enums.OPRWeightSmoothingMethods] = None
+    """
+    The method for smoothing OPR mode weights. 
+    
+    MEDIAN: applying a median filter to the weights of each mode. 
+    
+    POLYNOMIAL: fit the weights of each mode with a polynomial of selected degree.
+    """
+    
+    polynomial_degree: int = 4
+    """
+    The degree of the polynomial used for smoothing OPR mode weights.
+    """
+
+
+@dataclasses.dataclass
 class OPRModeWeightsOptions(ParameterOptions):
     initial_weights: Union[ndarray] = None
     """
@@ -420,20 +441,10 @@ class OPRModeWeightsOptions(ParameterOptions):
     At least one of `optimize_eigenmode_weights` and `optimize_intensity_variation`
     should be set to `True` if `optimizable` is `True`.
     """
-    
-    smoothing_method: Optional[enums.OPRWeightSmoothingMethods] = None
-    """
-    The method for smoothing OPR mode weights. 
-    
-    MEDIAN: applying a median filter to the weights of each mode. 
-    
-    POLYNOMIAL: fit the weights of each mode with a polynomial of selected degree.
-    """
-    
-    polynomial_smoothing_degree: int = 4
-    """
-    The degree of the polynomial used for smoothing OPR mode weights.
-    """
+
+    smoothing: OPRModeWeightsSmoothingOptions = dataclasses.field(
+        default_factory=OPRModeWeightsSmoothingOptions
+    )
 
     update_relaxation: float = 1.0
     """

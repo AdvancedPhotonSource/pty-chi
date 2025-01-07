@@ -416,10 +416,11 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
                 probe.constrain_support()
                 
             # Smooth OPR weights.
-            if not self.parameter_group.opr_mode_weights.is_dummy:
-                if self.parameter_group.opr_mode_weights.weight_smoothing_enabled(self.current_epoch):
-                    self.parameter_group.opr_mode_weights.smooth_weights()
-                self.parameter_group.opr_mode_weights.remove_outliers()
+            opr_mode_weights = self.parameter_group.opr_mode_weights
+            if not opr_mode_weights.is_dummy:
+                if opr_mode_weights.options.smoothing.is_enabled_on_this_epoch(self.current_epoch):
+                    opr_mode_weights.smooth_weights()
+                opr_mode_weights.remove_outliers()
 
 
 class AnalyticalIterativeReconstructor(IterativeReconstructor):
