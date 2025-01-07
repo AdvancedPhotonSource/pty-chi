@@ -7,7 +7,8 @@ from dataclasses import dataclass
 class OptimizationPlan:
     """
     When a `ReconstructParameter` has `optimizable == True`, this class is used to specify
-    the start, stop, and stride epochs of the optimization for that parameter.
+    the start, stop, and stride epochs of the optimization for that parameter. This class is
+    also used by `FeatureOptions`.
     """
     start: int = 0
     """

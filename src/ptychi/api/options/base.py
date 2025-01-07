@@ -83,9 +83,16 @@ class ParameterOptions(Options):
 
 @dataclasses.dataclass
 class FeatureOptions(ABC):
+    """
+    Abstract base class that is inherited by sub-feature dataclasses. This class is used to
+    determining if/when a feature is used.
+    """
+
     enabled: bool
+    "Turns execution of the feature on and off."
 
     optimization_plan: OptimizationPlan
+    "Schedules when the feature is executed."
 
     def is_enabled_on_this_epoch(self, current_epoch: int):
         if self.enabled and self.optimization_plan.is_enabled(current_epoch):
@@ -96,6 +103,8 @@ class FeatureOptions(ABC):
 
 @dataclasses.dataclass
 class ObjectMultisliceRegularizationOptions(FeatureOptions):
+    """Settings for multislice regularization of the object."""
+
     enabled: bool = False
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
@@ -134,6 +143,8 @@ class ObjectMultisliceRegularizationOptions(FeatureOptions):
 
 @dataclasses.dataclass
 class ObjectL1NormConstraintOptions(FeatureOptions):
+    """Settings for the L1 norm constraint."""
+
     enabled: bool = False
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
@@ -144,14 +155,15 @@ class ObjectL1NormConstraintOptions(FeatureOptions):
 
 @dataclasses.dataclass
 class ObjectSmoothnessConstraintOptions(FeatureOptions):
+    """Settings for smoothing of the magnitude (but not the phase) of the object"""
+
     enabled: bool = False
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
     alpha: float = 0
     """
-    The relaxation smoothing constant. If greater than 0, the magnitude (but not phase)
-    of the object will be smoothed according to `optimization_plan`
+    The relaxation smoothing constant. This value should be in the range  0 < alpha <= 1/8.
 
     Smoothing is done by constructing a 3x3 kernel of
     ```
@@ -166,6 +178,8 @@ class ObjectSmoothnessConstraintOptions(FeatureOptions):
 
 @dataclasses.dataclass
 class ObjectTotalVariationOptions(FeatureOptions):
+    """Settings for total variation constraint on the object."""
+
     enabled: bool = False
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
@@ -176,8 +190,9 @@ class ObjectTotalVariationOptions(FeatureOptions):
 
 @dataclasses.dataclass
 class RemoveGridArtifactsOptions(FeatureOptions):
+    """Settings for grid artifact removal in the object's phase, applied at the end of an epoch"""
+
     enabled: bool = False
-    """Whether to remove grid artifacts in the object's phase at the end of an epoch."""
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
@@ -208,27 +223,22 @@ class ObjectOptions(ParameterOptions):
     l1_norm_constraint: ObjectL1NormConstraintOptions = field(
         default_factory=ObjectL1NormConstraintOptions
     )
-    """L1 norm constraint options."""
 
     smoothness_constraint: ObjectSmoothnessConstraintOptions = field(
         default_factory=ObjectSmoothnessConstraintOptions
     )
-    """Smoothness constraint options."""
 
     total_variation: ObjectTotalVariationOptions = field(
         default_factory=ObjectTotalVariationOptions
     )
-    """Total variation options."""
 
     remove_grid_artifacts: RemoveGridArtifactsOptions = field(
         default_factory=RemoveGridArtifactsOptions
     )
-    """Grid artifact removal options."""
 
     multislice_regularization: ObjectMultisliceRegularizationOptions = field(
         default_factory=ObjectMultisliceRegularizationOptions
     )
-    """Multi-slice regularization options."""
 
     patch_interpolation_method: enums.PatchInterpolationMethods = (
         enums.PatchInterpolationMethods.FOURIER
@@ -243,25 +253,28 @@ class ObjectOptions(ParameterOptions):
 
 @dataclasses.dataclass
 class ProbePowerConstraintOptions(FeatureOptions):
+    """
+    Settings for scaling the probe and object intensity.
+    """
+
     enabled: bool = False
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
     probe_power: float = 0.0
     """
-    The target probe power. If greater than 0, probe power constraint
-    is run according to `optimization_plan`, and it scales the probe
-    and object intensity such that the power of the far-field probe is `probe_power`.
+    The target probe power. The probe and object intensity will be scaled such that 
+    the power of the far-field probe is `probe_power`.
     """
 
 
 @dataclasses.dataclass
 class ProbeOrthogonalizeIncoherentModesOptions(FeatureOptions):
+    """
+    Settings for orthogonalizing incoherent probe modes.
+    """
+
     enabled: bool = False
-    """
-    Whether to orthogonalize incoherent probe modes. If True, the incoherent probe
-    modes are orthogonalized according to `optimization_plan`.
-    """
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
@@ -271,22 +284,22 @@ class ProbeOrthogonalizeIncoherentModesOptions(FeatureOptions):
 
 @dataclasses.dataclass
 class ProbeOrthogonalizeOPRModesOptions(FeatureOptions):
+    """
+    Settings for orthogonalizing OPR modes.
+    """
+
     enabled: bool = False
-    """
-    Whether to orthogonalize OPR modes. If True, the OPR modes are orthogonalized
-    according to `optimization_plan`.
-    """
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
 
 @dataclasses.dataclass
 class ProbeSupportConstraintOptions(FeatureOptions):
+    """
+    Settings for probe shrinkwrapping, where small values are set to 0.
+    """
+        
     enabled: bool = False
-    """
-    When enabled, the probe will be shrinkwrapped according to `optimization_plan`,
-    where small values are set to 0.
-    """
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
@@ -363,12 +376,13 @@ class PositionCorrectionOptions:
 
 @dataclasses.dataclass
 class ProbePositionMagnitudeLimitOptions(FeatureOptions):
+    """Settings for imposing a magnitude limit on the probe position update."""
+
     enabled: bool = False
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
     limit: Optional[float] = 0
-    """Magnitude limit of the probe update. No limit is imposed if it is 0."""
 
 
 @dataclasses.dataclass
@@ -404,6 +418,8 @@ class ProbePositionOptions(ParameterOptions):
 
 @dataclasses.dataclass
 class OPRModeWeightsSmoothingOptions(FeatureOptions):
+    """Settings for smoothing OPR mode weights."""
+
     enabled: bool = False
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
@@ -426,11 +442,8 @@ class OPRModeWeightsSmoothingOptions(FeatureOptions):
 @dataclasses.dataclass
 class OPRModeWeightsEigenmodeWeightsOptions(FeatureOptions):
     """
-    Whether to optimize eigenmode weights, i.e., the weights of the second and
+    Settings for optimizing eigenmode weights, i.e., the weights of the second and
     following OPR modes.
-
-    At least one of `optimize_eigenmode_weights` and `optimize_intensity_variation`
-    should be set to `True` if `optimizable` is `True`.
     """
 
     enabled: bool = True
@@ -441,10 +454,7 @@ class OPRModeWeightsEigenmodeWeightsOptions(FeatureOptions):
 @dataclasses.dataclass
 class OPRModeWeightsIntensityVariationOptions(FeatureOptions):
     """
-    Whether to optimize intensity variation, i.e., the weight of the first OPR mode.
-
-    At least one of `optimize_eigenmode_weights` and `optimize_intensity_variation`
-    should be set to `True` if `optimizable` is `True`.
+    Settings for optimizing intensity variation, i.e., the weight of the first OPR mode.
     """
 
     enabled: bool = False
@@ -454,6 +464,13 @@ class OPRModeWeightsIntensityVariationOptions(FeatureOptions):
 
 @dataclasses.dataclass
 class OPRModeWeightsOptions(ParameterOptions):
+    """
+    The OPR mode weights configuration.
+
+    At least one of `optimize_eigenmode_weights` and `optimize_intensity_variation`
+    should be set to `True` if `optimizable` is `True`.
+    """
+
     initial_weights: Union[ndarray] = None
     """
     The initial weight(s) of the eigenmode(s). Acceptable values include the following:
