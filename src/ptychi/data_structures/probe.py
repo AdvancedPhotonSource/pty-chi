@@ -229,7 +229,7 @@ class Probe(ds.ReconstructParameter):
         self.set_data(probe)
 
     def constrain_opr_mode_orthogonality(
-        self, weights: Union[Tensor, ds.ReconstructParameter], eps=1e-5
+        self, weights: "oprweights.OPRModeWeights", eps=1e-5
     ):
         """
         Add the following constraints to variable probe weights
@@ -247,6 +247,8 @@ class Probe(ds.ReconstructParameter):
         incoherent mode when mixed state probe is used, as this is what PtychoShelves does.
         OPR modes of other incoherent modes are ignored, for now.
 
+        This function also updates the OPR mode weights.
+
         Parameters
         ----------
         weights : Tensor
@@ -261,8 +263,7 @@ class Probe(ds.ReconstructParameter):
         if not self.has_multiple_opr_modes:
             return
 
-        if isinstance(weights, oprweights.OPRModeWeights):
-            weights = weights.data
+        weights_data = weights.data
 
         # The main mode of the probe is the first OPR mode, while the
         # variable part of the probe is the second and following OPR modes.
@@ -279,7 +280,7 @@ class Probe(ds.ReconstructParameter):
         # Shape of weights:      (n_points, n_opr_modes).
         # Currently, only the first incoherent mode has OPR modes, and the
         # stored weights are for that mode.
-        weights[:, 1:] = weights[:, 1:] * vnorm[:, 0, 0, 0]
+        weights_data[:, 1:] = weights_data[:, 1:] * vnorm[:, 0, 0, 0]
 
         # Orthogonalize variable probes. With Gram-Schmidt, the first
         # OPR mode (i.e., the main mode) should not change during orthogonalization.
@@ -293,17 +294,17 @@ class Probe(ds.ReconstructParameter):
             # Compute the energies of variable OPR modes (i.e., the second and following)
             # in order to sort probes by energy.
             # Shape of power:         (n_opr_modes - 1,).
-            power = pmath.norm(weights[..., 1:], dim=0) ** 2
+            power = pmath.norm(weights_data[..., 1:], dim=0) ** 2
 
             # Sort the probes by energy
             sorted = torch.argsort(-power)
-            weights[:, 1:] = weights[:, sorted + 1]
+            weights_data[:, 1:] = weights_data[:, sorted + 1]
             # Apply only to the first incoherent mode.
             probe[1:, 0, :, :] = probe[sorted + 1, 0, :, :]
 
         # Remove outliars from variable probe weights.
-        aevol = torch.abs(weights)
-        weights = torch.minimum(
+        aevol = torch.abs(weights_data)
+        weights_data = torch.minimum(
             aevol,
             1.5
             * torch.quantile(
@@ -311,12 +312,13 @@ class Probe(ds.ReconstructParameter):
                 0.95,
                 dim=0,
                 keepdims=True,
-            ).type(weights.dtype),
-        ) * torch.sign(weights)
+            ).type(weights_data.dtype),
+        ) * torch.sign(weights_data)
 
         # Update stored data.
         self.set_data(probe)
-        return weights
+        # Update opr mode weights
+        weights.set_data(weights_data)
 
     def constrain_probe_power(
         self,
