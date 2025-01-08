@@ -229,7 +229,7 @@ class Probe(ds.ReconstructParameter):
         self.set_data(probe)
 
     def constrain_opr_mode_orthogonality(
-        self, weights: "oprweights.OPRModeWeights", eps=1e-5
+        self, weights: "oprweights.OPRModeWeights", eps=1e-5, *, update_weights_in_place: bool
     ):
         """
         Add the following constraints to variable probe weights
@@ -247,17 +247,18 @@ class Probe(ds.ReconstructParameter):
         incoherent mode when mixed state probe is used, as this is what PtychoShelves does.
         OPR modes of other incoherent modes are ignored, for now.
 
-        This function also updates the OPR mode weights.
+        This function also updates the OPR mode weights when `update_weights_in_place` is True.
 
         Parameters
         ----------
-        weights : Tensor
-            A (n_points, n_opr_modes) tensor of weights.
-        :param weights: a (n_points, n_opr_modes) tensor of weights.
+        weights : OPRModeWeights
+            The OPR mode weights object.
+        update_weights_in_place : bool
+            Whether to update the OPR mode weights data.
 
         Returns
         -------
-        Tensor
+        Tensor, optional
             Normalized and sorted OPR mode weights.
         """
         if not self.has_multiple_opr_modes:
@@ -317,8 +318,11 @@ class Probe(ds.ReconstructParameter):
 
         # Update stored data.
         self.set_data(probe)
-        # Update opr mode weights
-        weights.set_data(weights_data)
+
+        if update_weights_in_place:
+            weights.set_data(weights_data)
+        else:
+            return weights_data
 
     def constrain_probe_power(
         self,

@@ -378,7 +378,9 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
 
             # Apply OPR orthogonality constraint.
             if probe.options.orthogonalize_opr_modes.is_enabled_on_this_epoch(self.current_epoch):
-                probe.constrain_opr_mode_orthogonality(self.parameter_group.opr_mode_weights)
+                probe.constrain_opr_mode_orthogonality(
+                    self.parameter_group.opr_mode_weights, update_weights_in_place=True
+                )
 
             # Regularize multislice reconstruction.
             if object_.options.multislice_regularization.is_enabled_on_this_epoch(
