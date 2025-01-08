@@ -311,6 +311,17 @@ class ProbeSupportConstraintOptions(FeatureOptions):
 
 
 @dataclasses.dataclass
+class ProbeCenterConstraintOptions(FeatureOptions):
+    """
+    Settings for constraining the probe's center of mass to the center of the probe array.
+    """
+
+    enabled: bool = False
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+
+
+@dataclasses.dataclass
 class ProbeOptions(ParameterOptions):
     """
     The probe configuration.
@@ -342,20 +353,13 @@ class ProbeOptions(ParameterOptions):
         default_factory=ProbeSupportConstraintOptions
     )
 
+    center_constraint: ProbeCenterConstraintOptions = field(
+        default_factory=ProbeCenterConstraintOptions
+    )
 
     eigenmode_update_relaxation: float = 1.0
     """
     A separate step size for eigenmode update.
-    """
-    
-    center_constraint: bool = False
-    """
-    Whether to constrain the probe's center of mass to the center of the probe array.
-    """
-    
-    center_constraint_stride: int = 1
-    """
-    The number of epochs between probe center constraint updates.
     """
 
     def check(self):

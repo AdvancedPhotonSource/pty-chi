@@ -366,30 +366,6 @@ class Probe(ds.ReconstructParameter):
         data = data * mask
         self.set_data(data)
 
-    def support_constraint_enabled(self, current_epoch: int) -> bool:
-        if (
-            self.options.support_constraint
-            and current_epoch >= self.optimization_plan.start
-            and (current_epoch - self.optimization_plan.start)
-            % self.options.support_constraint_stride
-            == 0
-        ):
-            return True
-        else:
-            return False
-
-    def center_constraint_enabled(self, current_epoch: int) -> bool:
-        if (
-            self.options.center_constraint
-            and current_epoch >= self.optimization_plan.start
-            and (current_epoch - self.optimization_plan.start)
-            % self.options.center_constraint_stride
-            == 0
-        ):
-            return True
-        else:
-            return False
-        
     def center_probe(self):
         """
         Move the probe's center of mass to the center of the probe array.
