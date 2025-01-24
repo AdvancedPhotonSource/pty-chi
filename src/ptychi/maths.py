@@ -284,3 +284,8 @@ def ifft2_precise(x, norm=None):
     2D FFT with double precision.
     """
     return torch.fft.ifft2(x.type(torch.complex128), norm=norm).type(x.dtype)
+
+
+def is_all_integer(x: torch.Tensor) -> bool:
+    """Check if all elements in a tensor are integers."""
+    return torch.allclose(torch.eq(x, torch.round(x)), atol=1e-7)

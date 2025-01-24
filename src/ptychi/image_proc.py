@@ -79,7 +79,8 @@ def extract_patches_fourier_shift(
     patches = torch.stack(patches)
 
     # Apply Fourier shift to account for fractional shifts
-    patches = fourier_shift(patches, -fractional_shifts)
+    if not torch.allclose(fractional_shifts, torch.zeros_like(fractional_shifts), atol=1e-7):
+        patches = fourier_shift(patches, -fractional_shifts)
     patches = patches[:, patch_padding:-patch_padding, patch_padding:-patch_padding]
     return patches
 
@@ -160,7 +161,8 @@ def place_patches_fourier_shift(
     sxs = sxs + pad_lengths[0]
     exs = exs + pad_lengths[0]
 
-    patches = fourier_shift(patches, fractional_shifts)
+    if not torch.allclose(fractional_shifts, torch.zeros_like(fractional_shifts), atol=1e-7):
+        patches = fourier_shift(patches, -fractional_shifts)
     if not adjoint_mode:
         patches = patches[:, abs(patch_padding):-abs(patch_padding), abs(patch_padding):-abs(patch_padding)]
 
