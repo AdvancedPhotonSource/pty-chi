@@ -557,14 +557,14 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             A (n_probe_modes, h, w) tensor giving the accumulated probe update direction
             of the first OPR mode.
         """
+        delta_p_hat = delta_p_hat * alpha_p_mean
         
         probe = self.parameter_group.probe
         if "update_direction_history" not in self.probe_momentum_params.keys():
             self.probe_momentum_params["update_direction_history"] = []
             self.probe_momentum_params["velocity_map"] = torch.zeros_like(delta_p_hat)
         
-        upd = delta_p_hat * alpha_p_mean
-        upd = upd / pmath.mnorm(upd, dim=(-1, -2), keepdims=True)
+        upd = delta_p_hat / (pmath.mnorm(delta_p_hat, dim=(-1, -2), keepdims=True) + 1e-15)
         self.probe_momentum_params["update_direction_history"].append(upd)
         
         momentum_memory = 3
