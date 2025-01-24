@@ -767,13 +767,17 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     @timer()
     def _initialize_momentum_buffers(self):
-        self.object_momentum_params["accumulated_update_direction"] = 0
-        self.probe_momentum_params["accumulated_update_direction"] = 0
+        """Initialize momentum buffers.
+        
+        Only the probe's accumulated update direction is initialized here. The accumulated update
+        direction for the object is stored in `object.grad`.
+        """
+        if self.options.batching_mode != enums.BatchingModes.COMPACT or self.current_minibatch == 0:
+            self.probe_momentum_params["accumulated_update_direction"] = 0
 
     @timer()
     def _update_momentum_buffers(self, delta_p_hat):
-        """
-        Update momentum buffer for probe after each minibatch using the update direction calculated
+        """Update momentum buffer for probe after each minibatch using the update direction calculated
         in that minibatch. 
         
         We do not track the update direction for the object here, because it is already recorded in
