@@ -18,7 +18,7 @@ from ptychi.timing.timer_utils import timer
 
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group
-    import ptychi.data_structures.base as ds
+    import ptychi.data_structures.base as dsbase
 
 
 class ForwardModel(torch.nn.Module):
@@ -47,7 +47,7 @@ class ForwardModel(torch.nn.Module):
 
         self.parameter_group = parameter_group
         self.retain_intermediates = retain_intermediates
-        self.optimizable_parameters: ModuleList[ds.ReconstructParameter] = ModuleList()
+        self.optimizable_parameters: ModuleList[dsbase.ReconstructParameter] = ModuleList()
         self.propagator = None
         self.detector_size = detector_size
         self.intermediate_variables = {}

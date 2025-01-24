@@ -1,12 +1,12 @@
 from typing import TYPE_CHECKING
 
 import ptychi.position_correction as position_correction
-import ptychi.data_structures.base as ds
+import ptychi.data_structures.base as dsbase
 if TYPE_CHECKING:
     import ptychi.api as api
 
 
-class ProbePositions(ds.ReconstructParameter):
+class ProbePositions(dsbase.ReconstructParameter):
     options: "api.options.base.ProbePositionOptions"
 
     def __init__(

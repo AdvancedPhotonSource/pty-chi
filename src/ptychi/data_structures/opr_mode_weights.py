@@ -4,7 +4,7 @@ import logging
 import torch
 from torch import Tensor
 
-import ptychi.data_structures.base as ds
+import ptychi.data_structures.base as dsbase
 import ptychi.image_proc as ip
 import ptychi.maths as pmath
 from ptychi.data_structures.probe import Probe
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class OPRModeWeights(ds.ReconstructParameter):
+class OPRModeWeights(dsbase.ReconstructParameter):
     # TODO: update_relaxation is only used for LSQML. We should create dataclasses
     # to contain additional options for ReconstructParameter classes, and subclass them for specific
     # reconstruction algorithms - for example, OPRModeWeightsOptions -> LSQMLOPRModeWeightsOptions.
@@ -70,7 +70,7 @@ class OPRModeWeights(ds.ReconstructParameter):
         if self.optimizer_class is None:
             return
         if self.optimizable:
-            if isinstance(self.tensor, ds.ComplexTensor):
+            if isinstance(self.tensor, dsbase.ComplexTensor):
                 self.optimizer = self.optimizer_class([self.tensor.data], **self.optimizer_params)
             else:
                 self.optimizer = self.optimizer_class([self.tensor], **self.optimizer_params)

@@ -1,7 +1,7 @@
 from typing import Optional
 import dataclasses
 
-import ptychi.data_structures.base as ds
+import ptychi.data_structures.base as dsbase
 import ptychi.data_structures.object as object
 import ptychi.data_structures.opr_mode_weights as oprweights
 import ptychi.data_structures.probe as probe
@@ -10,10 +10,10 @@ import ptychi.data_structures.probe_positions as probepos
 
 @dataclasses.dataclass
 class ParameterGroup:
-    def get_all_parameters(self) -> list["ds.ReconstructParameter"]:
+    def get_all_parameters(self) -> list["dsbase.ReconstructParameter"]:
         return list(self.__dict__.values())
 
-    def get_optimizable_parameters(self) -> list["ds.ReconstructParameter"]:
+    def get_optimizable_parameters(self) -> list["dsbase.ReconstructParameter"]:
         ovs = []
         for var in self.get_all_parameters():
             if var.optimizable:
@@ -32,7 +32,7 @@ class PtychographyParameterGroup(ParameterGroup):
 
     probe_positions: "probepos.ProbePositions"
 
-    opr_mode_weights: Optional["oprweights.OPRModeWeights"] = dataclasses.field(default_factory=ds.DummyParameter)
+    opr_mode_weights: Optional["oprweights.OPRModeWeights"] = dataclasses.field(default_factory=dsbase.DummyParameter)
 
     def __post_init__(self):
         if self.probe.has_multiple_opr_modes and self.opr_mode_weights is None:

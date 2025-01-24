@@ -346,37 +346,11 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
                 )
             )
         ):
-            self.update_object_preconditioner(
-                use_all_modes=use_all_probe_modes_for_object_preconditioner
+            self.parameter_group.object.update_preconditioner(
+                probe=self.parameter_group.probe,
+                probe_positions=self.parameter_group.probe_positions,
+                patterns=self.dataset.patterns,
             )
-
-    def update_object_preconditioner(self, use_all_modes=False):
-        positions_all = self.parameter_group.probe_positions.tensor
-        # Shape of probe:        (n_probe_modes, h, w)
-        object_ = self.parameter_group.object.get_slice(0)
-
-        if use_all_modes:
-            probe_int = self.parameter_group.probe.get_all_mode_intensity(opr_mode=0)[None, :, :]
-        else:
-            probe_int = self.parameter_group.probe.get_mode_and_opr_mode(mode=0, opr_mode=0)[None, ...].abs() ** 2
-        # Shape of probe_int:    (n_scan_points, h, w)
-        probe_int = probe_int.repeat(len(positions_all), 1, 1)
-
-        # Stitch probes of all positions on the object buffer
-        # TODO: allow setting chunk size externally
-        probe_sq_map = chunked_processing(
-            func=self.parameter_group.object.place_patches_function,
-            common_kwargs={"op": "add"},
-            chunkable_kwargs={
-                "positions": positions_all + self.parameter_group.object.center_pixel,
-                "patches": probe_int,
-            },
-            iterated_kwargs={
-                "image": torch.zeros_like(object_.real).type(torch.get_default_dtype())
-            },
-            chunk_size=64,
-        )
-        self.parameter_group.object.preconditioner = probe_sq_map
 
     def run_post_epoch_hooks(self) -> None:
         with torch.no_grad():

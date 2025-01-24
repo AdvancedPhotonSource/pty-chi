@@ -9,7 +9,7 @@ from ptychi.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
     LossTracker,
 )
-import ptychi.data_structures.base as ds
+import ptychi.data_structures.base as dsbase
 import ptychi.forward_models as fm
 import ptychi.maths as pmath
 import ptychi.api.enums as enums
@@ -86,7 +86,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 "Selecting optimizer for OPRModeWeights is not supported for "
                 "LSQMLReconstructor and will be disregarded."
             )
-        if not isinstance(self.parameter_group.opr_mode_weights, ds.DummyParameter):
+        if not isinstance(self.parameter_group.opr_mode_weights, dsbase.DummyParameter):
             if self.parameter_group.opr_mode_weights.data[:, 1:].abs().max() < 1e-9:
                 raise ValueError(
                     "Weights of eigenmodes (the second and following OPR modes) in LSQMLReconstructor "
@@ -982,12 +982,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             e = self.accumulated_fourier_error / self.parameter_group.probe_positions.shape[0]
             self.fourier_errors.append(e.item())
             self.accumulated_fourier_error = 0.0
-
-    @timer()
-    def update_object_preconditioner(self, use_all_modes=False):
-        super().update_object_preconditioner(use_all_modes)
-        # PtychoShelves devides the preconditioner by 2 so we do the same here.
-        self.parameter_group.object.preconditioner = self.parameter_group.object.preconditioner / 2.0
 
     def run_pre_run_hooks(self) -> None:
         self.prepare_data()

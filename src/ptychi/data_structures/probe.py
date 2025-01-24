@@ -10,7 +10,7 @@ from torch import Tensor
 import ptychi.image_proc as ip
 import ptychi.maths as pmath
 import ptychi.utils as utils
-import ptychi.data_structures.base as ds
+import ptychi.data_structures.base as dsbase
 import ptychi.data_structures.object as object
 import ptychi.data_structures.opr_mode_weights as oprweights
 from ptychi.propagate import FourierPropagator, WavefieldPropagator
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class Probe(ds.ReconstructParameter):
+class Probe(dsbase.ReconstructParameter):
     # TODO: eigenmode_update_relaxation is only used for LSQML. We should create dataclasses
     # to contain additional options for ReconstructParameter classes, and subclass them for specific
     # reconstruction algorithms - for example, ProbeOptions -> LSQMLProbeOptions.
@@ -117,7 +117,7 @@ class Probe(ds.ReconstructParameter):
     def get_all_mode_intensity(
         self,
         opr_mode: Optional[int] = 0,
-        weights: Optional[Union[Tensor, "ds.ReconstructParameter"]] = None,
+        weights: Optional[Union[Tensor, "dsbase.ReconstructParameter"]] = None,
     ) -> Tensor:
         """
         Get the intensity of all probe modes.
@@ -145,7 +145,7 @@ class Probe(ds.ReconstructParameter):
         return torch.sum((p.abs()) ** 2, dim=0)
 
     def get_unique_probes(
-        self, weights: Union[Tensor, "ds.ReconstructParameter"], mode_to_apply: Optional[int] = None
+        self, weights: Union[Tensor, "dsbase.ReconstructParameter"], mode_to_apply: Optional[int] = None
     ) -> Tensor:
         """
         Parameters
