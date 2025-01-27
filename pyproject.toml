@@ -12,7 +12,7 @@ dependencies = [
     "h5py",
     "matplotlib",
     "mypy",
-    "numpy>=2.1",
+    "numpy",
     "pandas",
     "ruff",
     "scikit-image",
