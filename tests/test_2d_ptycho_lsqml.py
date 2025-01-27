@@ -75,6 +75,7 @@ class Test2dPtychoLsqml(tutils.TungstenDataTester):
         options.probe_position_options.magnitude_limit.enabled = True
         options.probe_position_options.magnitude_limit.limit = 5.0
         options.probe_position_options.correction_options.correction_type = api.PositionCorrectionTypes.GRADIENT
+        options.probe_position_options.correction_options.differentiation_method = api.ImageGradientMethods.FOURIER_DIFFERENTIATION
 
         options.reconstructor_options.batch_size = 96
         options.reconstructor_options.noise_model = api.NoiseModels.GAUSSIAN

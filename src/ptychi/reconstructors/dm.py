@@ -63,7 +63,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         if self.parameter_group.probe.has_multiple_opr_modes:
             raise NotImplementedError("DMReconstructor does not support multiple OPR modes yet.")
         if (
-            self.parameter_group.probe_positions.position_correction.correction_type
+            self.parameter_group.probe_positions.position_correction.options.correction_type
             is not api.enums.PositionCorrectionTypes.GRADIENT
         ):
             raise NotImplementedError("DMReconstructor only supports gradient position correction.")

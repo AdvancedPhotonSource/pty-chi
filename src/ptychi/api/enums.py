@@ -78,7 +78,7 @@ class ImageGradientMethods(StrEnum):
     FOURIER_DIFFERENTIATION = auto()
     FOURIER_SHIFT = auto()
     NEAREST = auto()
-    
+    GAUSSIAN = auto()
     
 class ImageIntegrationMethods(StrEnum):
     FOURIER = auto()

@@ -637,7 +637,7 @@ def adjoint_bilinear_shift(images: Tensor, shifts: Tensor) -> Tensor:
 @timer()
 def nearest_neighbor_gradient(
     image: Tensor, direction: Literal["forward", "backward"], dim: Tuple[int, ...] = (0, 1)
-) -> Tensor:
+) -> Tuple[Tensor, Tensor]:
     """
     Calculate the nearest neighbor gradient of a 2D image.
 
@@ -652,8 +652,8 @@ def nearest_neighbor_gradient(
 
     Returns
     -------
-    tuple of Tensor
-        a tuple of 2 images with the gradient in y and x directions.
+    Tuple[Tensor, Tensor]
+        A tuple of 2 images with the gradient in y and x directions.
     """
     if not hasattr(dim, "__len__"):
         dim = (dim,)
@@ -675,7 +675,7 @@ def nearest_neighbor_gradient(
 
 
 @timer()
-def gaussian_gradient(image: Tensor, sigma: float = 1.0, kernel_size=5) -> Tensor:
+def gaussian_gradient(image: Tensor, sigma: float = 1.0, kernel_size=5) -> Tuple[Tensor, Tensor]:
     """
     Calculate the gradient of a 2D image with a Gaussian-derivative kernel.
 
@@ -688,7 +688,7 @@ def gaussian_gradient(image: Tensor, sigma: float = 1.0, kernel_size=5) -> Tenso
 
     Returns
     -------
-    tuple of tensor
+    Tuple[Tensor, Tensor]
         A tuple of 2 images with the gradient in y and x directions.
     """
     r = torch.arange(kernel_size) - (kernel_size - 1) / 2.0
@@ -709,7 +709,7 @@ def gaussian_gradient(image: Tensor, sigma: float = 1.0, kernel_size=5) -> Tenso
 
 
 @timer()
-def fourier_gradient(image: Tensor) -> Tensor:
+def fourier_gradient(image: Tensor) -> Tuple[Tensor, Tensor]:
     """
     Calculate the gradient of an image using Fourier differentiation
     theorem: `fft(df/dx) = 2 * pi * i * u * fft(f)`.
@@ -729,6 +729,46 @@ def fourier_gradient(image: Tensor) -> Tensor:
     grad_y = torch.fft.ifft(torch.fft.fft(image, dim=-2) * (2j * torch.pi) * u, dim=-2)
     grad_x = torch.fft.ifft(torch.fft.fft(image, dim=-1) * (2j * torch.pi) * v, dim=-1)
     return grad_y, grad_x
+
+
+@timer()
+def fourier_shift_gradient(image: Tensor, step: float = 0.5) -> Tuple[Tensor, Tensor]:
+    """
+    Calculate the gradient of an image using Fourier shift. 
+
+    Parameters
+    ----------
+    image : Tensor
+        A (... H, W) tensor of images.
+
+    Returns
+    -------
+    Tuple[Tensor, Tensor]
+        A tuple of (... H, W) tensor of gradients in y and x directions.
+    """
+    orig_shape = image.shape
+    if image.ndim == 2:
+        image = image.unsqueeze(0)
+    
+    pad = math.ceil(step) + 1
+    image = torch.nn.functional.pad(image, (pad, pad, pad, pad), mode="replicate")
+    
+    sx1 = torch.tensor([[0, -step]], device=image.device).repeat(image.shape[0], 1)
+    sx2 = torch.tensor([[0, step]], device=image.device).repeat(image.shape[0], 1)
+    gx = fourier_shift(image, sx1) - fourier_shift(image, sx2)
+    
+    sy1 = torch.tensor([[-step, 0]], device=image.device).repeat(image.shape[0], 1)
+    sy2 = torch.tensor([[step, 0]], device=image.device).repeat(image.shape[0], 1)
+    gy = fourier_shift(image, sy1) - fourier_shift(image, sy2)
+    
+    if pad > 0:
+        gy = gy[..., pad:-pad, pad:-pad]
+        gx = gx[..., pad:-pad, pad:-pad]
+
+    if len(orig_shape) == 2:
+        gy = gy[0]
+        gx = gx[0]
+    return gy, gx
 
 
 @timer()
