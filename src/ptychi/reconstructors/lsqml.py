@@ -373,6 +373,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             delta_p_hat = delta_p_hat[:, mode_slicer]
 
         lambda_0 = 1.2e-7 / (probe.shape[-2] * probe.shape[-1])
+        lambda_lsq = 0.1
 
         # Shape of delta_p_o/o_p:     (batch_size, n_probe_modes or 1, h, w)
         delta_p_o = delta_p_hat * obj_patches[:, None, :, :]
@@ -380,11 +381,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         # Shape of aij:               (batch_size,)
         a11 = torch.sum((delta_o_patches_p.abs() ** 2 + lambda_0), dim=(-1, -2, -3))
-        a11 = a11 + 0.5 * torch.mean(a11, dim=0)
+        a11 = a11 + lambda_lsq * torch.mean(a11, dim=0)
         a12 = torch.sum((delta_o_patches_p * delta_p_o.conj()), dim=(-1, -2, -3))
         a21 = a12.conj()
         a22 = torch.sum((delta_p_o.abs() ** 2 + lambda_0), dim=(-1, -2, -3))
-        a22 = a22 + 0.5 * torch.mean(a22, dim=0)
+        a22 = a22 + lambda_lsq * torch.mean(a22, dim=0)
         b1 = torch.sum(torch.real(delta_o_patches_p.conj() * chi), dim=(-1, -2, -3))
         b2 = torch.sum(torch.real(delta_p_o.conj() * chi), dim=(-1, -2, -3))
 
