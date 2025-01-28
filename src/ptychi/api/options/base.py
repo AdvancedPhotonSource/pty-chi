@@ -207,6 +207,17 @@ class RemoveGridArtifactsOptions(FeatureOptions):
 
     direction: enums.Directions = enums.Directions.XY
     """The direction of grid artifact removal."""
+    
+
+@dataclasses.dataclass
+class RemoveObjectProbeAmbiguityOptions(FeatureOptions):
+    """Settings for removing the object-probe ambiguity, where the object is scaled by its norm
+    so that the mean transmission is kept around 1, and the probe is scaled accordingly.
+    """
+
+    enabled: bool = True
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=lambda: OptimizationPlan(stride=10))
 
 
 @dataclasses.dataclass
@@ -244,6 +255,10 @@ class ObjectOptions(ParameterOptions):
         enums.PatchInterpolationMethods.FOURIER
     )
     """The interpolation method used for extracting and updating patches of the object."""
+    
+    remove_object_probe_ambiguity: RemoveObjectProbeAmbiguityOptions = field(
+        default_factory=RemoveObjectProbeAmbiguityOptions
+    )
 
     def get_non_data_fields(self) -> dict:
         d = super().get_non_data_fields()

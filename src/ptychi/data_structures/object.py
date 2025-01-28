@@ -1,4 +1,4 @@
-from typing import Tuple, TYPE_CHECKING
+from typing import Tuple, TYPE_CHECKING, Optional
 import logging
 import copy
 import math
@@ -9,6 +9,7 @@ from torch import Tensor
 import ptychi.image_proc as ip
 import ptychi.data_structures as ds
 import ptychi.data_structures.base as dsbase
+import ptychi.maths as pmath
 from ptychi.timing.timer_utils import timer
 from ptychi.utils import (
     get_default_complex_dtype, 
@@ -87,6 +88,9 @@ class Object(dsbase.ReconstructParameter):
         raise NotImplementedError
     
     def initialize_preconditioner(self):
+        raise NotImplementedError
+    
+    def remove_object_probe_ambiguity(self):
         raise NotImplementedError
 
 
@@ -350,6 +354,46 @@ class PlanarObject(Object):
         corr = (1 + relax * aobj_upd) * torch.exp(1j * relax * pobj_upd)
         obj = obj * corr
         self.set_data(obj)
+        
+    def remove_object_probe_ambiguity(
+        self, 
+        probe: "ds.probe.Probe", 
+        *, 
+        update_probe_in_place: bool = True
+    ) -> Optional[Tensor]:
+        """
+        Remove the object-probe ambiguity by scaling the object by its norm,
+        and adjusting the probe power accordingly.
+        
+        Parameters
+        ----------
+        probe : ds.probe.Probe
+            The probe to adjust.
+        update_probe_in_place : bool, optional
+            Whether to update the probe in place. If False, the tensor of the updated probe is returned.
+        """
+        bbox = self.roi_bbox.get_bbox_with_top_left_origin()
+        roi_slicer = bbox.get_slicer()
+        w = self.preconditioner[*roi_slicer]
+        w = w / pmath.mnorm(w, dim=(-2, -1))
+        
+        # Get the norm of the object within the ROI for each slice.
+        obj_data = self.data
+        obj_norm = torch.sqrt(torch.mean(torch.abs(obj_data[..., *roi_slicer]) ** 2 * w, dim=(-2, -1)))
+        
+        # Scale the object such that the mean transmission is 1.
+        obj_data = obj_data / obj_norm[:, None, None]
+        
+        # Adjust the probe power accordingly.
+        probe_data = probe.data
+        probe_data = probe_data * torch.prod(obj_norm)
+        
+        self.set_data(obj_data)
+        if update_probe_in_place:
+            probe.set_data(probe_data)
+        else:
+            return probe_data
+        
         
     def calculate_illumination_map(
         self, 
