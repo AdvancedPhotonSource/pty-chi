@@ -92,7 +92,7 @@ class PtychographyCompactBatchSampler(torch.utils.data.Sampler):
         self.build_clusters()
 
     def __len__(self):
-        return int(np.round(len(self.positions) / self.batch_size))
+        return int(np.ceil(len(self.positions) / self.batch_size))
 
     def __iter__(self):
         cluster_indices = np.random.permutation(len(self.clusters_of_indices))
