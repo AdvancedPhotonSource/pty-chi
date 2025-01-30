@@ -162,7 +162,7 @@ def place_patches_fourier_shift(
     exs = exs + pad_lengths[0]
 
     if not torch.allclose(fractional_shifts, torch.zeros_like(fractional_shifts), atol=1e-7):
-        patches = fourier_shift(patches, -fractional_shifts)
+        patches = fourier_shift(patches, fractional_shifts)
     if not adjoint_mode:
         patches = patches[:, abs(patch_padding):-abs(patch_padding), abs(patch_padding):-abs(patch_padding)]
 
