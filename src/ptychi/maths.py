@@ -1,6 +1,8 @@
 from typing import Literal, Optional, Tuple, Union
 
 import torch
+import numpy as np
+
 from ptychi.timing.timer_utils import timer
 
 
@@ -289,3 +291,61 @@ def ifft2_precise(x, norm=None):
 def is_all_integer(x: torch.Tensor) -> bool:
     """Check if all elements in a tensor are integers."""
     return torch.allclose(torch.eq(x, torch.round(x)), atol=1e-7)
+
+
+def masked_argmax(
+    x: torch.Tensor | np.ndarray, 
+    mask: torch.Tensor | np.ndarray
+) -> torch.Tensor | np.ndarray:
+    """
+    Find the index of the maximum value in a tensor within a mask.
+    
+    This function works for both torch and numpy arrays.
+    
+    Parameters
+    ----------
+    x : torch.Tensor | np.ndarray
+        The input tensor.
+    mask : torch.Tensor | np.ndarray
+        The mask. Search is only performed within the masked region.
+    
+    Returns
+    -------
+    torch.Tensor | np.ndarray
+        The index of the maximum value in the tensor within the mask.
+    """
+    if isinstance(x, torch.Tensor):
+        x = torch.where(mask, x, -torch.inf)
+        return torch.argmax(x)
+    else:
+        x = np.where(mask, x, -np.inf)
+        return np.argmax(x)
+
+
+def masked_argmin(
+    x: torch.Tensor | np.ndarray, 
+    mask: torch.Tensor | np.ndarray
+) -> torch.Tensor | np.ndarray:
+    """
+    Find the index of the minimum value in a tensor within a mask.
+    
+    This function works for both torch and numpy arrays.
+    
+    Parameters
+    ----------
+    x : torch.Tensor | np.ndarray
+        The input tensor.
+    mask : torch.Tensor | np.ndarray
+        The mask. Search is only performed within the masked region.
+    
+    Returns
+    -------
+    torch.Tensor | np.ndarray
+        The index of the minimum value in the tensor within the mask.
+    """
+    if isinstance(x, torch.Tensor):
+        x = torch.where(mask, x, torch.inf)
+        return torch.argmin(x)
+    else:
+        x = np.where(mask, x, np.inf)
+        return np.argmin(x)
