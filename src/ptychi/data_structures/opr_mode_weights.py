@@ -102,6 +102,9 @@ class OPRModeWeights(dsbase.ReconstructParameter):
         current_epoch: int,
         probe_mode_index: Optional[int] = None,
     ):
+        # TODO: OPR updates are calculated using chi with uniquely shifted probes, 
+        # probe without shift, and probe updates that are adjoint-shifted. This is
+        # not accurate, but PtychoShelves does the same. We might need to revisit this.
         mode_slicer = probe._get_probe_mode_slicer(probe_mode_index)
         chi = chi[:, mode_slicer]
         delta_p_i = delta_p_i[:, mode_slicer]

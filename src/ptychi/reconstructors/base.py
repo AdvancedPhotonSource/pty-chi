@@ -13,7 +13,7 @@ import ptychi.maps as maps
 import ptychi.forward_models as fm
 import ptychi.api.enums as enums
 import ptychi.io_handles as io
-
+import ptychi.image_proc as ip
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
     import ptychi.api as api
@@ -594,3 +594,44 @@ class AnalyticalIterativePtychographyReconstructor(
             / ((psi.abs() ** 2).sum(1, keepdims=True).sqrt() + 1e-7)
             * torch.sqrt(actual_pattern_intensity + 1e-7)[:, None]
         )
+        
+    @timer()
+    def adjoint_shift_probe_update_direction(self, indices, delta_p, first_mode_only=False):
+        """
+        Apply the adjoint operator of the subpixel shift to the probe done in forward model.
+        
+        Parameters
+        ----------
+        indices : Tensor
+            Indices of diffraction patterns in the current batch.
+        delta_p : Tensor
+            A (batch_size, n_probe_modes, h, w) tensor giving the probe update direction.
+        first_mode_only : bool
+            If True, only the first mode is shifted.
+
+        Returns
+        -------
+        Tensor
+            A (batch_size, n_probe_modes, h, w) tensor giving the shifted probe update direction.
+        """
+        pos = self.parameter_group.probe_positions.data[indices]
+        orig_shape = delta_p.shape
+        fractional_shifts = pos - pos.round()
+        
+        if first_mode_only:
+            delta_p_to_shift = delta_p[..., 0, :, :]
+        else:
+            delta_p_to_shift = delta_p.reshape(delta_p.shape[0] * delta_p.shape[1], *delta_p.shape[2:])
+        
+        delta_p_shifted = ip.shift_images(
+            delta_p_to_shift, 
+            fractional_shifts, 
+            method=self.parameter_group.object.options.patch_interpolation_method,
+            adjoint=True
+        )
+        
+        if first_mode_only:
+            delta_p = torch.cat([delta_p_shifted[..., None, :, :], delta_p[..., 1:, :, :]], dim=-3)
+        else:
+            delta_p = delta_p_shifted.reshape(orig_shape)
+        return delta_p

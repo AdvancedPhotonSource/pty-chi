@@ -185,11 +185,12 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         probe = self.parameter_group.probe
         positions = self.parameter_group.probe_positions.tensor
 
-        obj_patches = object_.extract_patches(positions[start_pt:end_pt], probe.get_spatial_shape())
-        psi = self.forward_model.propagate_through_object(
-            self.forward_model.get_probe(list(range(start_pt, end_pt))),
-            obj_patches,
-            return_slice_psis=False,
+        obj_patches = object_.extract_patches(
+            positions[start_pt:end_pt].int().round(), probe.get_spatial_shape()
+        )
+        psi = self.forward_model.forward_real_space(
+            indices=torch.arange(start_pt, end_pt, device=obj_patches.device).long(),
+            obj_patches=obj_patches,
         )
 
         if return_obj_patches:
@@ -244,6 +245,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
     @timer()
     def add_to_probe_update_terms(
         self,
+        indices: Tensor,
         probe_numerator: Tensor,
         probe_denominator: Tensor,
         obj_patches: Tensor,
@@ -251,25 +253,32 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         end_pt: int,
     ):
         "Add to the running totals for the probe update numerator and denominator"
-        probe_numerator += (obj_patches.conj() * self.psi[start_pt:end_pt]).sum(0)
-        probe_denominator += (obj_patches.abs() ** 2).sum(0)
+        indices = torch.arange(start_pt, end_pt, device=probe_numerator.device).long()
+        numerator_update = (obj_patches.conj() * self.psi[start_pt:end_pt]).sum(0)
+        denominator_update = (obj_patches.abs() ** 2).sum(0)
+        numerator_update = self.adjoint_shift_probe_update_direction(indices, numerator_update, first_mode_only=True)
+        denominator_update = self.adjoint_shift_probe_update_direction(indices, denominator_update, first_mode_only=True)
+        probe_numerator += numerator_update
+        probe_denominator += denominator_update
 
     @timer()
     def update_object(self, start_pts: list[int], end_pts: list[int]):
         "Calculate and apply the object update."
 
         object_ = self.parameter_group.object
-        probe = self.parameter_group.probe
         positions = self.parameter_group.probe_positions.tensor
 
         # Calculate object update
-        p = probe.get_opr_mode(0)  # will need to update this when doing OPR
         # Iterating over the object numerator calculation is more memory efficient
         object_numerator = torch.zeros_like(object_.get_slice(0))
         for i in range(len(start_pts)):
+            indices = torch.arange(start_pts[i], end_pts[i], device=object_numerator.device).long()
+            p = self.forward_model.get_unique_probes(indices)
+            p = self.forward_model.shift_unique_probes(indices, p, first_mode_only=True)
+            
             object_numerator = object_.place_patches_function(
                 object_numerator,
-                positions[start_pts[i] : end_pts[i]] + object_.center_pixel,
+                positions[start_pts[i] : end_pts[i]].int().round() + object_.center_pixel,
                 (p.conj() * self.psi[start_pts[i] : end_pts[i]]).sum(1),
                 "add",
             )
@@ -296,16 +305,15 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
     ) -> Tensor:
         "Calculate the probe position update. Only gradient based updates are allowed for now."
 
-        probe = self.parameter_group.probe
         probe_positions = self.parameter_group.probe_positions
+        probe = self.forward_model.get_unique_probes(indices)
+        probe = self.forward_model.shift_unique_probes(indices, probe, first_mode_only=True)
 
         delta_pos = probe_positions.position_correction.get_update(
             chi,
             obj_patches,
             None,
             probe,
-            self.parameter_group.opr_mode_weights,
-            indices,
             None,
         )
 

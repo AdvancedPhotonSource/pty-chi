@@ -41,9 +41,10 @@ class Object(dsbase.ReconstructParameter):
     ):
         super().__init__(*args, name=name, options=options, is_complex=True, **kwargs)
         self.pixel_size_m = options.pixel_size_m
-        center_pixel = torch.tensor(self.shape, device=torch.get_default_device()) / 2.0
         self.roi_bbox: dsbase.BoundingBox = None
-
+        
+        center_pixel = torch.tensor(self.shape, device=torch.get_default_device()) / 2.0
+        center_pixel = center_pixel.round() + 0.5
         self.register_buffer("center_pixel", center_pixel)
 
     def extract_patches(self, positions, patch_shape, *args, **kwargs):
@@ -126,6 +127,7 @@ class PlanarObject(Object):
             self.slice_spacing_m = None
 
         center_pixel = torch.tensor(self.shape[1:], device=torch.get_default_device()) / 2.0
+        center_pixel = center_pixel.round() + 0.5
         self.register_buffer("center_pixel", center_pixel)
 
     @property
@@ -152,7 +154,11 @@ class PlanarObject(Object):
         return self.data[index, ...]
 
     @timer()
-    def extract_patches(self, positions: Tensor, patch_shape: Tuple[int, int]):
+    def extract_patches(
+        self, 
+        positions: Tensor, 
+        patch_shape: Tuple[int, int], 
+    ):
         """
         Extract (n_patches, n_slices, h', w') patches from the object.
 
@@ -182,7 +188,12 @@ class PlanarObject(Object):
         return patches_all_slices
 
     @timer()
-    def place_patches(self, positions: Tensor, patches: Tensor, *args, **kwargs):
+    def place_patches(
+        self, 
+        positions: Tensor, 
+        patches: Tensor, 
+        *args, **kwargs
+    ):
         """
         Place patches into the object.
 
@@ -205,7 +216,12 @@ class PlanarObject(Object):
         self.tensor.set_data(updated_slices)
 
     @timer()
-    def place_patches_on_empty_buffer(self, positions: Tensor, patches: Tensor, *args, **kwargs):
+    def place_patches_on_empty_buffer(
+        self, 
+        positions: Tensor, 
+        patches: Tensor, 
+        *args, **kwargs
+    ):
         """
         Place patches into a zero array with the *lateral* shape of the object.
 
@@ -436,7 +452,7 @@ class PlanarObject(Object):
             func=self.place_patches_function,
             common_kwargs={"op": "add"},
             chunkable_kwargs={
-                "positions": positions_all + self.center_pixel,
+                "positions": positions_all.round().int() + self.center_pixel,
                 "patches": probe_int,
             },
             iterated_kwargs={

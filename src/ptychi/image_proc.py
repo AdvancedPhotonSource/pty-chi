@@ -285,6 +285,46 @@ def place_patches_bilinear_shift(
 
 
 @timer()
+def shift_images(
+    images: Tensor, 
+    shifts: Tensor, 
+    method: Literal["bilinear", "fourier"] = "bilinear",
+    adjoint: bool = False
+) -> Tensor:
+    """Shift a batch of images by a given amount.
+    
+    Parameters
+    ----------
+    images : Tensor
+        A [N, H, W] tensor of images.
+    shifts : Tensor
+        A [N, 2] tensor of shifts in pixels. Use the same shift values as the
+        forward shift operation even if `adjoint` is True; do not flip the sign.
+    method : Literal["bilinear", "fourier"]
+        The method to use for shifting.
+    adjoint : bool
+        If True, the adjoint of the shift operation is performed. For Fourier
+        shift, it shifts the image by `-shifts`. For bilinear shift, it computes
+        the adjoint of the bilinear shift operation.
+    
+    Returns
+    -------
+    Tensor
+        Shifted images.
+    """
+    if method == "bilinear":
+        if adjoint:
+            return adjoint_bilinear_shift(images, shifts)
+        return bilinear_shift(images, shifts)
+    elif method == "fourier":
+        if adjoint:
+            return fourier_shift(images, -shifts)
+        return fourier_shift(images, shifts)
+    else:
+        raise ValueError(f"Invalid shift method: {method}")
+
+
+@timer()
 def fourier_shift(images: Tensor, shifts: Tensor, strictly_preserve_zeros: bool = False) -> Tensor:
     """
     Apply Fourier shift to a batch of images.
@@ -333,6 +373,103 @@ def fourier_shift(images: Tensor, shifts: Tensor, strictly_preserve_zeros: bool 
         shifted_images[zero_mask_shifted > 0] = 0
     return shifted_images
 
+
+def bilinear_shift(images: Tensor, shifts: Tensor) -> Tensor:
+    """
+    Apply bilinear shift to a batch of images.
+    
+    Parameters
+    ----------
+    images : Tensor
+        A [N, H, W] tensor of images.
+    shifts : Tensor
+        A [N, 2] tensor of shifts in pixels.
+
+    Returns
+    -------
+    Tensor
+        Shifted images.
+    """
+    if torch.allclose(shifts, torch.zeros_like(shifts)):
+        return images
+    y, x = torch.meshgrid(torch.arange(images.shape[-2]), torch.arange(images.shape[-1]), indexing="ij")
+    y = y.to(images.device)
+    x = x.to(images.device)
+    y = y.repeat(images.shape[0], 1, 1)
+    x = x.repeat(images.shape[0], 1, 1)
+    
+    # We want to sample the image at these positions.
+    y = y - shifts[:, 0].view(-1, 1, 1)
+    x = x - shifts[:, 1].view(-1, 1, 1)
+    
+    y_f = y.floor().int()
+    y_c = (y + 1).floor().int()
+    x_f = x.floor().int()
+    x_c = (x + 1).floor().int()
+    
+    w_00 = (y_c - y) * (x_c - x)
+    w_01 = (y_c - y) * (x - x_f)
+    w_10 = (y - y_f) * (x_c - x)
+    w_11 = (y - y_f) * (x - x_f)
+    
+    y_f = y_f.clip(0, images.shape[-2] - 1).view(-1)
+    y_c = y_c.clip(0, images.shape[-2] - 1).view(-1)
+    x_f = x_f.clip(0, images.shape[-1] - 1).view(-1)
+    x_c = x_c.clip(0, images.shape[-1] - 1).view(-1)
+    
+    orig_shape = images.shape
+    batch_inds = torch.arange(images.shape[0]).int().repeat_interleave(images.shape[-1] * images.shape[-2])
+    images = \
+        w_00.view(-1) * images[batch_inds, y_f, x_f] + \
+        w_01.view(-1) * images[batch_inds, y_f, x_c] + \
+        w_10.view(-1) * images[batch_inds, y_c, x_f] + \
+        w_11.view(-1) * images[batch_inds, y_c, x_c]
+    images = images.reshape(orig_shape)
+    return images
+
+
+def adjoint_bilinear_shift(images: Tensor, shifts: Tensor) -> Tensor:
+    """
+    Adjoint of bilinear shift.
+    """
+    if torch.allclose(shifts, torch.zeros_like(shifts)):
+        return images
+    y, x = torch.meshgrid(torch.arange(images.shape[-2]), torch.arange(images.shape[-1]), indexing="ij")
+    y = y.to(images.device)
+    x = x.to(images.device)
+    y = y.repeat(images.shape[0], 1, 1)
+    x = x.repeat(images.shape[0], 1, 1)
+    
+    # We want to sample the image at these positions.
+    y = y - shifts[:, 0].view(-1, 1, 1)
+    x = x - shifts[:, 1].view(-1, 1, 1)
+    
+    y_f = y.floor().int()
+    y_c = (y + 1).floor().int()
+    x_f = x.floor().int()
+    x_c = (x + 1).floor().int()
+    
+    w_00 = (y_c - y) * (x_c - x)
+    w_01 = (y_c - y) * (x - x_f)
+    w_10 = (y - y_f) * (x_c - x)
+    w_11 = (y - y_f) * (x - x_f)
+    
+    y_f = y_f.clip(0, images.shape[-2] - 1).view(-1)
+    y_c = y_c.clip(0, images.shape[-2] - 1).view(-1)
+    x_f = x_f.clip(0, images.shape[-1] - 1).view(-1)
+    x_c = x_c.clip(0, images.shape[-1] - 1).view(-1)
+    
+    orig_shape = images.shape
+    batch_inds = torch.arange(images.shape[0]).int().repeat_interleave(images.shape[-1] * images.shape[-2])
+    
+    adjoint = torch.zeros_like(images)
+    adjoint.index_put_((batch_inds, y_f, x_f), (w_00 * images).view(-1), accumulate=True)
+    adjoint.index_put_((batch_inds, y_f, x_c), (w_01 * images).view(-1), accumulate=True)
+    adjoint.index_put_((batch_inds, y_c, x_f), (w_10 * images).view(-1), accumulate=True)
+    adjoint.index_put_((batch_inds, y_c, x_c), (w_11 * images).view(-1), accumulate=True)
+    adjoint = adjoint.reshape(orig_shape)
+    return adjoint
+    
 
 @timer()
 def nearest_neighbor_gradient(

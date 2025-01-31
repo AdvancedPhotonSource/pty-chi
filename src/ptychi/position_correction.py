@@ -26,9 +26,7 @@ class PositionCorrection:
         chi: torch.Tensor,
         obj_patches: torch.Tensor,
         delta_o_patches: torch.Tensor,
-        probe: "ptychi.data_structures.probe.Probe",
-        opr_mode_weights: "base.OPRModeWeights",
-        indices: torch.Tensor,
+        unique_probes: torch.Tensor,
         object_step_size: float,
     ):
         """
@@ -42,10 +40,8 @@ class PositionCorrection:
             A (batch_size, n_slices, h, w) tensor of patches of the object.
         delta_o_patches : torch.Tensor
             A (batch_size, h, w) tensor of patches of the update to be applied to the object.
-        probe : Probe
-            The Probe object that is being reconstructed.
-        opr_mode_weights : OPRModeWeights
-            The OPRModeWeights object that is being reconstructed.
+        unique_probes : torch.Tensor
+            A (batch_size, n_modes, h, w) tensor of unique probes for all positions in the batch.
         object_step_size : float
             The step size/learning rate of the object optimizer.
 
@@ -54,17 +50,7 @@ class PositionCorrection:
         Tensor
             A (n_positions, 2) tensor of updates to the probe positions.
         """
-
-        if (
-            probe.has_multiple_opr_modes
-            and self.correction_type is api.PositionCorrectionTypes.GRADIENT
-        ):
-            # Shape of probe_m0:   (batch_size, h, w)
-            probe_m0 = probe.get_unique_probes(
-                weights=opr_mode_weights.get_weights(indices), mode_to_apply=0
-            )[:, 0]
-        else:
-            probe_m0 = probe.get_mode_and_opr_mode(0, 0)
+        probe_m0 = unique_probes[:, 0]
 
         if self.correction_type is api.PositionCorrectionTypes.GRADIENT:
             return self.get_gradient_update(chi, obj_patches, probe_m0)
