@@ -1123,7 +1123,26 @@ def median_filter_1d(x: Tensor, window_size: int = 5):
 
 
 @timer()
-def vignett(img: Tensor, margin: int = 20, sigma: float = 1.0):
+def generate_vignette_mask(
+    shape: tuple[int, int], 
+    margin: int = 20, 
+    sigma: float = 1.0, 
+    method: Literal["gaussian", "linear"] = "gaussian"
+):
+    """
+    Generate a vignette mask for an image of shape `shape`.
+    """
+    mask = torch.ones(shape, device=torch.get_default_device())
+    mask = vignette(mask, margin, sigma, method=method)
+    return mask
+
+
+@timer()
+def vignette(
+    img: Tensor, 
+    margin: int = 20, 
+    sigma: float = 1.0, 
+    method: Literal["gaussian", "linear"] = "gaussian"):
     """
     Vignett an image so that it gradually decays near the boundary.
     For each dimension of the image, a mask with a width of `2 * margin`
@@ -1143,6 +1162,8 @@ def vignett(img: Tensor, margin: int = 20, sigma: float = 1.0):
         The margin of image where the decay takes place.
     sigma : float
         The standard deviation of the Gaussian kernel.
+    method : Literal["gaussian", "linear"]
+        The method to use to generate the vignette mask.
     """
     img = img.clone()
     for i_dim in range(img.ndim):
@@ -1153,15 +1174,26 @@ def vignett(img: Tensor, margin: int = 20, sigma: float = 1.0):
             + [2 * margin]
             + [img.shape[i] for i in range(i_dim + 1, img.ndim)]
         )
-        mask = torch.zeros(mask_shape, device=img.device)
-        mask_slicer = [slice(None)] * i_dim + [slice(margin, None)]
-        mask[*mask_slicer] = 1.0
-        gauss_win = torch.signal.windows.gaussian(margin // 2, std=sigma)
-        gauss_win = gauss_win / torch.sum(gauss_win)
-        mask = convolve1d(mask, gauss_win, dim=i_dim, padding="same")
-        mask_final_slicer = [slice(None)] * i_dim + [slice(len(gauss_win), len(gauss_win) + margin)]
-        mask = mask[*mask_final_slicer]
-        mask = torch.where(mask < 1e-3, 0, mask)
+        if method == "gaussian":
+            mask = torch.zeros(mask_shape, device=img.device)
+            mask_slicer = [slice(None)] * i_dim + [slice(margin, None)]
+            mask[*mask_slicer] = 1.0
+            gauss_win = torch.signal.windows.gaussian(margin // 2, std=sigma)
+            gauss_win = gauss_win / torch.sum(gauss_win)
+            mask = convolve1d(mask, gauss_win, dim=i_dim, padding="same")
+            mask_final_slicer = [slice(None)] * i_dim + [slice(len(gauss_win), len(gauss_win) + margin)]
+            mask = mask[*mask_final_slicer]
+            mask = torch.where(mask < 1e-3, 0, mask)
+        elif method == "linear":
+            ramp = torch.linspace(0, 1, margin)
+            new_shape = [1] * img.ndim
+            new_shape[i_dim] = margin
+            ramp = ramp.reshape(new_shape)
+            rep = list(img.shape)
+            rep[i_dim] = 1
+            mask = ramp.repeat(rep)
+        else:
+            raise ValueError(f"Unknown method: {method}")
 
         slicer = [slice(None)] * i_dim + [slice(0, margin)]
         img[slicer] = img[slicer] * mask
@@ -1298,7 +1330,7 @@ def unwrap_phase_2d(
         img = torch.nn.functional.pad(
             img[None, None, :, :], (padding[1], padding[1], padding[0], padding[0]), mode="reflect"
         )[0, 0]
-        img = vignett(img, margin=10, sigma=2.5)
+        img = vignette(img, margin=10, sigma=2.5)
 
     gy, gx = get_phase_gradient(
         img, fourier_shift_step=fourier_shift_step, image_grad_method=image_grad_method
