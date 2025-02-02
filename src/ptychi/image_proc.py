@@ -351,7 +351,7 @@ def fourier_shift(images: Tensor, shifts: Tensor, strictly_preserve_zeros: bool 
         zero_mask = images == 0
         zero_mask = zero_mask.float()
         zero_mask_shifted = fourier_shift(zero_mask, shifts, strictly_preserve_zeros=False)
-    ft_images = torch.fft.fft2(images)
+    ft_images = pmath.fft2_precise(images)
     freq_y, freq_x = torch.meshgrid(
         torch.fft.fftfreq(images.shape[-2]), torch.fft.fftfreq(images.shape[-1]), indexing="ij"
     )
@@ -366,7 +366,7 @@ def fourier_shift(images: Tensor, shifts: Tensor, strictly_preserve_zeros: bool 
         * (freq_x * shifts[:, 1].view(-1, 1, 1) + freq_y * shifts[:, 0].view(-1, 1, 1))
     )
     ft_images = ft_images * mult
-    shifted_images = torch.fft.ifft2(ft_images)
+    shifted_images = pmath.ifft2_precise(ft_images)
     if not images.dtype.is_complex:
         shifted_images = shifted_images.real
     if strictly_preserve_zeros:

@@ -2,6 +2,8 @@ from typing import Literal, Optional, Tuple, Union
 
 import torch
 import numpy as np
+import cupy
+import cupyx.scipy.fft as cupyfft
 
 from ptychi.timing.timer_utils import timer
 
@@ -278,14 +280,22 @@ def fft2_precise(x, norm=None):
     """
     2D FFT with double precision.
     """
-    return torch.fft.fft2(x.type(torch.complex128), norm=norm).type(x.dtype)
+    # return torch.fft.fft2(x.type(torch.complex128), norm=norm).type(x.dtype)
+    orig_dtype = x.dtype
+    x = cupy.asarray(x)
+    x = cupyfft.fft2(x, norm=norm)
+    return torch.tensor(x, dtype=orig_dtype) 
 
 
 def ifft2_precise(x, norm=None):
     """
     2D FFT with double precision.
     """
-    return torch.fft.ifft2(x.type(torch.complex128), norm=norm).type(x.dtype)
+    # return torch.fft.ifft2(x.type(torch.complex128), norm=norm).type(x.dtype)
+    orig_dtype = x.dtype
+    x = cupy.asarray(x)
+    x = cupyfft.ifft2(x, norm=norm)
+    return torch.tensor(x, dtype=orig_dtype)
 
 
 def is_all_integer(x: torch.Tensor) -> bool:
