@@ -563,7 +563,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         if len(self.probe_momentum_params["update_direction_history"]) > momentum_memory + 1:
             # Remove the oldest momentum update.
             self.probe_momentum_params["update_direction_history"].pop(0)
-            for i_mode in range(probe.n_modes):
+            # PtychoShelves only applies momentum to the first mode.
+            for i_mode in range(1):
                 # Project older updates to the latest one, ordered from recent to old.
                 projected_updates = [
                     (self.probe_momentum_params["update_direction_history"][i][i_mode] * 
