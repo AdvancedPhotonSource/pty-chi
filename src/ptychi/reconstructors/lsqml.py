@@ -217,7 +217,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 # then the delta_o_i used should also be calculated using only the first
                 # probe mode.
                 delta_o_i_mode_0_raw = self._calculate_object_patch_update_direction(chi, psi_im1=probe_current_slice, probe_mode_index=0)
-                delta_o_comb_mode_0 = self._combine_object_patch_update_directions(delta_o_i_mode_0_raw, positions)
+                delta_o_comb_mode_0 = self._combine_object_patch_update_directions(delta_o_i_mode_0_raw, positions, onto_accumulated=True)
                 _, delta_o_i_mode_0 = self._precondition_object_update_direction(
                     delta_o_comb_mode_0, positions
                 )
@@ -227,7 +227,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 delta_o_i_raw = self._calculate_object_patch_update_direction(
                     chi, psi_im1=probe_current_slice, probe_mode_index=None
                 )
-                delta_o_comb = self._combine_object_patch_update_directions(delta_o_i_raw, positions)
+                delta_o_comb = self._combine_object_patch_update_directions(delta_o_i_raw, positions, onto_accumulated=True)
             else:
                 delta_o_i_raw = delta_o_i_mode_0_raw
                 delta_o_comb = delta_o_comb_mode_0
@@ -291,7 +291,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 )
             else:
                 self._record_object_slice_gradient(
-                    i_slice, delta_o_comb, add_to_existing=True
+                    i_slice, delta_o_comb, add_to_existing=False
                 )
             
             # Set chi to conjugate-modulated wavefield.
@@ -648,7 +648,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         return delta_o_patches[:, None, :, :]
 
     @timer()
-    def _combine_object_patch_update_directions(self, delta_o_patches, positions):
+    def _combine_object_patch_update_directions(self, delta_o_patches, positions, onto_accumulated=False):
         """
         Combine the update directions of object patches into a buffer with the
         same size as the whole object.
@@ -657,6 +657,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         ----------
         delta_o_patches : Tensor
             A (batch_size, 1, h, w) tensor giving the update direction for object patches.
+        onto_accumulated : bool
+            If True, add the update direction to the accumulated update direction stored in
+            `object.grad`. Otherwise, add the update direction to the object buffer.
 
         Returns
         -------
@@ -670,7 +673,10 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_o_hat = self.parameter_group.object.place_patches_on_empty_buffer(
             positions.round().int(), delta_o_patches
         )
-        return delta_o_hat[None, ...]
+        delta_o_hat = delta_o_hat[None, ...]
+        if onto_accumulated:
+            delta_o_hat = delta_o_hat + (-self.parameter_group.object.get_grad())
+        return delta_o_hat
 
     @timer()
     def _precondition_object_update_direction(self, delta_o_hat, positions=None, alpha_mix=0.1, slice_index=0):
