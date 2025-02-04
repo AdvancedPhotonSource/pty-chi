@@ -37,7 +37,7 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
     momentum_acceleration_gain: float = 0.0
     """The gain of momentum acceleration. If 0, momentum acceleration is not used."""
     
-    momentum_acceleration_gradient_mixing_factor: Optional[float] = None
+    momentum_acceleration_gradient_mixing_factor: Optional[float] = 1
     """
     Controls how the current gradient is mixed with the accumulated velocity in LSQML
     momentum acceleration:
