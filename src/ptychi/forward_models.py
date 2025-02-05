@@ -426,7 +426,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
         """
         positions = self.probe_positions.tensor[indices]
         obj_patches = self.object.extract_patches(
-            positions.round().int(), self.probe.get_spatial_shape()
+            positions.round().int(), self.probe.get_spatial_shape(),
+            integer_mode=True
         )
 
         self.record_intermediate_variable("positions", positions)
@@ -486,7 +487,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
         """
         positions = self.probe_positions.tensor[indices]
         obj_patches = self.object.extract_patches(
-            positions.round().int(), self.probe.get_spatial_shape()
+            positions.round().int(), self.probe.get_spatial_shape(),
+            integer_mode=True
         )
 
         self.record_intermediate_variable("positions", positions)

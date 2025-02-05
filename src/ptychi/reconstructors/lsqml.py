@@ -672,7 +672,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         # Stitch all delta O patches on the object buffer
         # Shape of delta_o_hat:  (h_whole, w_whole)
         delta_o_hat = self.parameter_group.object.place_patches_on_empty_buffer(
-            positions.round().int(), delta_o_patches
+            positions.round().int(), delta_o_patches, integer_mode=True
         )
         delta_o_hat = delta_o_hat[None, ...]
         if onto_accumulated:
@@ -701,7 +701,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         # Re-extract delta O patches
         if positions is not None:
-            delta_o_patches = self.parameter_group.object.extract_patches_function(
+            delta_o_patches = ip.extract_patches_integer(
                 delta_o_hat,
                 positions.round().int() + self.parameter_group.object.center_pixel,
                 self.parameter_group.probe.shape[-2:],

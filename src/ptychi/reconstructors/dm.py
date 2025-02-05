@@ -15,7 +15,7 @@ from ptychi.reconstructors.base import (
 )
 from ptychi.api.options.dm import DMReconstructorOptions
 from ptychi.timing.timer_utils import timer
-
+import ptychi.image_proc as ip
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
 
@@ -186,7 +186,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         positions = self.parameter_group.probe_positions.tensor
 
         obj_patches = object_.extract_patches(
-            positions[start_pt:end_pt].int().round(), probe.get_spatial_shape()
+            positions[start_pt:end_pt].int().round(), probe.get_spatial_shape(), integer_mode=True
         )
         psi = self.forward_model.forward_real_space(
             indices=torch.arange(start_pt, end_pt, device=obj_patches.device).long(),
@@ -276,11 +276,11 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             p = self.forward_model.get_unique_probes(indices)
             p = self.forward_model.shift_unique_probes(indices, p, first_mode_only=True)
             
-            object_numerator = object_.place_patches_function(
+            object_numerator = ip.place_patches_integer(
                 object_numerator,
                 positions[start_pts[i] : end_pts[i]].int().round() + object_.center_pixel,
                 (p.conj() * self.psi[start_pts[i] : end_pts[i]]).sum(1),
-                "add",
+                op="add",
             )
 
         self.update_object_preconditioner(use_all_modes=True)

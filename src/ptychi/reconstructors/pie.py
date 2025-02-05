@@ -9,6 +9,7 @@ from ptychi.reconstructors.base import (
 )
 from ptychi.metrics import MSELossOfSqrt
 from ptychi.timing.timer_utils import timer
+import ptychi.image_proc as ip
 
 if TYPE_CHECKING:
     import ptychi.api as api
@@ -105,7 +106,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
             step_weight = self.calculate_object_step_weight(p)
             delta_o_patches = step_weight * (psi_prime - psi)
             delta_o_patches = delta_o_patches.sum(1)
-            delta_o = object_.place_patches_function(
+            delta_o = ip.place_patches_integer(
                 torch.zeros_like(object_.get_slice(0)),
                 positions.int().round() + object_.center_pixel,
                 delta_o_patches,

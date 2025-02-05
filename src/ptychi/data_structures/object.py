@@ -158,6 +158,7 @@ class PlanarObject(Object):
         self, 
         positions: Tensor, 
         patch_shape: Tuple[int, int], 
+        integer_mode: bool = False,
     ):
         """
         Extract (n_patches, n_slices, h', w') patches from the object.
@@ -169,6 +170,9 @@ class PlanarObject(Object):
             The origin of the given positions are assumed to be `self.center_pixel`.
         patch_shape : tuple
             Tuple giving the lateral patch shape in pixels.
+        integer_mode : bool, optional
+            If True, the patches are extracted at the exact center between pixels,
+            so that no interpolation is needed.
 
         Returns
         -------
@@ -180,9 +184,14 @@ class PlanarObject(Object):
         positions = positions + self.center_pixel
         patches_all_slices = []
         for i_slice in range(self.n_slices):
-            patches = self.extract_patches_function(
-                self.get_slice(i_slice), positions, patch_shape
-            )
+            if integer_mode:
+                patches = ip.extract_patches_integer(
+                    self.get_slice(i_slice), positions, patch_shape
+                )
+            else:
+                patches = self.extract_patches_function(
+                    self.get_slice(i_slice), positions, patch_shape
+                )
             patches_all_slices.append(patches)
         patches_all_slices = torch.stack(patches_all_slices, dim=1)
         return patches_all_slices
@@ -192,6 +201,7 @@ class PlanarObject(Object):
         self, 
         positions: Tensor, 
         patches: Tensor, 
+        integer_mode: bool = False,
         *args, **kwargs
     ):
         """
@@ -204,13 +214,21 @@ class PlanarObject(Object):
             The origin of the given positions are assumed to be `self.center_pixel`.
         patches : Tensor
             Tensor of shape (n_patches, n_slices, H, W) of image patches.
+        integer_mode : bool, optional
+            If True, the patches are placed at the exact center between pixels,
+            so that no interpolation is needed.
         """
         positions = positions + self.center_pixel
         updated_slices = []
         for i_slice in range(self.n_slices):
-            image = self.place_patches_function(
-                self.get_slice(i_slice), positions, patches[:, i_slice, ...]
-            )
+            if integer_mode:
+                image = ip.place_patches_integer(
+                    self.get_slice(i_slice), positions, patches[:, i_slice, ...], op="add"
+                )
+            else:
+                image = self.place_patches_function(
+                    self.get_slice(i_slice), positions, patches[:, i_slice, ...], op="add"
+                )
             updated_slices.append(image)
         updated_slices = torch.stack(updated_slices, dim=0)
         self.tensor.set_data(updated_slices)
@@ -220,6 +238,7 @@ class PlanarObject(Object):
         self, 
         positions: Tensor, 
         patches: Tensor, 
+        integer_mode: bool = False,
         *args, **kwargs
     ):
         """
@@ -232,6 +251,9 @@ class PlanarObject(Object):
             The origin of the given positions are assumed to be `self.center_pixel`.
         patches : Tensor
             Tensor of shape (N, H, W) of image patches.
+        integer_mode : bool, optional
+            If True, the patches are placed at the exact center between pixels,
+            so that no interpolation is needed.
 
         Returns
         -------
@@ -242,7 +264,10 @@ class PlanarObject(Object):
         image = torch.zeros(
             self.lateral_shape, dtype=get_default_complex_dtype(), device=self.tensor.data.device
         )
-        image = self.place_patches_function(image, positions, patches, op="add")
+        if integer_mode:
+            image = ip.place_patches_integer(image, positions, patches, op="add")
+        else:
+            image = self.place_patches_function(image, positions, patches, op="add")
         return image
     
     def get_object_in_roi(self):

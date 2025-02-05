@@ -24,6 +24,173 @@ logger = logging.getLogger(__name__)
 
 
 @timer()
+def batch_slice(image: Tensor, sy: Tensor, sx: Tensor, ey: Tensor, ex: Tensor) -> Tensor:
+    """
+    Slice patches from an image at given window positions. The patch size is determined
+    from the starting and ending coordinates in each direction, and is assumed to be
+    the same for all patches.
+    
+    Parameters
+    ----------
+    image : Tensor
+        A (H, W) tensor of the image.
+    sy : Tensor
+        A (N,) tensor of integers giving the starting y-coordinates of the patches.
+    sx : Tensor
+        A (N,) tensor of integers giving the starting x-coordinates of the patches.
+    ey : Tensor
+        A (N,) tensor of integers giving the ending y-coordinates of the patches.
+    ex : Tensor
+        A (N,) tensor of integers giving the ending x-coordinates of the patches.
+
+    Returns
+    -------
+    Tensor
+        A tensor of shape (N, h, w) containing the extracted patches.
+    """
+    h, w = image.shape[-2:]
+    patch_size = [ey[0] - sy[0], ex[0] - sx[0]]
+    x = torch.arange(patch_size[1])[None, :]
+    y = torch.arange(patch_size[0])[None, :]
+    x = x.expand(len(sx), x.shape[1])
+    y = y.expand(len(sy), y.shape[1])
+    x = x + sx[:, None]
+    y = y + sy[:, None]
+    inds = (y * w).unsqueeze(-1) + x.unsqueeze(1)
+    patches = image.view(-1)[inds.view(-1)]
+    patches = patches.reshape(len(sy), patch_size[0], patch_size[1])
+    return patches
+    
+
+def batch_put(
+    image: Tensor, 
+    patches: Tensor, 
+    sy: Tensor, 
+    sx: Tensor, 
+    ey: Tensor, 
+    ex: Tensor, 
+    op: Literal["add", "set"] = "add"
+) -> Tensor:
+    """
+    Slice patches from an image at given window positions. The patch size is determined
+    from the starting and ending coordinates in each direction, and is assumed to be
+    the same for all patches.
+    
+    Parameters
+    ----------
+    image : Tensor
+        A (H, W) tensor of the buffer to place the patches into.
+    patches : Tensor
+        A (N, h, w) tensor of the patches.
+    sy : Tensor
+        A (N,) tensor of integers giving the starting y-coordinates of the patches.
+    sx : Tensor
+        A (N,) tensor of integers giving the starting x-coordinates of the patches.
+    ey : Tensor
+        A (N,) tensor of integers giving the ending y-coordinates of the patches.
+    ex : Tensor
+        A (N,) tensor of integers giving the ending x-coordinates of the patches.
+    op : Literal["add", "set"]
+        The operation to perform. "add" adds the patches to the image, 
+        "set" sets the patches to the image replacing the existing values.
+    
+    Returns
+    -------
+    Tensor
+        A tensor of shape (H, W) containing the image with patches added or set.
+    """
+    h, w = image.shape[-2:]
+    patch_size = [ey[0] - sy[0], ex[0] - sx[0]]
+    x = torch.arange(patch_size[1])[None, :]
+    y = torch.arange(patch_size[0])[None, :]
+    x = x.expand(len(sx), x.shape[1])
+    y = y.expand(len(sy), y.shape[1])
+    x = x + sx[:, None]
+    y = y + sy[:, None]
+    inds = (y * w).unsqueeze(-1) + x.unsqueeze(1)
+    image = image.reshape(-1)
+    image.index_put_((inds.view(-1),), patches.view(-1), accumulate=(op == "add"))
+    return image.reshape(h, w)
+
+
+@timer()
+def extract_patches_integer(
+    image: Tensor, positions: Tensor, shape: Tuple[int, int]
+) -> Tensor:
+    """
+    Extract patches from 2D object, assuming the positions are at the
+    exact center between pixels, so that no interpolation is needed. 
+    If a patch's footprint goes outside the image,
+    the image is padded with zeros to account for the missing pixels.
+
+    Parameters
+    ----------
+    image : Tensor
+        The whole image.
+    positions : Tensor
+        A tensor of shape (N, 2) giving the center positions of the patches in pixels.
+        The origin of the given positions are assumed to be the TOP LEFT corner of the image.
+        For even patch shapes, the positions are assumed be at half pixels (i.e., positions % 1 == 0.5)
+        so that the starting and ending coordinates of the patches are integers.
+    shape : tuple of int
+        A tuple giving the patch shape in pixels.
+
+    Returns
+    -------
+    Tensor
+        A tensor of shape (N, H, W) containing the extracted patches.
+    """
+    sys = (positions[:, 0] - (shape[0] - 1.0) / 2.0).round().int()
+    sxs = (positions[:, 1] - (shape[1] - 1.0) / 2.0).round().int()
+    eys = sys + shape[0]
+    exs = sxs + shape[1]
+    patches = batch_slice(image, sys, sxs, eys, exs)
+    return patches
+
+
+@timer()
+def place_patches_integer(
+    image: Tensor, 
+    positions: Tensor, 
+    patches: Tensor, 
+    op: Literal["add", "set"] = "add"
+) -> Tensor:
+    """
+    Place patches into a 2D object, assuming the positions are at the
+    exact center between pixels, so that no interpolation is needed. 
+    If a patch's footprint goes outside the image,
+    the image is padded with zeros to account for the missing pixels.
+
+    Parameters
+    ----------
+    image : Tensor
+        The whole image to place the patches into.
+    positions : Tensor
+        A tensor of shape (N, 2) giving the center positions of the patches in pixels.
+        The origin of the given positions are assumed to be the TOP LEFT corner of the image.
+        For even patch shapes, the positions are assumed be at half pixels (i.e., positions % 1 == 0.5)
+        so that the starting and ending coordinates of the patches are integers.
+    patches : Tensor
+        A (N, H, W) or (H, W) tensor of image patches.
+    op : Literal["add", "set"]
+        The operation to perform. "add" adds the patches to the image, 
+        "set" sets the patches to the image replacing the existing values.
+
+    Returns
+    -------
+    Tensor
+        A tensor with the same shape as the object with patches added onto it.
+    """
+    shape = patches.shape[-2:]
+    sys = (positions[:, 0] - (shape[0] - 1.0) / 2.0).round().int()
+    sxs = (positions[:, 1] - (shape[1] - 1.0) / 2.0).round().int()
+    eys = sys + shape[0]
+    exs = sxs + shape[1]
+    image = batch_put(image, patches, sys, sxs, eys, exs, op=op)
+    return image
+
+
+@timer()
 def extract_patches_fourier_shift(
     image: Tensor, positions: Tensor, shape: Tuple[int, int]
 ) -> Tensor:
@@ -72,11 +239,7 @@ def extract_patches_fourier_shift(
     sxs = sxs + pad_lengths[0]
     exs = exs + pad_lengths[0]
 
-    patches = []
-    for sy, ey, sx, ex in zip(sys, eys, sxs, exs):
-        p = image[sy:ey, sx:ex]
-        patches.append(p)
-    patches = torch.stack(patches)
+    patches = batch_slice(image, sys, sxs, eys, exs)
 
     # Apply Fourier shift to account for fractional shifts
     if not torch.allclose(fractional_shifts, torch.zeros_like(fractional_shifts), atol=1e-7):
@@ -168,11 +331,7 @@ def place_patches_fourier_shift(
 
     inline_timer = InlineTimer("add or set patches on image")
     inline_timer.start()
-    for i in range(patches.shape[0]):
-        if op == "add":
-            image[sys[i] : eys[i], sxs[i] : exs[i]] += patches[i]
-        elif op == "set":
-            image[sys[i] : eys[i], sxs[i] : exs[i]] = patches[i]
+    image = batch_put(image, patches, sys, sxs, eys, exs, op=op)
     inline_timer.end()
 
     # Undo padding
