@@ -252,7 +252,7 @@ class ObjectOptions(ParameterOptions):
     )
 
     patch_interpolation_method: enums.PatchInterpolationMethods = (
-        enums.PatchInterpolationMethods.BILINEAR
+        enums.PatchInterpolationMethods.FOURIER
     )
     """The interpolation method used for extracting and updating patches of the object."""
     
