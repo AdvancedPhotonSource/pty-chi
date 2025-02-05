@@ -293,7 +293,7 @@ class ProbeOrthogonalizeIncoherentModesOptions(FeatureOptions):
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
-    method: enums.OrthogonalizationMethods = enums.OrthogonalizationMethods.GS
+    method: enums.OrthogonalizationMethods = enums.OrthogonalizationMethods.SVD
     """The method to use for incoherent_mode orthogonalization."""
 
 

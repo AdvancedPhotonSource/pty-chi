@@ -146,6 +146,13 @@ def orthogonalize_svd(
     # Straighten dimensions given by `dim`.`
     # Shape of x:        (bcast_dims_shape, prod(dim_shape), group_dim_shape)
     x = x.reshape(batch_dim_shape + [-1] + group_dim_shape)
+    
+    # Use higher precision.
+    orig_dtype = x.dtype
+    if orig_dtype.is_complex:
+        x = x.type(torch.complex128)
+    else:
+        x = x.type(torch.float64)
 
     # Creat an shape(group_dim) x shape(group_dim) covariance matrix and eigendecompose it.
     if x.ndim == 2:
@@ -178,7 +185,7 @@ def orthogonalize_svd(
         new_norm = norm(x, dim=list(dim) + [group_dim], keepdims=True)
         x = x * (orig_norm / new_norm)
 
-    return x
+    return x.type(orig_dtype)
 
 
 def project(a, b, dim=None):

@@ -223,8 +223,9 @@ class Probe(dsbase.ReconstructParameter):
         )
 
         # Restore norm.
-        norm_first_mode_new = pmath.norm(probe[0, 0], dim=(-2, -1))
-        probe = probe * norm_first_mode_orig / norm_first_mode_new
+        if self.orthogonalize_incoherent_modes_method != "svd":
+            norm_first_mode_new = pmath.norm(probe[0, 0], dim=(-2, -1))
+            probe = probe * norm_first_mode_orig / norm_first_mode_new
 
         self.set_data(probe)
 
