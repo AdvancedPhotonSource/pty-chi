@@ -236,10 +236,10 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             )
                 
             # Calculate probe update direction.
-            delta_p_i = self._calculate_probe_update_direction(
+            delta_p_i_unshifted = self._calculate_probe_update_direction(
                 chi, obj_patches=obj_patches, slice_index=i_slice, probe_mode_index=None
             )  # Eq. 24a
-            delta_p_i = self.adjoint_shift_probe_update_direction(indices, delta_p_i, first_mode_only=True)
+            delta_p_i = self.adjoint_shift_probe_update_direction(indices, delta_p_i_unshifted, first_mode_only=True)
             delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
             if i_slice == 0:
                 if not self.parameter_group.opr_mode_weights.is_dummy:
@@ -295,7 +295,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 )
             
             # Set chi to conjugate-modulated wavefield.
-            chi = delta_p_i
+            chi = delta_p_i_unshifted
 
         mean_alpha_o_all_slices = pmath.trim_mean(self.alpha_object_all_pos_all_slices[indices], 0.1, dim=0)
         if (
