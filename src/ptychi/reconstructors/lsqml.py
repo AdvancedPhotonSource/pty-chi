@@ -217,7 +217,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 # then the delta_o_i used should also be calculated using only the first
                 # probe mode.
                 delta_o_i_mode_0_raw = self._calculate_object_patch_update_direction(chi, psi_im1=probe_current_slice, probe_mode_index=0)
-                delta_o_comb_mode_0 = self._combine_object_patch_update_directions(delta_o_i_mode_0_raw, positions, onto_accumulated=True)
+                delta_o_comb_mode_0 = self._combine_object_patch_update_directions(delta_o_i_mode_0_raw, positions, onto_accumulated=True, slice_index=i_slice)
                 _, delta_o_i_mode_0 = self._precondition_object_update_direction(
                     delta_o_comb_mode_0, positions
                 )
@@ -227,7 +227,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 delta_o_i_raw = self._calculate_object_patch_update_direction(
                     chi, psi_im1=probe_current_slice, probe_mode_index=None
                 )
-                delta_o_comb = self._combine_object_patch_update_directions(delta_o_i_raw, positions, onto_accumulated=True)
+                delta_o_comb = self._combine_object_patch_update_directions(delta_o_i_raw, positions, onto_accumulated=True, slice_index=i_slice)
             else:
                 delta_o_i_raw = delta_o_i_mode_0_raw
                 delta_o_comb = delta_o_comb_mode_0
@@ -649,7 +649,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         return delta_o_patches[:, None, :, :]
 
     @timer()
-    def _combine_object_patch_update_directions(self, delta_o_patches, positions, onto_accumulated=False):
+    def _combine_object_patch_update_directions(self, delta_o_patches, positions, onto_accumulated=False, slice_index=0):
         """
         Combine the update directions of object patches into a buffer with the
         same size as the whole object.
@@ -676,7 +676,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         )
         delta_o_hat = delta_o_hat[None, ...]
         if onto_accumulated:
-            delta_o_hat = delta_o_hat + (-self.parameter_group.object.get_grad())
+            delta_o_hat = delta_o_hat + (-self.parameter_group.object.get_grad()[slice_index:slice_index + 1])
         return delta_o_hat
 
     @timer()
