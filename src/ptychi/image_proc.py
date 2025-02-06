@@ -826,14 +826,14 @@ def integrate_image_2d_fourier(grad_y: Tensor, grad_x: Tensor) -> Tensor:
         The integrated image.
     """
     shape = grad_y.shape
-    f = torch.fft.fft2(grad_x + 1j * grad_y)
+    f = pmath.fft2_precise(grad_x + 1j * grad_y)
     y, x = torch.fft.fftfreq(shape[0]), torch.fft.fftfreq(shape[1])
 
     r = torch.exp(2j * torch.pi * (x + y[:, None]))
     r = r / (2j * torch.pi * (x + 1j * y[:, None]))
     r[0, 0] = 0
     integrated_image = f * r
-    integrated_image = torch.fft.ifft2(integrated_image)
+    integrated_image = pmath.ifft2_precise(integrated_image)
     if not torch.is_complex(grad_x):
         integrated_image = integrated_image.real
     return integrated_image
@@ -877,10 +877,10 @@ def integrate_image_2d_deconvolution(
     if tf_y is None or tf_x is None:
         tf_y = 2j * torch.pi * u
         tf_x = 2j * torch.pi * v
-    f_grad_y = torch.fft.fft2(grad_y)
-    f_grad_x = torch.fft.fft2(grad_x)
+    f_grad_y = pmath.fft2_precise(grad_y)
+    f_grad_x = pmath.fft2_precise(grad_x)
     img = (f_grad_y * tf_y + f_grad_x * tf_x) / (tf_y.abs() ** 2 + tf_x.abs() ** 2 + 1e-5)
-    img = -torch.fft.ifft2(img)
+    img = -pmath.ifft2_precise(img)
     img = img + bc_center - img[img.shape[0] // 2, img.shape[1] // 2]
     return img
 
@@ -1222,7 +1222,7 @@ def remove_grid_artifacts(
     center_y, center_x = math.floor(ny / 2) + 1, math.floor(nx / 2) + 1
 
     k_max = 0.5 / pixel_size_m
-    f_img = torch.fft.fftshift(torch.fft.fft2(img))
+    f_img = torch.fft.fftshift(pmath.fft2_precise(img))
     # Frequencies of the artifacts.
     dk_s_y, dk_s_x = 1 / period_y_m, 1 / period_x_m
 
