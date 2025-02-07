@@ -119,6 +119,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
                 self.options.chunk_length,
             )
         )
+        end_pts[-1] = min(end_pts[-1], probe_positions.n_scan_points)
         n_chunks = math.ceil(probe_positions.n_scan_points / self.options.chunk_length)
 
         # Initialize the exit wave
@@ -186,7 +187,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         positions = self.parameter_group.probe_positions.tensor
 
         obj_patches = object_.extract_patches(
-            positions[start_pt:end_pt].int().round(), probe.get_spatial_shape(), integer_mode=True
+            positions[start_pt:end_pt].round().int(), probe.get_spatial_shape(), integer_mode=True
         )
         psi = self.forward_model.forward_real_space(
             indices=torch.arange(start_pt, end_pt, device=obj_patches.device).long(),
@@ -245,7 +246,6 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
     @timer()
     def add_to_probe_update_terms(
         self,
-        indices: Tensor,
         probe_numerator: Tensor,
         probe_denominator: Tensor,
         obj_patches: Tensor,
@@ -254,10 +254,14 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
     ):
         "Add to the running totals for the probe update numerator and denominator"
         indices = torch.arange(start_pt, end_pt, device=probe_numerator.device).long()
-        numerator_update = (obj_patches.conj() * self.psi[start_pt:end_pt]).sum(0)
-        denominator_update = (obj_patches.abs() ** 2).sum(0)
+        numerator_update = (obj_patches.conj() * self.psi[start_pt:end_pt])
+        denominator_update = (obj_patches.abs() ** 2)
+        # Before summing in the batch dimension, the updates should be adjointly shifted to backpropagate
+        # through the subpixel shifts of the probe. 
         numerator_update = self.adjoint_shift_probe_update_direction(indices, numerator_update, first_mode_only=True)
         denominator_update = self.adjoint_shift_probe_update_direction(indices, denominator_update, first_mode_only=True)
+        numerator_update = numerator_update.sum(0)
+        denominator_update = denominator_update.sum(0)
         probe_numerator += numerator_update
         probe_denominator += denominator_update
 
@@ -278,12 +282,17 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             
             object_numerator = ip.place_patches_integer(
                 object_numerator,
-                positions[start_pts[i] : end_pts[i]].int().round() + object_.center_pixel,
+                positions[start_pts[i] : end_pts[i]].round().int() + object_.center_pixel,
                 (p.conj() * self.psi[start_pts[i] : end_pts[i]]).sum(1),
                 op="add",
             )
 
-        self.update_object_preconditioner(use_all_modes=True)
+            self.parameter_group.object.update_preconditioner(
+                probe=self.parameter_group.probe,
+                probe_positions=self.parameter_group.probe_positions,
+                patterns=self.dataset.patterns,
+                use_all_modes=True
+            )
         object_denominator = self.parameter_group.object.preconditioner
 
         updated_object = object_numerator / torch.sqrt(

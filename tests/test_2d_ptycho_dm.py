@@ -35,6 +35,7 @@ class Test2DPtychoDM(tutils.TungstenDataTester):
         options.probe_position_options.optimizable = False
         
         options.reconstructor_options.num_epochs = 8
+        options.reconstructor_options.chunk_length = 100
         
         task = PtychographyTask(options)
         task.run()
