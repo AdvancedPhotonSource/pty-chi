@@ -65,6 +65,18 @@ class TestPatchExtractionPlacement(tutils.BaseTester):
         x_ahy = torch.sum(image_replaced * image)
         assert torch.allclose(ax_y, x_ahy)
         
+    def test_patch_extraction_placement_int(self):        
+        positions = torch.tensor([[5, 5], [20, 20], [15, 20]]) + 0.5
+        image = torch.arange(32 * 32).reshape(32, 32)
+        
+        patches = ip.extract_patches_integer(image, positions, (8, 8))
+        image_replaced = ip.place_patches_integer(torch.zeros_like(image), positions, patches, op="add")
+                
+        ax_y = torch.sum(patches.abs() ** 2)
+        x_ahy = torch.sum(image_replaced * image)
+        assert torch.allclose(ax_y, x_ahy)
+        assert torch.all(patches.sum(-1).sum(-1) == torch.tensor([11616, 43296, 33056]))
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -75,3 +87,4 @@ if __name__ == '__main__':
     tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=True)
     tester.test_patch_extraction_placement_set_ordinary()
     tester.test_patch_extraction_placement_add_adjoint()
+    tester.test_patch_extraction_placement_int()

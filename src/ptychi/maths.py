@@ -283,18 +283,72 @@ def polyval(x: torch.Tensor, coeffs: torch.Tensor):
     return (coeffs * x.view(-1, 1) ** torch.arange(len(coeffs) - 1, -1, -1)).sum(1)
 
 
+def real_dtype_to_complex(dtype: torch.dtype) -> torch.dtype:
+    """Convert a real dtype to a complex dtype with the same precision.
+    If a complex dtype is provided, it is returned unchanged.
+
+    Parameters
+    ----------
+    dtype : torch.dtype
+        The real dtype to convert.
+
+    Returns
+    -------
+    torch.dtype
+        The complex dtype with the same precision.
+    """
+    if dtype.is_complex:
+        return dtype
+    elif dtype == torch.float64:
+        return torch.complex128
+    elif dtype == torch.float32:
+        return torch.complex64
+    elif dtype == torch.float16:
+        return torch.complex32
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype}")
+    
+
+def complex_dtype_to_real(dtype: torch.dtype) -> torch.dtype:
+    """Convert a complex dtype to a real dtype with the same precision.
+    If a real dtype is provided, it is returned unchanged.
+
+    Parameters
+    ----------
+    dtype : torch.dtype
+        The complex dtype to convert.
+
+    Returns
+    -------
+    torch.dtype
+        The real dtype with the same precision.
+    """
+    if not dtype.is_complex:
+        return dtype
+    elif dtype == torch.complex128:
+        return torch.float64
+    elif dtype == torch.complex64:
+        return torch.float32
+    elif dtype == torch.complex32:
+        return torch.float16
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype}")
+
+
 def fft2_precise(x, norm=None):
     """
     2D FFT with double precision.
     """
-    return torch.fft.fft2(x.type(torch.complex128), norm=norm).type(x.dtype)
+    final_dtype = real_dtype_to_complex(x.dtype)
+    return torch.fft.fft2(x.type(torch.complex128), norm=norm).type(final_dtype)
 
 
 def ifft2_precise(x, norm=None):
     """
     2D FFT with double precision.
     """
-    return torch.fft.ifft2(x.type(torch.complex128), norm=norm).type(x.dtype)
+    final_dtype = real_dtype_to_complex(x.dtype)
+    return torch.fft.ifft2(x.type(torch.complex128), norm=norm).type(final_dtype)
 
 
 def is_all_integer(x: torch.Tensor) -> bool:
