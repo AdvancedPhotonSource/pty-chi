@@ -109,7 +109,11 @@ def batch_put(
     y = y + sy[:, None]
     inds = (y * w).unsqueeze(-1) + x.unsqueeze(1)
     image = image.reshape(-1)
-    image.index_put_((inds.view(-1),), patches.view(-1), accumulate=(op == "add"))
+    try:
+        patches_flattened = patches.view(-1)
+    except RuntimeError:
+        patches_flattened = patches.reshape(-1)
+    image.index_put_((inds.view(-1),), patches_flattened, accumulate=(op == "add"))
     return image.reshape(h, w)
 
 
