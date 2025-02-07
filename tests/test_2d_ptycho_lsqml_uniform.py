@@ -26,6 +26,7 @@ class Test2DPtychoLSQMLUniform(tutils.TungstenDataTester):
         options.object_options.optimizable = True
         options.object_options.optimizer = api.Optimizers.SGD
         options.object_options.step_size = 1
+        options.object_options.build_preconditioner_with_all_modes = True
         
         options.probe_options.initial_guess = probe
         options.probe_options.optimizable = True

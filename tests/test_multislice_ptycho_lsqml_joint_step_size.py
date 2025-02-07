@@ -26,6 +26,7 @@ class TestMultislicePtychoLsqmlJointStepSize(tutils.TungstenDataTester):
         options.object_options.optimizable = True
         options.object_options.optimizer = api.Optimizers.SGD
         options.object_options.step_size = 1
+        options.object_options.build_preconditioner_with_all_modes = True
         
         options.probe_options.initial_guess = probe
         options.probe_options.optimizable = True
@@ -40,7 +41,7 @@ class TestMultislicePtychoLsqmlJointStepSize(tutils.TungstenDataTester):
         options.opr_mode_weight_options.optimizable = True
         options.opr_mode_weight_options.update_relaxation = 0.1
         
-        options.reconstructor_options.batch_size = 44
+        options.reconstructor_options.batch_size = 96
         options.reconstructor_options.noise_model = api.NoiseModels.GAUSSIAN
         options.reconstructor_options.num_epochs = 8
         options.reconstructor_options.solve_obj_prb_step_size_jointly_for_first_slice_in_multislice = True

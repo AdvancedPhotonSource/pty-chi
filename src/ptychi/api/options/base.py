@@ -259,6 +259,14 @@ class ObjectOptions(ParameterOptions):
     remove_object_probe_ambiguity: RemoveObjectProbeAmbiguityOptions = field(
         default_factory=RemoveObjectProbeAmbiguityOptions
     )
+    
+    build_preconditioner_with_all_modes: bool = False
+    """If True, the probe illumination map used for the preconditioner is 
+    built using the sum of intensities of all probe modes. This may help address
+    some issues if some probe modes contain highly localized high-intensity anomalies,
+    if the selected reconstructor uses preconditioner to regularize object updates.
+    However, it might lead to slower convergence speed.
+    """
 
     def get_non_data_fields(self) -> dict:
         d = super().get_non_data_fields()

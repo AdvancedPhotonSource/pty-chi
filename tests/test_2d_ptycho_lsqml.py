@@ -25,6 +25,7 @@ class Test2dPtychoLsqml(tutils.TungstenDataTester):
         options.object_options.optimizable = True
         options.object_options.optimizer = api.Optimizers.SGD
         options.object_options.step_size = 1
+        options.object_options.build_preconditioner_with_all_modes = True
         
         options.probe_options.initial_guess = probe
         options.probe_options.optimizable = True
@@ -60,6 +61,7 @@ class Test2dPtychoLsqml(tutils.TungstenDataTester):
         options.object_options.optimizable = True
         options.object_options.optimizer = api.Optimizers.SGD
         options.object_options.step_size = 1
+        options.object_options.build_preconditioner_with_all_modes = True
         
         options.probe_options.initial_guess = probe
         options.probe_options.optimizable = True
@@ -70,19 +72,22 @@ class Test2dPtychoLsqml(tutils.TungstenDataTester):
         options.probe_position_options.position_y_px = positions_px[:, 0]
         options.probe_position_options.optimizable = True
         options.probe_position_options.optimizer = api.Optimizers.SGD
-        options.probe_position_options.step_size = 0.1
         options.probe_position_options.magnitude_limit.enabled = True
-        options.probe_position_options.magnitude_limit.limit = 2.0
+        options.probe_position_options.magnitude_limit.limit = 5.0
         options.probe_position_options.correction_options.correction_type = api.PositionCorrectionTypes.GRADIENT
 
         options.reconstructor_options.batch_size = 96
         options.reconstructor_options.noise_model = api.NoiseModels.GAUSSIAN
-        options.reconstructor_options.num_epochs = 8
+        options.reconstructor_options.num_epochs = 32
             
         task = PtychographyTask(options)
         task.run()
         
         recon = task.get_data_to_cpu('object', as_numpy=True)[0]
+        if self.debug and not self.generate_gold:
+            pos = task.get_data_to_cpu('probe_positions', as_numpy=True)
+            _, _, _, pos_true = self.load_tungsten_data(pos_type='true')
+            tutils.plot_probe_positions(pos, pos_true)
         return recon
     
     @tutils.TungstenDataTester.wrap_recon_tester(name='test_2d_ptycho_lsqml_opr')
@@ -99,6 +104,7 @@ class Test2dPtychoLsqml(tutils.TungstenDataTester):
         options.object_options.optimizable = True
         options.object_options.optimizer = api.Optimizers.SGD
         options.object_options.step_size = 1
+        options.object_options.build_preconditioner_with_all_modes = True
         
         options.probe_options.initial_guess = probe
         options.probe_options.optimizable = True
@@ -111,11 +117,10 @@ class Test2dPtychoLsqml(tutils.TungstenDataTester):
         
         options.opr_mode_weight_options.initial_weights = generate_initial_opr_mode_weights(len(positions_px), probe.shape[0])
         options.opr_mode_weight_options.optimizable = True
-        options.opr_mode_weight_options.update_relaxation = 0.1
         
         options.reconstructor_options.batch_size = 44
         options.reconstructor_options.noise_model = api.NoiseModels.GAUSSIAN
-        options.reconstructor_options.num_epochs = 8
+        options.reconstructor_options.num_epochs = 32
         
         task = PtychographyTask(options)
         task.run()
