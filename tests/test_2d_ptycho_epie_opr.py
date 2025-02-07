@@ -47,13 +47,13 @@ class Test2dPtychoEpieOPR(tutils.TungstenDataTester):
         options.probe_position_options.optimizable = False
 
         options.opr_mode_weight_options.initial_weights = generate_initial_opr_mode_weights(
-            len(positions_px), probe.shape[0], eigenmode_weight=0.1
+            len(positions_px), probe.shape[0]
         )
         options.opr_mode_weight_options.optimizable = True
         options.opr_mode_weight_options.update_relaxation = 0.1
 
         options.reconstructor_options.batch_size = 96
-        options.reconstructor_options.num_epochs = 8
+        options.reconstructor_options.num_epochs = 32
 
         task = PtychographyTask(options)
         task.run()
@@ -97,7 +97,7 @@ class Test2dPtychoEpieOPR(tutils.TungstenDataTester):
         options.probe_position_options.optimizable = False
 
         options.opr_mode_weight_options.initial_weights = generate_initial_opr_mode_weights(
-            len(positions_px), probe.shape[0], eigenmode_weight=0.1
+            len(positions_px), probe.shape[0]
         )
         options.opr_mode_weight_options.optimizable = True
         options.opr_mode_weight_options.update_relaxation = 0.1

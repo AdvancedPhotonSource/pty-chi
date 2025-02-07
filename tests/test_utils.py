@@ -281,6 +281,15 @@ def plot_multislice_phase(img):
         ax[i].imshow(np.angle(img[i, ...]))
         ax[i].set_title('slice {}'.format(i))
     plt.show()
+    
+    
+def plot_probe_positions(pos, pos_true=None):
+    import matplotlib.pyplot as plt
+    plt.scatter(pos[:, 1], pos[:, 0], label="reconstructed")
+    if pos_true is not None:
+        plt.scatter(pos_true[:, 1], pos_true[:, 0], label="true")
+    plt.legend()
+    plt.show()
 
 
 def get_timing_data_dir():

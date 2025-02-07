@@ -91,8 +91,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         obj_patches = self.forward_model.intermediate_variables["obj_patches"]
         psi = self.forward_model.intermediate_variables["psi"]
         psi_far = self.forward_model.intermediate_variables["psi_far"]
-
-        p = self.forward_model.intermediate_variables["shifted_unique_probes"]
+        unique_probes = self.forward_model.intermediate_variables["shifted_unique_probes"]
 
         psi_prime = self.replace_propagated_exit_wave_magnitude(psi_far, y_true)
         # Do not swap magnitude for bad pixels.
@@ -103,13 +102,13 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         delta_o = None
         if object_.optimization_enabled(self.current_epoch):
-            step_weight = self.calculate_object_step_weight(p)
+            step_weight = self.calculate_object_step_weight(unique_probes)
             delta_o_patches = step_weight * (psi_prime - psi)
-            delta_o_patches = delta_o_patches.sum(1)
+            delta_o_patches = delta_o_patches.sum(1, keepdim=True)
             delta_o = ip.place_patches_integer(
                 torch.zeros_like(object_.get_slice(0)),
-                positions.int().round() + object_.center_pixel,
-                delta_o_patches,
+                positions.round().int() + object_.center_pixel,
+                delta_o_patches[:, 0],
                 op="add",
             )
             # Add slice dimension.
@@ -160,7 +159,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         Returns
         -------
         Tensor
-            A (batch_size, h, w) tensor giving the weight for the object update step.
+            A (batch_size, n_modes, h, w) tensor giving the weight for the object update step.
         """
         numerator = p.abs() * p.conj()
         denominator = p.abs().sum(1, keepdim=True).max() * (
@@ -245,7 +244,7 @@ class EPIEReconstructor(PIEReconstructor):
 
     @timer()
     def calculate_object_step_weight(self, p: Tensor):
-        p_max = (torch.abs(p) ** 2).sum(0).max()
+        p_max = (torch.abs(p) ** 2).sum(1).max()
         step_weight = self.parameter_group.object.options.alpha * p.conj() / p_max
         return step_weight
 
@@ -283,7 +282,7 @@ class RPIEReconstructor(PIEReconstructor):
 
     @timer()
     def calculate_object_step_weight(self, p: Tensor):
-        p_max = (torch.abs(p) ** 2).sum(0).max()
+        p_max = (torch.abs(p) ** 2).sum(1).max()
         step_weight = p.conj() / (
             (1 - self.parameter_group.object.options.alpha) * (torch.abs(p) ** 2)
             + self.parameter_group.object.options.alpha * p_max

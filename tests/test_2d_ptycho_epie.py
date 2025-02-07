@@ -38,7 +38,7 @@ class Test2DPtychoEPIE(tutils.TungstenDataTester):
         options.probe_position_options.position_y_px = positions_px[:, 0]
         options.probe_position_options.optimizable = False
         
-        options.reconstructor_options.batch_size = 96
+        options.reconstructor_options.batch_size = 100
         options.reconstructor_options.num_epochs = 32
         
         task = PtychographyTask(options)

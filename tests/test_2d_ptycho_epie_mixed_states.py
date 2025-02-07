@@ -52,6 +52,10 @@ class Test2DPtychoEpieMixedStates(tutils.TungstenDataTester):
         task.run()
 
         recon = task.get_data_to_cpu('object', as_numpy=True)[0]
+        if self.debug and not self.generate_gold:
+            pos = task.get_data_to_cpu('probe_positions', as_numpy=True)
+            _, _, _, pos_true = self.load_tungsten_data(pos_type='true')
+            tutils.plot_probe_positions(pos, pos_true)
         return recon
     
     
