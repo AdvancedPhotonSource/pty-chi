@@ -35,11 +35,11 @@ class PositionCorrection:
         Parameters
         ----------
         chi : torch.Tensor
-            A (batch_size, h, w) tensor of the exit wave update.
+            A (batch_size, n_modes, h, w) tensor of the exit wave update.
         obj_patches : torch.Tensor
             A (batch_size, n_slices, h, w) tensor of patches of the object.
         delta_o_patches : torch.Tensor
-            A (batch_size, h, w) tensor of patches of the update to be applied to the object.
+            A (batch_size, n_slices or 1, h, w) tensor of patches of the update to be applied to the object.
         unique_probes : torch.Tensor
             A (batch_size, n_modes, h, w) tensor of unique probes for all positions in the batch.
         object_step_size : float
@@ -75,6 +75,7 @@ class PositionCorrection:
         """
         # Just take the first slice.
         obj_patches = obj_patches[:, 0]
+        delta_o_patches = delta_o_patches[:, 0]
         
         updated_obj_patches = obj_patches + delta_o_patches * object_step_size
 
@@ -86,8 +87,8 @@ class PositionCorrection:
 
         for i in range(n_positions):
             delta_pos[i] = -find_cross_corr_peak(
-                updated_obj_patches[i] * probe_mask,
-                obj_patches[i] * probe_mask,
+                updated_obj_patches[i] * probe_mask[i],
+                obj_patches[i] * probe_mask[i],
                 scale=self.cross_correlation_scale,
                 real_space_width=self.cross_correlation_real_space_width,
             )
