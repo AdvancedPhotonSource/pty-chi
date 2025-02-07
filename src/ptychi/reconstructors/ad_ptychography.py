@@ -36,14 +36,6 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
         self.forward_model_params["free_space_propagation_distance_m"] = self.dataset.free_space_propagation_distance_m
         return super().build_forward_model()
 
-    def run_pre_epoch_hooks(self) -> None:
-        if (
-            self.parameter_group.object.is_multislice
-            and self.parameter_group.object.options.multislice_regularization.weight > 0
-        ):
-            self.update_preconditioners()
-        return super().run_pre_epoch_hooks()
-
     def run_post_differentiation_hooks(self, input_data, y_true):
         super().run_post_differentiation_hooks(input_data, y_true)
 

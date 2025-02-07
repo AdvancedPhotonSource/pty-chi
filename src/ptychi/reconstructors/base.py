@@ -331,7 +331,7 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             )
         return super().build_dataloader(batch_sampler=batch_sampler)
 
-    def update_preconditioners(self, use_all_probe_modes_for_object_preconditioner=False):
+    def update_preconditioners(self):
         # Update preconditioner of the object only if:
         # - the preconditioner does not exist, or
         # - it is within the 10 epochs after the probe starts being optimized, or
@@ -351,6 +351,9 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
                 probe_positions=self.parameter_group.probe_positions,
                 patterns=self.dataset.patterns,
             )
+            
+    def run_pre_epoch_hooks(self) -> None:
+        self.update_preconditioners()
 
     def run_post_epoch_hooks(self) -> None:
         with torch.no_grad():

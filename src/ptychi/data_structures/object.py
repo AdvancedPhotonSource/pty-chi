@@ -474,7 +474,7 @@ class PlanarObject(Object):
         # Stitch probes of all positions on the object buffer
         # TODO: allow setting chunk size externally
         probe_sq_map = chunked_processing(
-            func=self.place_patches_function,
+            func=ip.place_patches_integer,
             common_kwargs={"op": "add"},
             chunkable_kwargs={
                 "positions": positions_all.round().int() + self.center_pixel,
@@ -492,6 +492,7 @@ class PlanarObject(Object):
         probe: "ds.probe.Probe",
         probe_positions: "ds.probe_positions.ProbePositions",
         patterns: Tensor = None,
+        use_all_modes: bool = False,
     ) -> None:
         """Update the preconditioner. This function reproduces the behavior
         of PtychoShelves in `ptycho_solver`: it averages the new illumination
@@ -506,10 +507,12 @@ class PlanarObject(Object):
         patterns : Tensor, optional
             A (n_scan_points, h, w) tensor giving the diffraction patterns. Only needed
             if the preconditioner does not exist and needs to be initialized.
+        use_all_modes : bool, optional
+            Whether to use the sum of all probe modes' intensities for the illumination map.
         """
         if self.preconditioner is None:
             self.initialize_preconditioner(probe, probe_positions, patterns)
-        illum_map = self.calculate_illumination_map(probe, probe_positions, use_all_modes=False)
+        illum_map = self.calculate_illumination_map(probe, probe_positions, use_all_modes=use_all_modes)
         self.preconditioner = (self.preconditioner + illum_map) / 2
     
     def initialize_preconditioner(

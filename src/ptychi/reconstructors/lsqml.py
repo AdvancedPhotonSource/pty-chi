@@ -979,7 +979,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.prepare_data()
 
     def run_pre_epoch_hooks(self) -> None:
-        self.update_preconditioners()
+        super().run_pre_epoch_hooks()
         self.accumulated_fourier_error = 0.0
         self.indices = []
 
