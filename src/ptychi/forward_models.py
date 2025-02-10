@@ -576,18 +576,37 @@ class PlanarPtychographyForwardModel(ForwardModel):
         (2) divide it by (abs(o) ** 2).max() to make up the ePIE scaling factor
             (but we can assume this is 1.0);
         (3) divide it by batch_size to make up the mean over the batch dimension.
+        
+        For probe positions and OPR weights, we just compensate for the mean reduction:
+        (1) multiply it by h * w.
         """
         # Directly modify the gradients here. Tensor.register_hook has memory leak issue.
         if self.object.optimizable:
-            self.object.tensor.data.grad = (
-                self.object.tensor.data.grad
+            self.object.set_grad(
+                self.object.get_grad()
                 / self.probe.get_all_mode_intensity().max()
                 * patterns.numel()
             )
         # Assuming (obj_patches.abs() ** 2).max() == 1.0
         if self.probe.optimizable:
-            self.probe.tensor.data.grad = self.probe.tensor.data.grad * (
-                patterns.numel() / len(patterns)
+            self.probe.set_grad(
+                self.probe.get_grad() * (
+                    patterns.numel() / len(patterns)
+                )
+            )
+            
+        if self.probe_positions.optimizable:
+            self.probe_positions.set_grad(
+                self.probe_positions.get_grad() * (
+                    patterns.numel() / len(patterns)
+                )
+            )
+            
+        if self.opr_mode_weights.optimizable:
+            self.opr_mode_weights.set_grad(
+                self.opr_mode_weights.get_grad() * (
+                    patterns.numel() / len(patterns)
+                )
             )
 
 
