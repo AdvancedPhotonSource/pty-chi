@@ -2,8 +2,6 @@ from typing import Literal, Optional, Tuple, Union
 
 import torch
 import numpy as np
-import cupy
-import cupyx.scipy.fft as cupyfft
 
 from ptychi.timing.timer_utils import timer
 
