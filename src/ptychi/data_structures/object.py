@@ -364,19 +364,13 @@ class PlanarObject(Object):
         aobj_upd = 1 + 0.9 * (aobj_upd - 1)
 
         # Find correction for phase.
-        # The weight map is clipped at 0.1. Values that are too close to 0 would result in
-        # small but non-zero pixels in the image after it is multiplied with the weight map.
-        # During phase unwrapping, if the phase gradient is calculated using finite difference
-        # with Fourier shift, these values can dangle around 0, causing the phase of the
-        # complex gradient to flip between pi and -pi.
         w_phase = torch.clip(10 * (self.preconditioner / self.preconditioner.max()), max=1)
-        w_phase_clipped = torch.clip(w_phase, min=0.1)
 
         if self.options.multislice_regularization.unwrap_phase:
             pobj = [
                 ip.unwrap_phase_2d(
                     obj[i_slice],
-                    weight_map=w_phase_clipped,
+                    weight_map=w_phase,
                     fourier_shift_step=0.5,
                     image_grad_method=self.options.multislice_regularization.unwrap_image_grad_method,
                     image_integration_method=self.options.multislice_regularization.unwrap_image_integration_method,
