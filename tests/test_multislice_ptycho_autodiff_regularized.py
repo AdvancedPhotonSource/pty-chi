@@ -34,7 +34,7 @@ class TestMultislicePtychoAutodiffRegularized(tutils.BaseTester):
         options.object_options.optimizer = api.Optimizers.ADAM
         options.object_options.step_size = 1e-3
         options.object_options.multislice_regularization.enabled = True
-        options.object_options.multislice_regularization.weight = 0.1
+        options.object_options.multislice_regularization.weight = 1.0
         options.object_options.multislice_regularization.unwrap_image_grad_method = api.enums.ImageGradientMethods.FOURIER_DIFFERENTIATION
         
         options.probe_options.initial_guess = probe
@@ -53,7 +53,7 @@ class TestMultislicePtychoAutodiffRegularized(tutils.BaseTester):
         options.reconstructor_options.forward_model_class = api.ForwardModels.PLANAR_PTYCHOGRAPHY
         options.reconstructor_options.loss_function = api.LossFunctions.MSE_SQRT
         options.reconstructor_options.batch_size = 101
-        options.reconstructor_options.num_epochs = 4
+        options.reconstructor_options.num_epochs = 8
         options.reconstructor_options.default_device = api.Devices.GPU
         options.reconstructor_options.random_seed = 123
         
