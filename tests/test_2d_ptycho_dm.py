@@ -91,9 +91,9 @@ if __name__ == "__main__":
     parser.add_argument("--generate-gold", action="store_true")
     args = parser.parse_args()
 
-    # tester = Test2DPtychoDM()
-    # tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=True)
-    # tester.test_2d_ptycho_dm()
+    tester = Test2DPtychoDM()
+    tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=True)
+    tester.test_2d_ptycho_dm()
 
     tester=Test2DPtychoDMPositionCorrection()
     tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=True)
