@@ -156,7 +156,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
                 )
             if probe_positions.optimization_enabled(self.current_epoch):
                 delta_pos[start_pts[i] : end_pts[i]] = self.get_positions_update_chunk(
-                    indices=list(range(start_pts[i], end_pts[i])),
+                    indices=torch.Tensor(list(range(start_pts[i], end_pts[i]))).to(int),
                     obj_patches=obj_patches,
                     chi=self.psi[start_pts[i] : end_pts[i]] - new_psi,
                 )
