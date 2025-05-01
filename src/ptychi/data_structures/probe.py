@@ -467,9 +467,9 @@ class SynthesisDictLearnProbe( Probe ):
         self.build_optimizer()
 
     def get_dictionary(self):
-        dictionary_matrix = torch.tensor( self.options.experimental.sdl_probe_options.D, dtype=torch.complex64 )
-        dictionary_matrix_pinv = torch.tensor( self.options.experimental.sdl_probe_options.D_pinv, dtype=torch.complex64 )
-        dictionary_matrix_H = torch.tensor( self.options.experimental.sdl_probe_options.DH, dtype=torch.complex64 )
+        dictionary_matrix = torch.tensor( self.options.experimental.sdl_probe_options.d_mat, dtype=torch.complex64 )
+        dictionary_matrix_pinv = torch.tensor( self.options.experimental.sdl_probe_options.d_mat_pinv, dtype=torch.complex64 )
+        dictionary_matrix_H = torch.tensor( self.options.experimental.sdl_probe_options.d_mat_conj_transpose, dtype=torch.complex64 )
         return dictionary_matrix, dictionary_matrix_pinv, dictionary_matrix_H
 
     def get_initial_weights(self):

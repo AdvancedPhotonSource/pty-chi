@@ -20,13 +20,6 @@ class PIEObjectOptions(base.ObjectOptions):
     """
     Multiplier for the update to the object, as defined in table 1 of Maiden (2017).
     """
-    
-    multimodal_update: bool = True
-    """
-    If True, object update direction is calculated and summed over all probe modes. 
-    Otherwise, only the first mode will be used for object update. However, forward
-    propagation always uses all probe modes regardless of this option.
-    """
 
 
 @dataclasses.dataclass

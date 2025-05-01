@@ -553,18 +553,25 @@ class ProbeOptions(ParameterOptions):
 @dataclasses.dataclass
 class SynthesisDictLearnProbeOptions( Options ):
     
-    D:      Union[ndarray, Tensor] = None
-    DH:     Union[ndarray, Tensor] = None
-    D_pinv: Union[ndarray, Tensor] = None
+    d_mat: Union[ndarray, Tensor] = None
+    # the synthesis sparse dictionary matrix; contains the basis functions 
+    # that will be used to represent the probe via the sparse code weights
+    
+    d_mat_conj_transpose: Union[ndarray, Tensor] = None
+    # conjugate transpose of the synthesis sparse dictionary matrix
+    
+    d_mat_pinv: Union[ndarray, Tensor] = None
+    # Moore-Penrose pseudoinverse of the synthesis sparse dictionary matrix
     
     probe_sparse_code: Union[ndarray, Tensor] = None
+    # sparse code weights vector
     
     probe_sparse_code_nnz: float = None
+    # number of non-zeros we will keep when enforcing sparsity constraint on
+    # the sparse code weights vector probe_sparse_code
     
     enabled: bool = False
 
-    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
-    
 @dataclasses.dataclass
 class PositionCorrectionOptions(Options):
     """Options used for specifying the position correction function."""
