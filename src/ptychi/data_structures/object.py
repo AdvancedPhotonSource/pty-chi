@@ -565,30 +565,6 @@ class PlanarObject(Object):
             chunk_size=64,
         )
         
-        # from mpl_toolkits.axes_grid1 import make_axes_locatable
-        # import matplotlib as mpl
-        # #mpl.use('Agg')
-        # mpl.use('TKAgg')
-        # # mpl.use('WebAgg')
-        # import matplotlib.pyplot as plt
-        # import numpy as np
-    
-        # fig, ax1 = plt.subplots( nrows = 1, ncols = 1, )
-        # plt.subplots_adjust(wspace=0.5, hspace=0.3)
-        # A = probe_sq_map.detach().cpu().numpy()
-
-        # pos1 = ax1.imshow( A, cmap = 'bone',  ) # vmin=0.5, vmax=1.2
-        # #ax1.title.set_text( 'object proj abs' )
-        # #ax1.title.set_size( 8 )
-        # divider = make_axes_locatable(ax1)
-        # cax = divider.append_axes("right", size="5%", pad=0.05)
-        # plt.colorbar(pos1, cax=cax)
-        # #plt.show( block = False ) 
-        # #import os
-        
-        # plt.savefig( 'debug_plotting', dpi = 300 )
-        # plt.close('all')
-    
         return probe_sq_map
 
     def update_preconditioner(
@@ -617,40 +593,6 @@ class PlanarObject(Object):
         if self.preconditioner is None:
             self.initialize_preconditioner(probe, probe_positions, patterns)
         illum_map = self.calculate_illumination_map(probe, probe_positions, use_all_modes=use_all_modes)
-        
-        
-        # from mpl_toolkits.axes_grid1 import make_axes_locatable
-        # import matplotlib as mpl
-        # #mpl.use('Agg')
-        # mpl.use('TKAgg')
-        # # mpl.use('WebAgg')
-        # import matplotlib.pyplot as plt
-        # import numpy as np
-        
-        # fig, ( ax1, ax2 ) = plt.subplots( nrows = 1, ncols = 2, )
-        # plt.subplots_adjust(wspace=0.5, hspace=0.3)
-
-
-        # pos1 = ax1.imshow( illum_map.detach().cpu().numpy(), cmap = 'bone',  ) # vmin=0.5, vmax=1.2
-        # ax1.title.set_text( 'illum_map' )
-        # ax1.title.set_size( 8 )
-        # divider = make_axes_locatable(ax1)
-        # cax = divider.append_axes("right", size="5%", pad=0.05)
-        # plt.colorbar(pos1, cax=cax)
-        # #plt.show( block = False ) 
-
-        # pos2 = ax2.imshow( self.preconditioner.detach().cpu().numpy(), cmap = 'bone',  )     # vmin=-0.3, vmax=0.3 
-        # ax2.title.set_text( 'self.preconditioner' )
-        # ax2.title.set_size( 8 )
-        # divider = make_axes_locatable(ax2)
-        # cax = divider.append_axes("right", size="5%", pad=0.05)
-        # plt.colorbar(pos2, cax=cax)
-        # #plt.show( block = False ) 
-        
-        # plt.savefig( 'test_debug.png', dpi = 300 )
-        # plt.close('all')
-        
-        
         self.preconditioner = (self.preconditioner + illum_map) / 2
     
     def initialize_preconditioner(

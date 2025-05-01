@@ -487,19 +487,6 @@ class ProbeCenterConstraintOptions(FeatureOptions):
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
-
-@dataclasses.dataclass
-class ProbeSynthesisSparseDictLearnOptions(FeatureOptions):
-    
-    D:      Union[ndarray, Tensor] = None
-    Dpinv:  Union[ndarray, Tensor] = None
-    
-    C_p: Union[ndarray, Tensor] = None
-
-    enabled: bool = False
-
-    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
-    
 @dataclasses.dataclass
 class ProbeOptions(ParameterOptions):
     """
@@ -540,10 +527,6 @@ class ProbeOptions(ParameterOptions):
     """
     A separate step size for eigenmode update.
     """
-    
-    sDL: ProbeSynthesisSparseDictLearnOptions = field(
-        default_factory = ProbeSynthesisSparseDictLearnOptions
-    )
     
     def check(self, options: "task_options.PtychographyTaskOptions"):
         super().check(options)

@@ -89,7 +89,6 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         obj_patches = self.forward_model.intermediate_variables["obj_patches"]
         psi = self.forward_model.intermediate_variables["psi"]
         psi_far = self.forward_model.intermediate_variables["psi_far"]
-        #unique_probes = self.forward_model.intermediate_variables.shifted_unique_probes[0]
         unique_probes = self.forward_model.intermediate_variables.shifted_unique_probes
         
         psi_prime = self.replace_propagated_exit_wave_magnitude(psi_far, y_true)
@@ -104,9 +103,6 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         for i_slice in range(object_.n_slices - 1, -1, -1):
             
-            # PUT THIS IN PIE RECONST?    
-            #probe_current_slice = self._get_incident_wavefields_for_slice(i_slice)
-                
             if object_.optimization_enabled(self.current_epoch):
                 step_weight = self.calculate_object_step_weight(unique_probes[i_slice])
                 delta_o_patches = step_weight * delta_exwv_i
@@ -127,8 +123,6 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                 delta_p_i = self.adjoint_shift_probe_update_direction(indices, delta_p_i, first_mode_only=True)
                 
             if i_slice > 0:
-                #unique_probes[i_slice] = unique_probes[i_slice] + delta_p_i
-                #unique_probes[i_slice - 1] = self.forward_model.propagate_to_previous_slice(unique_probes[i_slice], slice_index = i_slice )
                 delta_exwv_i = self.forward_model.propagate_to_previous_slice(delta_p_i, slice_index = i_slice )
                 
         delta_pos = None

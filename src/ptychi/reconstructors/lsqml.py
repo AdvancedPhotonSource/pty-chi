@@ -231,44 +231,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 indices, delta_p_i_unshifted, first_mode_only=True
             )
             
-            
-  
-            # from mpl_toolkits.axes_grid1 import make_axes_locatable
-            # import matplotlib as mpl
-            # #mpl.use('Agg')
-            # mpl.use('TKAgg')
-            # # mpl.use('WebAgg')
-            # import matplotlib.pyplot as plt
-            # import numpy as np
-            
-            # fig, ax1 = plt.subplots( nrows = 1, ncols = 1, )
-            # plt.subplots_adjust(wspace=0.5, hspace=0.3)
-
-            # pos1 = ax1.imshow( np.abs( delta_p_i_unshifted[22, 0, ...].detach().cpu().numpy()), cmap = 'bone',  ) # vmin=0.5, vmax=1.2
-            # ax1.title.set_text( 'delta_p_i_unshifted' )
-            # ax1.title.set_size( 8 )
-            # divider = make_axes_locatable(ax1)
-            # cax = divider.append_axes("right", size="5%", pad=0.05)
-            # plt.colorbar(pos1, cax=cax)
-            # #plt.show( block = False ) 
-            # plt.savefig( 'delta_p_i_unshifted.png', dpi = 300 )
-            # plt.close('all')
-            
-            # fig, ax1 = plt.subplots( nrows = 1, ncols = 1, )
-            # plt.subplots_adjust(wspace=0.5, hspace=0.3)
-            # pos1 = ax1.imshow( np.abs( delta_p_i[22, 0, ...].detach().cpu().numpy()), cmap = 'bone',  )     # vmin=-0.3, vmax=0.3 
-            # ax1.title.set_text( 'delta_p_i' )
-            # ax1.title.set_size( 8 )
-            # divider = make_axes_locatable(ax1)
-            # cax = divider.append_axes("right", size="5%", pad=0.05)
-            # plt.colorbar(pos1, cax=cax)
-            # #plt.show( block = False ) 
-            
-            # plt.savefig( 'delta_p_i.png', dpi = 300 )
-            # plt.close('all')
-            
-            
-            
             delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
 
             # Update OPR modes and weights.
@@ -310,11 +272,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 self._record_object_slice_gradient(i_slice, delta_o_precond, add_to_existing=False)
             else:
                 self._record_object_slice_gradient(i_slice, delta_o_comb, add_to_existing=False)
-
-
-
-
-
             if self.parameter_group.probe_positions.optimization_enabled(
                 self.current_epoch
             ) and i_slice == self.parameter_group.probe_positions.get_slice_for_correction(
@@ -333,7 +290,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
             # Set chi to conjugate-modulated wavefield.
             chi = delta_p_i_unshifted
-            #chi = delta_p_i
 
         mean_alpha_o_all_slices = pmath.trim_mean(
             self.alpha_object_all_pos_all_slices[indices], 0.1, dim=0
