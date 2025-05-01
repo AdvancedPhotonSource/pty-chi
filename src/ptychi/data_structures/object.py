@@ -369,7 +369,7 @@ class PlanarObject(Object):
         alpha = self.options.smoothness_constraint.alpha
         if alpha > 1.0 / 8:
             logger.warning(f"Alpha = {alpha} in smoothness constraint should be less than 1/8.")
-        psf = torch.ones(3, 3, device=self.data.device) * alpha
+        psf = torch.ones(3, 3, device=self.tensor.data.device) * alpha
         psf[2, 2] = 1 - 8 * alpha
 
         data = self.data
