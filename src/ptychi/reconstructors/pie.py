@@ -90,7 +90,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         psi = self.forward_model.intermediate_variables["psi"]
         psi_far = self.forward_model.intermediate_variables["psi_far"]
         unique_probes = self.forward_model.intermediate_variables.shifted_unique_probes
-        
+
         psi_prime = self.replace_propagated_exit_wave_magnitude(psi_far, y_true)
         # Do not swap magnitude for bad pixels.
         psi_prime = torch.where(

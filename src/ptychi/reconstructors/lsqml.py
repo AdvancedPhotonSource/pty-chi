@@ -230,7 +230,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             delta_p_i = self.adjoint_shift_probe_update_direction(
                 indices, delta_p_i_unshifted, first_mode_only=True
             )
-            
             delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
 
             # Update OPR modes and weights.
@@ -272,6 +271,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 self._record_object_slice_gradient(i_slice, delta_o_precond, add_to_existing=False)
             else:
                 self._record_object_slice_gradient(i_slice, delta_o_comb, add_to_existing=False)
+
             if self.parameter_group.probe_positions.optimization_enabled(
                 self.current_epoch
             ) and i_slice == self.parameter_group.probe_positions.get_slice_for_correction(

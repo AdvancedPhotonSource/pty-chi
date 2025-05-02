@@ -564,7 +564,6 @@ class PlanarObject(Object):
             },
             chunk_size=64,
         )
-        
         return probe_sq_map
 
     def update_preconditioner(

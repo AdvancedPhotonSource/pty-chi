@@ -487,6 +487,7 @@ class ProbeCenterConstraintOptions(FeatureOptions):
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
+
 @dataclasses.dataclass
 class ProbeOptions(ParameterOptions):
     """
@@ -527,7 +528,7 @@ class ProbeOptions(ParameterOptions):
     """
     A separate step size for eigenmode update.
     """
-    
+
     def check(self, options: "task_options.PtychographyTaskOptions"):
         super().check(options)
         if not (self.initial_guess is not None and self.initial_guess.ndim == 4):
