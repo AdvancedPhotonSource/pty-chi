@@ -1,3 +1,6 @@
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 import numpy as np
 from typing import Optional
 import h5py

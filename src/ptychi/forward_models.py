@@ -1,7 +1,9 @@
-import math
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 import logging
 import dataclasses
-from typing import Optional, TYPE_CHECKING, TypedDict
+from typing import Optional, TYPE_CHECKING
 import torch
 from torch import Tensor
 from torch.nn import ModuleList
@@ -81,9 +83,9 @@ class ForwardModel(torch.nn.Module):
     def record_intermediate_variable(self, name, var):
         if self.retain_intermediates:
             if isinstance(self.intermediate_variables[name], list):
-                self.intermediate_variables[name].append(var)
+                self.intermediate_variables[name].append(var.detach())
             else:
-                self.intermediate_variables[name] = var
+                self.intermediate_variables[name] = var.detach()
 
 
 class PlanarPtychographyForwardModel(ForwardModel):

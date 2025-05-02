@@ -1,3 +1,6 @@
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 from typing import TYPE_CHECKING
 
 import torch
@@ -37,7 +40,7 @@ class ProbePositions(dsbase.ReconstructParameter):
             options=options.correction_options
         )
     
-        self.register_buffer("initial_positions", self.data)
+        self.register_buffer("initial_positions", self.data.detach())
         self.register_buffer(
             "affine_transform_matrix", 
             self.get_identity_affine_transform_matrix()

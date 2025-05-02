@@ -1,10 +1,12 @@
-from typing import List, Optional
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
+from typing import Optional
 import numpy as np
 
 from .settings import MovieFileSettings, MovieFileTypes
 
 from .mappings import prepare_movie_subject, movie_setting_types
-from .settings import ProbeMovieSettings
 from .io import append_array_to_h5, save_movie_to_file
 import os
 import h5py

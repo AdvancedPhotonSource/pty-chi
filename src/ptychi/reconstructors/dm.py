@@ -1,3 +1,6 @@
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 from typing import Optional, TYPE_CHECKING, Tuple, Union
 import logging
 
@@ -7,7 +10,6 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 import math
 
-from ptychi.api import enums
 import ptychi.api as api
 from ptychi.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,

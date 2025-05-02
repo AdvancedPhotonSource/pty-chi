@@ -1,3 +1,6 @@
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 from typing import Optional, TYPE_CHECKING
 
 import torch
@@ -213,7 +216,6 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
             A (n_positions, 2) tensor of probe position vectors.
         """
         object_ = self.parameter_group.object
-        probe = self.parameter_group.probe
         probe_positions = self.parameter_group.probe_positions
 
         if delta_o is not None:

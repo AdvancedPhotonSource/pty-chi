@@ -1,3 +1,6 @@
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 from typing import Tuple, Literal, Optional, Protocol
 import math
 import logging
@@ -1610,8 +1613,12 @@ def unwrap_phase_2d(
     # Pad image to avoid FFT boundary artifacts.
     padding = [64, 64]
     if torch.any(torch.tensor(padding) > 0):
+        if img.shape[-2] > padding[0] and img.shape[-1] > padding[1]:
+            padding_mode = "reflect"
+        else:
+            padding_mode = "replicate"
         img = torch.nn.functional.pad(
-            img[None, None, :, :], (padding[1], padding[1], padding[0], padding[0]), mode="reflect"
+            img[None, None, :, :], (padding[1], padding[1], padding[0], padding[0]), mode=padding_mode
         )[0, 0]
         img = vignette(img, margin=10, sigma=2.5)
 

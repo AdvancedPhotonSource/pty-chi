@@ -1,3 +1,6 @@
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 from typing import Literal, Union, overload
 from types import TracebackType
 import random
@@ -261,6 +264,41 @@ class PtychographyTask(Task):
         if as_numpy:
             data = data.cpu().numpy()
         return data
+    
+    def copy_data_from_task(
+        self, 
+        task: "PtychographyTask",
+        params_to_copy: tuple[str, ...] = ("object", "probe", "probe_positions", "opr_mode_weights")
+    ) -> None:
+        """Copy data of reconstruction parameters from another task object.
+
+        Parameters
+        ----------
+        task : PtychographyTask
+            The task object to copy from.
+        params_to_copy : tuple[str, ...], optional
+            The parameters to copy. By default, copy all parameters.
+        """
+        with torch.no_grad():
+            for param in params_to_copy:
+                if param == "object":
+                    self.reconstructor.parameter_group.object.set_data(
+                        task.get_data("object")
+                    )
+                elif param == "probe":
+                    self.reconstructor.parameter_group.probe.set_data(
+                        task.get_data("probe")
+                    )
+                elif param == "probe_positions":
+                    self.reconstructor.parameter_group.probe_positions.set_data(
+                        task.get_data("probe_positions")
+                    )
+                elif param == "opr_mode_weights":
+                    self.reconstructor.parameter_group.opr_mode_weights.set_data(
+                        task.get_data("opr_mode_weights")
+                    )
+                else:
+                    raise ValueError(f"Invalid parameter name: {param}")
 
     def __exit__(self, exc_type, exc_value, exc_tb):
         del self.object

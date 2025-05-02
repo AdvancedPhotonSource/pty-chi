@@ -1,3 +1,6 @@
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 from typing import Optional, Union, TYPE_CHECKING, Sequence
 import dataclasses
 from dataclasses import field
@@ -228,7 +231,13 @@ class RemoveObjectProbeAmbiguityOptions(FeatureOptions):
 class SliceSpacingOptions(ParameterOptions):
     
     optimizable: bool = False
-    """Whether the slice spacings are optimizable."""
+    """Whether the slice spacings are optimizable.
+    
+    Known issue: slice spacing optimization only works with AutodiffPtychography, and we
+    have to use `loss.backward(retain_graph=True)` to make it work with AD. This might
+    result in growing per-epoch walltime and memory usage. We are working on a better
+    solution.
+    """
     
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
     
@@ -415,6 +424,12 @@ class ObjectOptions(ParameterOptions):
                     "`object_options.center_coords` will be disregarded when "
                     "`object_options.determine_center_coords_by` is not set to "
                     "`SPECIFIED`."
+                )
+                
+        if self.smoothness_constraint.enabled:
+            if self.smoothness_constraint.alpha > 1.0 / 8 or self.smoothness_constraint.alpha < 0:
+                raise ValueError(
+                    f"smoothness_constraint.alpha = {self.smoothness_constraint.alpha} is out of range [0, 1/8]."
                 )
 
 

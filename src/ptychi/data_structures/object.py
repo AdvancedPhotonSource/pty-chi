@@ -1,3 +1,6 @@
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 from typing import Tuple, TYPE_CHECKING, Optional
 import logging
 import copy
@@ -14,7 +17,6 @@ from ptychi.timing.timer_utils import timer
 import ptychi.api.enums as enums
 from ptychi.utils import (
     get_default_complex_dtype, 
-    to_tensor, 
     to_numpy, 
     chunked_processing,
     get_probe_renormalization_factor
@@ -374,9 +376,9 @@ class PlanarObject(Object):
 
         data = self.data
         for i_slice in range(self.n_slices):
-            mag = data[i_slice].abs()
-            mag = ip.convolve2d(mag, psf, "same")
-            data[i_slice] = data[i_slice] / data[i_slice].abs() * mag
+            slc0 = data[i_slice]
+            slc = ip.convolve2d(slc0, psf, "same")
+            data[i_slice] = slc
         self.set_data(data)
 
     @timer()

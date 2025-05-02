@@ -1,3 +1,6 @@
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 from typing import Optional, Union, TYPE_CHECKING
 import logging
 import os
@@ -443,7 +446,7 @@ class DIPProbe(Probe):
     
     def __init__(
         self,
-        name: str = "object",
+        name: str = "probe",
         options: "api.options.ad_ptychography.AutodiffPtychographyProbeOptions" = None,
         *args,
         **kwargs

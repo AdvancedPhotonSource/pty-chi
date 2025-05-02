@@ -88,11 +88,7 @@ class Test2dPtychoLsqmlMultiscan(tutils.TungstenDataTester):
                 task.run(1)
                 # Copy object to next task
                 if i_task < len(all_tasks) - 1:
-                    obj = task.get_data("object")
-                    # It is important to set the object in a no_grad context since `set_data`
-                    # is an in-place operation and would be prohibited otherwise.
-                    with torch.no_grad():
-                        all_tasks[i_task + 1].reconstructor.parameter_group.object.set_data(obj)
+                    all_tasks[i_task + 1].copy_data_from_task(task, params_to_copy=("object",))
         
         recon = all_tasks[-1].get_data_to_cpu('object', as_numpy=True)[0]
         return recon

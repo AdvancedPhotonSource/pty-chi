@@ -1,3 +1,6 @@
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 from typing import Union, Optional
 import dataclasses
 
@@ -5,6 +8,9 @@ from numpy import ndarray, inf
 from torch import Tensor
 
 import ptychi.api.options.base as base
+
+
+__all__ = ["PtychographyDataOptions"]
 
 
 @dataclasses.dataclass

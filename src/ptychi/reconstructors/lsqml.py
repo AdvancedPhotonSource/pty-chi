@@ -1,3 +1,6 @@
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 from typing import Optional, TYPE_CHECKING
 import logging
 import math
@@ -9,7 +12,6 @@ from ptychi.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
     LossTracker,
 )
-import ptychi.data_structures.base as dsbase
 import ptychi.forward_models as fm
 import ptychi.maths as pmath
 import ptychi.api.enums as enums
@@ -1094,31 +1096,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.parameter_group.probe_positions.step_optimizer(
             limit=self.parameter_group.probe_positions.options.correction_options.update_magnitude_limit
         )
-
-    @timer()
-    def _calculate_fourier_probe_position_update_direction(self, chi, positions, obj_patches):
-        """
-        Eq. 28 of Odstrcil (2018).
-        """
-        raise NotImplementedError
-        probe = self.parameter_group.probe.tensor.complex()
-        f_probe = torch.fft.fft2(probe)
-
-        # coord_ramp = torch.fft.fftfreq(probe.shape[-2])
-        # dp = 2j * torch.pi * coord_ramp[:, None] * obj_patches[:, None, :, :] * probe[None, :, :, :]
-        # nom_y = (dp.conj() * chi).real()
-        # denom_y = dp.abs() ** 2
-
-        # coord_ramp = torch.fft.fftfreq(probe.shape[-1])
-        # dp = 2j * torch.pi * coord_ramp[None, :] * obj_patches[:, None, :, :] * probe[None, :, :, :]
-        # nom_x = (dp.conj() * chi).real()
-        # denom_x = dp.abs() ** 2
-
-        coord_ramp = torch.fft.fftfreq(probe.shape[-2])
-        delta_p_y = torch.ifft2(2 * torch.pi * coord_ramp[:, None] * 1j * f_probe)
-
-        coord_ramp = torch.fft.fftfreq(probe.shape[-1])
-        delta_p_x = torch.ifft2(2 * torch.pi * coord_ramp[None, :] * 1j * f_probe)
 
     @timer()
     def _calculate_final_object_update_step_size(self):

@@ -1,3 +1,6 @@
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -6,7 +9,7 @@ import cmath
 import math
 
 import torch
-from torch.fft import fft2, fftfreq, ifft2
+from torch.fft import fftfreq
 
 from ptychi.timing.timer_utils import timer
 import ptychi.maths as pmath
@@ -112,7 +115,7 @@ class WavefieldPropagatorParameters:
         FY, FX = torch.meshgrid(fy, fx, indexing="ij")
         FY = FY.to(torch.get_default_device())
         FX = FX.to(torch.get_default_device())
-        return FY, FX
+        return FY.detach(), FX.detach()
     
     def is_fresnel_transform_preferrable(self) -> bool:
         n_eff = math.sqrt(float(self.height_px) * float(self.width_px))

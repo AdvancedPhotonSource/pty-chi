@@ -1,3 +1,6 @@
+# Copyright © 2025 UChicago Argonne, LLC All right reserved
+# Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
+
 from typing import Optional, Union
 import logging
 import math
@@ -38,6 +41,10 @@ class PtychographyDataset(Dataset):
         if valid_pixel_mask is None:
             valid_pixel_mask = torch.ones(self.patterns.shape[-2:])
         self.valid_pixel_mask = to_tensor(valid_pixel_mask, device="cpu", dtype=torch.bool)
+        
+        if fft_shift:
+            self.valid_pixel_mask = torch.fft.fftshift(self.valid_pixel_mask, dim=(-2, -1))
+            logger.info("Valid pixel mask have been FFT-shifted.")
 
         self.wavelength_m = wavelength_m
         self.free_space_propagation_distance_m = free_space_propagation_distance_m
@@ -296,7 +303,6 @@ class PtychographyUniformBatchSampler(torch.utils.data.Sampler):
         return math.ceil(len(self.positions) / self.batch_size)
 
     def __iter__(self):
-        self.build_indices()
         for i in np.random.choice(range(len(self)), len(self), replace=False):
             yield self.batches_of_indices[i]
 
