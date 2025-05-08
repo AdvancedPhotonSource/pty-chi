@@ -117,21 +117,22 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                     op="add",
                 )
                 
-                delta_o[i_slice, ... ] = delta_o_i
+                delta_o[i_slice, ...] = delta_o_i
                 
             delta_p_i = None
             if probe.optimization_enabled(self.current_epoch):
-                step_weight = self.calculate_probe_step_weight((obj_patches[ :, i_slice, ... ])[:, None, ...])
+                step_weight = self.calculate_probe_step_weight((obj_patches[:, i_slice, ...])[:, None, ...])
                 delta_p_i = step_weight * delta_exwv_i  # get delta p at each position
 
             delta_pos = None
-            if probe_positions.optimization_enabled(self.current_epoch) and object_.optimizable and i_slice == self.parameter_group.probe_positions.get_slice_for_correction(
-                    object_.n_slices
-                ):
+            if (probe_positions.optimization_enabled(self.current_epoch) 
+                and object_.optimizable 
+                and i_slice == self.parameter_group.probe_positions.get_slice_for_correction(object_.n_slices)
+            ):
                 delta_pos = torch.zeros_like(probe_positions.data)
                 delta_pos[indices] = probe_positions.position_correction.get_update(
                     delta_exwv_i,   
-                    obj_patches[:, i_slice : i_slice + 1,...],        
+                    obj_patches[:, i_slice : i_slice + 1, ...],        
                     delta_o_patches,
                     self.forward_model.intermediate_variables.shifted_unique_probes[i_slice],
                     object_.optimizer_params["lr"],
@@ -139,7 +140,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                 
             if i_slice > 0:
                 delta_exwv_i = delta_exwv_i * obj_patches[:, i_slice : i_slice + 1,...].conj()
-                delta_exwv_i = self.forward_model.propagate_to_previous_slice(delta_exwv_i, slice_index = i_slice )
+                delta_exwv_i = self.forward_model.propagate_to_previous_slice(delta_exwv_i, slice_index=i_slice)
                 
         # Calculate and apply opr mode updates
         if self.parameter_group.opr_mode_weights.optimization_enabled(self.current_epoch):
@@ -153,6 +154,8 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                 self.current_epoch,
                 probe_mode_index=0,
             )
+        # Undo subpixel shift in probe update directions.
+        delta_p_i = self.adjoint_shift_probe_update_direction(indices, delta_p_i, first_mode_only=True)
 
         return (delta_o, delta_p_i, delta_pos), y
 
