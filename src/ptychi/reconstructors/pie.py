@@ -102,7 +102,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         psi_prime = self.forward_model.free_space_propagator.propagate_backward(psi_prime)
         
         delta_exwv_i = (psi_prime - psi)
-        delta_o = torch.zeros_like( object_.data )
+        delta_o = torch.zeros_like(object_.data)
 
         for i_slice in range(object_.n_slices - 1, -1, -1):
             
@@ -121,30 +121,32 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                 
             delta_p_i = None
             if probe.optimization_enabled(self.current_epoch):
-                step_weight = self.calculate_probe_step_weight( (obj_patches[ :, i_slice, ... ])[:, None, ...])
+                step_weight = self.calculate_probe_step_weight((obj_patches[ :, i_slice, ... ])[:, None, ...])
                 delta_p_i = step_weight * delta_exwv_i  # get delta p at each position
-                delta_p_i = self.adjoint_shift_probe_update_direction(indices, delta_p_i, first_mode_only=True)
+
+            delta_pos = None
+            if probe_positions.optimization_enabled(self.current_epoch) and object_.optimizable and i_slice == self.parameter_group.probe_positions.get_slice_for_correction(
+                    object_.n_slices
+                ):
+                delta_pos = torch.zeros_like(probe_positions.data)
+                delta_pos[indices] = probe_positions.position_correction.get_update(
+                    delta_exwv_i,   
+                    obj_patches[:, i_slice : i_slice + 1,...],        
+                    delta_o_patches,
+                    self.forward_model.intermediate_variables.shifted_unique_probes[i_slice],
+                    object_.optimizer_params["lr"],
+                )
                 
             if i_slice > 0:
-                delta_exwv_i = self.forward_model.propagate_to_previous_slice(delta_p_i, slice_index = i_slice )
+                delta_exwv_i = delta_exwv_i * obj_patches[:, i_slice : i_slice + 1,...].conj()
+                delta_exwv_i = self.forward_model.propagate_to_previous_slice(delta_exwv_i, slice_index = i_slice )
                 
-        delta_pos = None
-        if probe_positions.optimization_enabled(self.current_epoch) and object_.optimizable:
-            delta_pos = torch.zeros_like(probe_positions.data)
-            delta_pos[indices] = probe_positions.position_correction.get_update(
-                psi_prime - psi,    # delta_exwv_i                      ( FOR WHICH SLICE? )
-                obj_patches,        # obj_patches[ :, i_slice, ... ]    ( FOR WHICH SLICE? )
-                delta_o_patches,
-                self.forward_model.intermediate_variables.shifted_unique_probes[0],
-                object_.optimizer_params["lr"],
-            )
-            
         # Calculate and apply opr mode updates
         if self.parameter_group.opr_mode_weights.optimization_enabled(self.current_epoch):
             opr_mode_weights.update_variable_probe(
                 probe,
                 indices,
-                psi_prime - psi,
+                delta_exwv_i,
                 delta_p_i,
                 delta_p_i.mean(0),
                 obj_patches,
@@ -169,11 +171,19 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         Tensor
             A (batch_size, n_modes, h, w) tensor giving the weight for the object update step.
         """
+        # numerator = p.abs() * p.conj()
+        # denominator = p.abs().sum(1, keepdim=True).max() * (
+        #     p.abs() ** 2 + self.parameter_group.object.options.alpha * (p.abs() ** 2).sum(1, keepdim=True).max()
+        # )
+        # step_weight = numerator / denominator
+        
+        
         numerator = p.abs() * p.conj()
         denominator = p.abs().sum(1, keepdim=True).max() * (
-            p.abs() ** 2 + self.parameter_group.object.options.alpha * (p.abs() ** 2).sum(1, keepdim=True).max()
+            p.abs().sum(1, keepdim=True) ** 2 + self.parameter_group.object.options.alpha * (p.abs() ** 2).sum(1, keepdim=True).max()
         )
-        step_weight = numerator / denominator
+        step_weight = numerator.sum(1, keepdim=True) / denominator
+        
         return step_weight
 
     @timer()
@@ -199,7 +209,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
             obj_patches.abs() ** 2 + self.parameter_group.probe.options.alpha * obj_max
         )
         step_weight = numerator / denominator
-        return step_weight
+        return step_weight[:, None, ...]
 
     @timer()
     def apply_updates(self, delta_o, delta_p_i, delta_pos, *args, **kwargs):
@@ -253,8 +263,9 @@ class EPIEReconstructor(PIEReconstructor):
 
     @timer()
     def calculate_object_step_weight(self, p: Tensor):
-        p_max = (torch.abs(p) ** 2).sum(1).max()
-        step_weight = self.parameter_group.object.options.alpha * p.conj() / p_max
+        p_max = (torch.abs(p) ** 2).sum(1, keepdim=True).max()
+        #step_weight = self.parameter_group.object.options.alpha * p.conj() / p_max
+        step_weight = self.parameter_group.object.options.alpha * p.conj().sum(1, keepdim=True) / p_max
         return step_weight
 
     @timer()
@@ -291,12 +302,24 @@ class RPIEReconstructor(PIEReconstructor):
 
     @timer()
     def calculate_object_step_weight(self, p: Tensor):
-        p_max = (torch.abs(p) ** 2).sum(1).max()
-        step_weight = p.conj() / (
-            (1 - self.parameter_group.object.options.alpha) * (torch.abs(p) ** 2)
+        
+        # apply multimodal update
+        abs2_p = (torch.abs(p) ** 2).sum(1)
+        p_max = abs2_p.max()
+        step_weight = p.conj().sum(1) / (
+            (1 - self.parameter_group.object.options.alpha) * abs2_p
             + self.parameter_group.object.options.alpha * p_max
         )
-        return step_weight
+        
+        # # use only first mode
+        # abs2_p = (torch.abs(p) ** 2)[:, 0]
+        # p_max = abs2_p.max()
+        # step_weight = p.conj()[:, 0] / (
+        #     (1 - self.parameter_group.object.options.alpha) * abs2_p
+        #     + self.parameter_group.object.options.alpha * p_max
+        # )
+
+        return step_weight[:, None,...]
 
     @timer()
     def calculate_probe_step_weight(self, obj_patches: Tensor):
