@@ -171,16 +171,9 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         Tensor
             A (batch_size, n_modes, h, w) tensor giving the weight for the object update step.
         """
-        # numerator = p.abs() * p.conj()
-        # denominator = p.abs().sum(1, keepdim=True).max() * (
-        #     p.abs() ** 2 + self.parameter_group.object.options.alpha * (p.abs() ** 2).sum(1, keepdim=True).max()
-        # )
-        # step_weight = numerator / denominator
-        
-        
         numerator = p.abs() * p.conj()
         denominator = p.abs().sum(1, keepdim=True).max() * (
-            p.abs().sum(1, keepdim=True) ** 2 + self.parameter_group.object.options.alpha * (p.abs() ** 2).sum(1, keepdim=True).max()
+            (p.abs() ** 2).sum(1, keepdim=True) + self.parameter_group.object.options.alpha * (p.abs() ** 2).sum(1, keepdim=True).max()
         )
         step_weight = numerator.sum(1, keepdim=True) / denominator
         
@@ -264,7 +257,6 @@ class EPIEReconstructor(PIEReconstructor):
     @timer()
     def calculate_object_step_weight(self, p: Tensor):
         p_max = (torch.abs(p) ** 2).sum(1, keepdim=True).max()
-        #step_weight = self.parameter_group.object.options.alpha * p.conj() / p_max
         step_weight = self.parameter_group.object.options.alpha * p.conj().sum(1, keepdim=True) / p_max
         return step_weight
 
