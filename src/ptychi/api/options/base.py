@@ -551,24 +551,24 @@ class ProbeOptions(ParameterOptions):
         return d
 
 @dataclasses.dataclass
-class SynthesisDictLearnProbeOptions( Options ):
+class SynthesisDictLearnProbeOptions(Options):
     
     d_mat: Union[ndarray, Tensor] = None
-    # the synthesis sparse dictionary matrix; contains the basis functions 
-    # that will be used to represent the probe via the sparse code weights
+    """The synthesis sparse dictionary matrix; contains the basis functions 
+    that will be used to represent the probe via the sparse code weights."""
     
     d_mat_conj_transpose: Union[ndarray, Tensor] = None
-    # conjugate transpose of the synthesis sparse dictionary matrix
+    """Conjugate transpose of the synthesis sparse dictionary matrix."""
     
     d_mat_pinv: Union[ndarray, Tensor] = None
-    # Moore-Penrose pseudoinverse of the synthesis sparse dictionary matrix
+    """Moore-Penrose pseudoinverse of the synthesis sparse dictionary matrix."""
     
     probe_sparse_code: Union[ndarray, Tensor] = None
-    # sparse code weights vector
+    """Sparse code weights vector."""
     
     probe_sparse_code_nnz: float = None
-    # number of non-zeros we will keep when enforcing sparsity constraint on
-    # the sparse code weights vector probe_sparse_code
+    """Number of non-zeros we will keep when enforcing sparsity constraint on
+    the sparse code weights vector probe_sparse_code."""
     
     enabled: bool = False
 
