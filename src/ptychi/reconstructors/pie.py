@@ -128,14 +128,14 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_p_i = None
         if probe.optimization_enabled(self.current_epoch) and self.parameter_group.probe.representation == "sparse_code":
             rc = psi_prime.shape[-1] * psi_prime.shape[-2]
-            Nscpm = psi_prime.shape[-3]
-            Nspos = psi_prime.shape[-4]
+            n_scpm = psi_prime.shape[-3]
+            n_pos = psi_prime.shape[-4]
             
-            psi_prime_vec = torch.reshape(psi_prime, (Nspos, Nscpm, rc))
+            psi_prime_vec = torch.reshape(psi_prime, (n_pos, n_scpm, rc))
             
-            probe_vec = torch.reshape(self.parameter_group.probe.data[0, ...], (Nscpm , rc))
+            probe_vec = torch.reshape(self.parameter_group.probe.data[0, ...], (n_scpm , rc))
             
-            obj_patches_vec = torch.reshape(obj_patches, (Nspos, 1, rc ))
+            obj_patches_vec = torch.reshape(obj_patches, (n_pos, 1, rc ))
             
             conj_obj_patches = torch.conj(obj_patches_vec)
             abs2_obj_patches = torch.abs(obj_patches_vec) ** 2
