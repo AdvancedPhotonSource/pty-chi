@@ -1111,7 +1111,8 @@ def _prepare_initial_probe(dp, params):
     probe = probe[None, ...]
     if params.get('orthogonalize_initial_probe', True):
         print("Orthogonalizing initial probe")
-    probe = orthogonalize_initial_probe(to_tensor(probe))
+        probe = orthogonalize_initial_probe(to_tensor(probe))
+        
     # Add n_opr_modes - 1 eigenmodes which are randomly initialized
     probe = add_additional_opr_probe_modes_to_probe(to_tensor(probe), num_opr_modes)
 

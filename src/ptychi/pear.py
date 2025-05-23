@@ -92,7 +92,7 @@ def ptycho_recon(run_recon=True, **params):
     options.probe_options.optimizer = api.Optimizers.SGD
     options.probe_options.step_size = 1
   
-    options.probe_options.orthogonalize_incoherent_modes.enabled = True
+    options.probe_options.orthogonalize_incoherent_modes.enabled = True    
     options.probe_options.orthogonalize_incoherent_modes.method = api.OrthogonalizationMethods.SVD
     options.probe_options.orthogonalize_opr_modes.enabled = True
     
