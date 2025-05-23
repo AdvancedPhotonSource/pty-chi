@@ -777,7 +777,7 @@ def gaussian_gradient(image: Tensor, sigma: float = 1.0, kernel_size=5) -> Tuple
     # Gate the gradients
     grads = [grad_y, grad_x]
     for i, g in enumerate(grads):
-        m = torch.logical_and(grad_y.abs() < 1e-6, grad_y.abs() != 0)
+        m = torch.logical_and(g.abs() < 1e-6, g.abs() != 0)
         if torch.count_nonzero(m) > 0:
             logger.debug("Gradient magnitudes between 0 and 1e-6 are set to 0.")
             g = g * torch.logical_not(m)
@@ -1426,7 +1426,7 @@ def vignette(
     img: Tensor, 
     margin: int = 20, 
     sigma: float = 1.0, 
-    method: Literal["gaussian", "linear"] = "gaussian",
+    method: Literal["gaussian", "linear", "window"] = "gaussian",
     dim=(-2, -1)):
     """
     Vignett an image so that it gradually decays near the boundary.
@@ -1444,11 +1444,14 @@ def vignette(
     img : Tensor
         The input image.
     margin : int
-        The margin of image where the decay takes place.
+        The margin of image where the decay takes place. 
+        Only used if `method` is "gaussian" or "linear".
     sigma : float
-        The standard deviation of the Gaussian kernel.
-    method : Literal["gaussian", "linear"]
-        The method to use to generate the vignette mask.
+        The standard deviation of the Gaussian kernel. 
+        Only used if `method` is "gaussian".
+    method : Literal["gaussian", "linear", "window"]
+        The method to use to generate the vignette mask. 
+        "window" is a Hann window.
     """
     dims = [d % img.ndim for d in dim]
     img = img.clone()
@@ -1478,14 +1481,20 @@ def vignette(
             rep = list(img.shape)
             rep[i_dim] = 1
             mask = ramp.repeat(rep)
+        elif method == "window":
+            window_func = torch.hamming_window(
+                img.shape[i_dim], periodic=True, alpha=0.5, beta=0.5
+            )
+            img = img * window_func.reshape([-1] + [1] * (img.ndim - i_dim - 1))
         else:
             raise ValueError(f"Unknown method: {method}")
 
-        slicer = [slice(None)] * i_dim + [slice(0, margin)]
-        img[slicer] = img[slicer] * mask
+        if method in ["gaussian", "linear"]:
+            slicer = [slice(None)] * i_dim + [slice(0, margin)]
+            img[slicer] = img[slicer] * mask
 
-        slicer = [slice(None)] * i_dim + [slice(-margin, None)]
-        img[slicer] = img[slicer] * mask.flip(i_dim)
+            slicer = [slice(None)] * i_dim + [slice(-margin, None)]
+            img[slicer] = img[slicer] * mask.flip(i_dim)
     return img
 
 
