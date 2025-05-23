@@ -118,14 +118,20 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
             reg.backward()
         return reg
     
-    def get_retain_graph(self):
-        # Makeshift solution. `retain_graph` has to be True if `slice_spacings` is optimized to prevent
-        # error during backward() call, but this is not optimal. We need to find a better way to handle this.
-        if self.parameter_group.object.slice_spacings.options.optimizable:
-            return True
+    def get_retain_graph(self) -> bool:
+        """Determines whether `loss.backward()` should have `retain_graph=True`.
+        Since regularizers' gradients are computed after `loss.backward()`, we need to
+        return `True` if any regularizer is enabled.
+        """
         if self.parameter_group.object.options.experimental.deep_image_prior_options.enabled:
             return True
         if self.parameter_group.probe.options.experimental.deep_image_prior_options.enabled:
+            return True
+        if (
+            self.parameter_group.object.options.l1_norm_constraint.is_enabled_on_this_epoch(self.current_epoch)
+            and self.parameter_group.object.options.l2_norm_constraint.is_enabled_on_this_epoch(self.current_epoch)
+            and self.parameter_group.object.options.total_variation.is_enabled_on_this_epoch(self.current_epoch)
+        ):
             return True
         return False
 

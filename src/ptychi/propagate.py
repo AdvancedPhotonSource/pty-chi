@@ -156,13 +156,13 @@ class AngularSpectrumPropagator(WavefieldPropagator):
         
         # Separate registered buffer into real and imaginary parts to prevent it
         # from breaking in DataParallel.
-        self.register_buffer('_transfer_function_real', _transfer_function.real)
-        self.register_buffer('_transfer_function_imag', _transfer_function.imag)
+        self._transfer_function_real = _transfer_function.real
+        self._transfer_function_imag = _transfer_function.imag
 
     def update(self, parameters: WavefieldPropagatorParameters) -> None:
         _transfer_function = self.get_transfer_function(parameters)
-        self._transfer_function_real[...] = _transfer_function.real
-        self._transfer_function_imag[...] = _transfer_function.imag
+        self._transfer_function_real = _transfer_function.real
+        self._transfer_function_imag = _transfer_function.imag
 
     def get_transfer_function(self, parameters: WavefieldPropagatorParameters) -> ComplexTensor:
         ar = parameters.pixel_aspect_ratio
