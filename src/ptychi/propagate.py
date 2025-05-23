@@ -105,16 +105,16 @@ class WavefieldPropagatorParameters:
         JJ, II = torch.meshgrid(jj, ii, indexing="ij")
         XX = II - self.width_px // 2
         YY = JJ - self.height_px // 2
-        XX = XX.to(torch.get_default_device())
-        YY = YY.to(torch.get_default_device())
+        XX = utils.auto_transfer_to_device(XX)
+        YY = utils.auto_transfer_to_device(YY)
         return YY, XX
 
     def get_frequency_coordinates(self) -> tuple[RealTensor, RealTensor]:
         fx = fftfreq(self.width_px)
         fy = fftfreq(self.height_px)
         FY, FX = torch.meshgrid(fy, fx, indexing="ij")
-        FY = FY.to(torch.get_default_device())
-        FX = FX.to(torch.get_default_device())
+        FY = utils.auto_transfer_to_device(FY)
+        FX = utils.auto_transfer_to_device(FX)
         return FY.detach(), FX.detach()
     
     def is_fresnel_transform_preferrable(self) -> bool:
