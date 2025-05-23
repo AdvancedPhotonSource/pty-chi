@@ -377,7 +377,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 delta_o_i_mode_0_raw, positions, onto_accumulated=True, slice_index=i_slice
             )
             _, delta_o_i_mode_0 = self._precondition_object_update_direction(
-                delta_o_comb_mode_0, positions
+                delta_o_comb_mode_0, 
+                positions, 
+                alpha_mix=self.options.preconditioning_damping_factor
             )
         else:
             delta_o_i_mode_0 = None
@@ -394,7 +396,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             delta_o_i_raw = delta_o_i_mode_0_raw
             delta_o_comb = delta_o_comb_mode_0
         delta_o_precond, delta_o_i = self._precondition_object_update_direction(
-            delta_o_comb, positions
+            delta_o_comb, 
+            positions, 
+            alpha_mix=self.options.preconditioning_damping_factor
         )
         return delta_o_comb, delta_o_precond, delta_o_i, delta_o_i_mode_0
 
@@ -896,7 +900,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_o_hat_full = []
         for i_slice in range(self.parameter_group.object.n_slices):
             delta_o_hat = self._precondition_object_update_direction(
-                -self.parameter_group.object.get_grad()[i_slice : i_slice + 1], positions=None
+                -self.parameter_group.object.get_grad()[i_slice : i_slice + 1], 
+                positions=None,
+                alpha_mix=self.options.preconditioning_damping_factor
             )
             delta_o_hat_full.append(delta_o_hat)
         delta_o_hat_full = torch.cat(delta_o_hat_full, dim=0)
