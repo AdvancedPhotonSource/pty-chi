@@ -321,34 +321,35 @@ def save_reconstructions(task, recon_path, iter, params):
     # Save scan positions
     scan_positions = task.get_data_to_cpu("probe_positions", as_numpy=True)
     if params["position_correction"]:
-        plt.figure()
-        plt.scatter(-init_positions_x, init_positions_y, s=1, edgecolors="blue")
-        plt.scatter(
-            -scan_positions[:, 1] * pixel_size,
-            scan_positions[:, 0] * pixel_size,
-            s=10,
-            edgecolors="red",
-            facecolors="none",
-        )
-        # Calculate average position differences
-        x_diff = np.mean(np.abs(-scan_positions[:, 1] * pixel_size - (-init_positions_x)))
-        y_diff = np.mean(np.abs(scan_positions[:, 0] * pixel_size - init_positions_y))
-        if params.get("beam_source", "xray") == "electron":
-            plt.xlabel(f"X [{pixel_unit}] (average error: {x_diff * 10:.2f} angstrom)")
-            plt.ylabel(f"Y [{pixel_unit}] (average error: {y_diff * 10:.2f} angstrom)")
-        else:
-            plt.xlabel(f"X [{pixel_unit}] (average error: {x_diff * 1e3:.2f} nm)")
-            plt.ylabel(f"Y [{pixel_unit}] (average error: {y_diff * 1e3:.2f} nm)")
-        plt.legend(
-            ["Initial positions", "Refined positions"],
-            loc="upper center",
-            bbox_to_anchor=(0.5, 1.15),
-        )
-        plt.grid(True)
-        plt.xlim(pos_x_min * range_factor, pos_x_max * range_factor)
-        plt.ylim(pos_y_min * range_factor, pos_y_max * range_factor)
-        plt.savefig(f"{recon_path}/positions/positions_Niter{iter}.png", dpi=300)
-        plt.close()
+        if params.get("save_plots", True):
+            plt.figure()
+            plt.scatter(-init_positions_x, init_positions_y, s=1, edgecolors="blue")
+            plt.scatter(
+                -scan_positions[:, 1] * pixel_size,
+                scan_positions[:, 0] * pixel_size,
+                s=10,
+                edgecolors="red",
+                facecolors="none",
+            )
+            # Calculate average position differences
+            x_diff = np.mean(np.abs(-scan_positions[:, 1] * pixel_size - (-init_positions_x)))
+            y_diff = np.mean(np.abs(scan_positions[:, 0] * pixel_size - init_positions_y))
+            if params.get("beam_source", "xray") == "electron":
+                plt.xlabel(f"X [{pixel_unit}] (average error: {x_diff * 10:.2f} angstrom)")
+                plt.ylabel(f"Y [{pixel_unit}] (average error: {y_diff * 10:.2f} angstrom)")
+            else:
+                plt.xlabel(f"X [{pixel_unit}] (average error: {x_diff * 1e3:.2f} nm)")
+                plt.ylabel(f"Y [{pixel_unit}] (average error: {y_diff * 1e3:.2f} nm)")
+            plt.legend(
+                ["Initial positions", "Refined positions"],
+                loc="upper center",
+                bbox_to_anchor=(0.5, 1.15),
+            )
+            plt.grid(True)
+            plt.xlim(pos_x_min * range_factor, pos_x_max * range_factor)
+            plt.ylim(pos_y_min * range_factor, pos_y_max * range_factor)
+            plt.savefig(f"{recon_path}/positions/positions_Niter{iter}.png", dpi=300)
+            plt.close()
 
         # Plot affine transformation parameters from probe position correction
         affine_matrix = task.reconstructor.parameter_group.probe_positions.affine_transform_matrix
@@ -376,37 +377,39 @@ def save_reconstructions(task, recon_path, iter, params):
             ("Shear", pos_shear, "Shear", None, None),
         ]
 
-        fig, axs = plt.subplots(2, 2, figsize=(10, 8))
-        axs = axs.ravel()
-        for i, (title, data, ylabel, ylim, color) in enumerate(param_info):
-            axs[i].plot(iterations, data, "o-", color="blue")
-            axs[i].set_xlabel("Iterations")
-            axs[i].set_ylabel(ylabel)
-            axs[i].set_title(title)
-            axs[i].grid(True)
-            if ylim:
-                axs[i].set_ylim(*ylim)
+        if params.get("save_plots", True):
+            fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+            axs = axs.ravel()
+            for i, (title, data, ylabel, ylim, color) in enumerate(param_info):
+                axs[i].plot(iterations, data, "o-", color="blue")
+                axs[i].set_xlabel("Iterations")
+                axs[i].set_ylabel(ylabel)
+                axs[i].set_title(title)
+                axs[i].grid(True)
+                if ylim:
+                    axs[i].set_ylim(*ylim)
 
-        plt.tight_layout()
-        plt.savefig(f"{recon_path}/positions_affine/positions_affine_Niter{iter}.png", dpi=300)
-        plt.close(fig)
+            plt.tight_layout()
+            plt.savefig(f"{recon_path}/positions_affine/positions_affine_Niter{iter}.png", dpi=300)
+            plt.close(fig)
 
     # Plot loss vs iterations
     loss = task.reconstructor.loss_tracker.table["loss"]
-
-    plt.figure()
-    plt.plot(loss, label="Loss")
-    plt.xlabel("Iterations")
-    plt.ylabel("Loss")
-    plt.yscale("log")
-    plt.legend()
-    plt.grid(True)
-    loss_array = loss.values
-    min_loss = min(loss_array)
-    final_loss = loss_array[-1] if len(loss_array) > 0 else 0
-    plt.title(f"Min Loss: {min_loss:.2e}. Final Loss: {final_loss:.2e}")
-    plt.savefig(f"{recon_path}/loss/loss_Niter{iter}.png", dpi=300)
-    plt.close()
+    
+    if params.get("save_plots", True):
+        plt.figure()
+        plt.plot(loss, label="Loss")
+        plt.xlabel("Iterations")
+        plt.ylabel("Loss")
+        plt.yscale("log")
+        plt.legend()
+        plt.grid(True)
+        loss_array = loss.values
+        min_loss = min(loss_array)
+        final_loss = loss_array[-1] if len(loss_array) > 0 else 0
+        plt.title(f"Min Loss: {min_loss:.2e}. Final Loss: {final_loss:.2e}")
+        plt.savefig(f"{recon_path}/loss/loss_Niter{iter}.png", dpi=300)
+        plt.close()
 
     # Save results in hdf5 format
     init_positions_px = np.array([init_positions_y / pixel_size, init_positions_x / pixel_size]).T
@@ -719,20 +722,21 @@ def save_initial_conditions(recon_path, params, options):
         init_positions_x = (
             options.probe_position_options.position_x_px * options.object_options.pixel_size_m * 1e6
         )
-    plt.figure()
-    plt.scatter(-init_positions_x, init_positions_y, s=1, edgecolors="blue")
-    plt.xlabel(f"X [{pixel_unit}]")
-    plt.ylabel(f"Y [{pixel_unit}]")
-    plt.legend(["Initial positions"], loc="upper center", bbox_to_anchor=(0.5, 1.15))
-    plt.grid(True)
-    pos_x_min, pos_x_max = plt.xlim()
-    pos_y_min, pos_y_max = plt.ylim()
+    if params.get("save_plots", True):
+        plt.figure()
+        plt.scatter(-init_positions_x, init_positions_y, s=1, edgecolors="blue")
+        plt.xlabel(f"X [{pixel_unit}]")
+        plt.ylabel(f"Y [{pixel_unit}]")
+        plt.legend(["Initial positions"], loc="upper center", bbox_to_anchor=(0.5, 1.15))
+        plt.grid(True)
+        pos_x_min, pos_x_max = plt.xlim()
+        pos_y_min, pos_y_max = plt.ylim()
 
-    range_factor = 1.1
-    plt.xlim(pos_x_min * range_factor, pos_x_max * range_factor)
-    plt.ylim(pos_y_min * range_factor, pos_y_max * range_factor)
-    plt.savefig(f"{recon_path}/init_positions.png", dpi=300)
-    plt.close()
+        range_factor = 1.1
+        plt.xlim(pos_x_min * range_factor, pos_x_max * range_factor)
+        plt.ylim(pos_y_min * range_factor, pos_y_max * range_factor)
+        plt.savefig(f"{recon_path}/init_positions.png", dpi=300)
+        plt.close()
 
     if params["position_correction"]:
         global pos_scale, pos_assymetry, pos_rotation, pos_shear, iterations
