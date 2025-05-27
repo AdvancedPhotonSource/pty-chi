@@ -36,6 +36,106 @@ Base Options
    :undoc-members:
    :show-inheritance:
 
+.. autoclass:: ptychi.api.options.base.FeatureOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.SynthesisDictLearnProbeOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.PositionCorrectionOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.PositionAffineTransformConstraintOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.ProbePositionMagnitudeLimitOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.ForwardModelOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.ObjectMultisliceRegularizationOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.ObjectL1NormConstraintOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.ObjectL2NormConstraintOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.ObjectSmoothnessConstraintOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.ObjectTotalVariationOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.RemoveGridArtifactsOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.RemoveObjectProbeAmbiguityOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.SliceSpacingOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.ProbePowerConstraintOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.ProbeOrthogonalizeIncoherentModesOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.ProbeOrthogonalizeOPRModesOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.ProbeSupportConstraintOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.ProbeCenterConstraintOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.base.OPRModeWeightsSmoothingOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Data Options
 ------------
 
