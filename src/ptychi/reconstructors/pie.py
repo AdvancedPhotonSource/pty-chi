@@ -136,38 +136,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
             delta_p_i = None
             if (i_slice == 0) and (probe.optimization_enabled(self.current_epoch)):
                 if (self.parameter_group.probe.representation == "sparse_code"):
-                    
-                    # rc = delta_exwv_i.shape[-1] * delta_exwv_i.shape[-2]
-                    # n_scpm = delta_exwv_i.shape[-3]
-                    # n_spos = delta_exwv_i.shape[-4]
-   
-                    # obj_patches_vec = torch.reshape(obj_patches[:, i_slice, ...], (n_spos, 1, rc ))
-                    # obj_patches_vec = torch.swapaxes(obj_patches_vec, 0, -1)
-                    
-                    # abs2_obj_patches = torch.abs(obj_patches_vec) ** 2
-                    # z = torch.sum(abs2_obj_patches, dim = -1)
-                    # z_max = torch.max(z)
-                    # w = 0.9 * (z_max - z)
-                    
-                    # z_plus_w = torch.asarray( torch.swapaxes(z + w, 0, 1), dtype = torch.complex64 )
-                    # denom = (self.parameter_group.probe.dictionary_matrix_H @ (z_plus_w * self.parameter_group.probe.dictionary_matrix))
 
-                    # delta_exwv_i_vec = torch.reshape( delta_exwv_i, (n_scpm * n_spos, rc)).T
-                    # numer = self.parameter_group.probe.dictionary_matrix_H @ delta_exwv_i_vec
-
-                    # delta_sparse_code = torch.linalg.solve(denom, numer)     
-         
-                    # probe_vec = unique_probes[i_slice]
-                    # sz = unique_probes[i_slice].shape
-                    # probe_vec = torch.reshape( probe_vec, ( n_spos, n_scpm, sz[2] * sz[3] ))
-                    # probe_vec = torch.swapaxes( probe_vec, 0, -1)
-                    # probe_vec = torch.reshape( probe_vec, ( probe_vec.shape[0], probe_vec.shape[1] * probe_vec.shape[2] ))
-                    # sparse_code_probe_vs_spos = self.parameter_group.probe.dictionary_matrix_pinv @ probe_vec
-   
-                    # sparse_code = sparse_code_probe_vs_spos + 1e-0 * delta_sparse_code
-                    
-                    #=====
-                    
                     rc = delta_exwv_i.shape[-1] * delta_exwv_i.shape[-2]
                     n_scpm = delta_exwv_i.shape[-3]
                     n_spos = delta_exwv_i.shape[-4]
@@ -176,7 +145,6 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                     abs2_obj_patches = torch.abs(obj_patches_vec) ** 2
                     
                     z = torch.sum(abs2_obj_patches, dim = 0)
-                    #z = abs2_obj_patches
                     z_max = torch.max(z)
                     w = 1.0 * (z_max - z)
                     z_plus_w = torch.swapaxes(z + w, 0, 1)
@@ -184,14 +152,12 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                     delta_exwv = self.adjoint_shift_probe_update_direction(indices, delta_exwv_i, first_mode_only=True)
                     delta_exwv =  delta_exwv_i
                     delta_exwv = torch.sum(delta_exwv, 0)
-                    #delta_exwv = delta_exwv.mean(0)
                     delta_exwv = torch.reshape( delta_exwv, (n_scpm, rc)).T
                     
                     denom = (self.parameter_group.probe.dictionary_matrix_H @ (z_plus_w * self.parameter_group.probe.dictionary_matrix))
                     numer = self.parameter_group.probe.dictionary_matrix_H @ delta_exwv
                     
                     delta_sparse_code = torch.linalg.solve(denom, numer)
-                    # self.parameter_group.probe.sparse_code_probe
                     
                     delta_p = self.parameter_group.probe.dictionary_matrix @ delta_sparse_code
                     delta_p = torch.reshape( delta_p.T, (  n_scpm, delta_exwv_i.shape[-1] , delta_exwv_i.shape[-2]))
@@ -200,159 +166,26 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                     # # Undo subpixel shift in probe update directions.
                     # delta_p_i = self.adjoint_shift_probe_update_direction(indices, delta_p_i, first_mode_only=True)   
                                         
-                    # Update sparse code in probe class
+                    # sparse code update 
                     sparse_code = self.parameter_group.probe.get_sparse_code_weights()
-                    sparse_code = sparse_code + 1e-0 * delta_sparse_code[...,None]
-                    self.parameter_group.probe.set_sparse_code(sparse_code)
+                    sparse_code = sparse_code + 1e-0 * delta_sparse_code
 
-
-
-
-
-                    #delta_p_i = self.forward_model.shift_unique_probes(indices, delta_p_i, first_mode_only=True)
-                    
-                    # probe_vec = self.parameter_group.probe.dictionary_matrix @ sparse_code
-                    # probe_sdl = torch.reshape( torch.swapaxes( probe_vec, 0, -1), *[delta_exwv_i.shape] )
-
-                    # delta_p_i = probe_sdl - unique_probes[i_slice]
-                    
-                    # sparse_code = sparse_code_probe + delta_sparse_code
-                    
-                    # new_probe = self.parameter_group.probe.dictionary_matrix @ sparse_code
-                    # new_probe = torch.reshape( new_probe, ( sz[2] , sz[3], n_scpm ))
-                    
-                    
-                    
-                    '''
-                    
-                    #=====
-                    
-                    probe_vec = unique_probes[i_slice]
-                    probe_vec = self.adjoint_shift_probe_update_direction(indices, probe_vec, first_mode_only=True)
-                    
-                    probe_vec = probe_vec.mean(0)
-                    #probe_vec = torch.sum( probe_vec, 0 )
-                    
-                    sz = unique_probes[i_slice].shape
-                    #probe_vec = torch.reshape( probe_vec, ( n_spos, n_scpm, sz[2] * sz[3] ))
-                    probe_vec = torch.reshape( probe_vec, ( n_scpm, sz[2] * sz[3] ))
-                    probe_vec = torch.swapaxes( probe_vec, 0, -1)
-                    #probe_vec = torch.reshape( probe_vec, ( probe_vec.shape[0], probe_vec.shape[1] * probe_vec.shape[2] ))
-                    
-                    sparse_code_probe = self.parameter_group.probe.dictionary_matrix_pinv @ probe_vec
-                    
-                    #sparse_code_probe = torch.reshape( sparse_code_probe, (sparse_code_probe.shape[0], n_spos, n_scpm ))
-                    
-                    self.parameter_group.probe.sparse_code_probe
-                    
-                    
-                    #sparse_code_probe = torch.sum( sparse_code_probe, 1 )
-                    sparse_code_probe = sparse_code_probe.mean(1)
-                            
-                    sparse_code = sparse_code_probe + delta_sparse_code
-                    
-                    new_probe = self.parameter_group.probe.dictionary_matrix @ sparse_code
-                    new_probe = torch.reshape( new_probe, ( sz[2] , sz[3], n_scpm ))
-
-                    
- 
-                    
-                    #from PySide6.QtWidgets import QApplication
-                    import numpy as np
-                    import matplotlib.pyplot as plt
-                    import matplotlib as mpl
-                    from mpl_toolkits.axes_grid1 import make_axes_locatable
-                    #mpl.use('Agg')
-                    #mpl.use('TKAgg')
-                    #mpl.use('WebAgg')
-                    mpl.use('QTAgg')
-                    mpl.rcParams['agg.path.chunksize'] = 10000
-
-                    # A = sparse_code_probe.cpu().numpy()
-                    # #A = delta_sparse_code.cpu().numpy()
-                    
-                    # fig, ( ax1, ax2 ) = plt.subplots( nrows = 2, ncols = 1, )
-                    # plt.subplots_adjust(wspace=0.5, hspace=0.3)
-                    
-                    # B = np.real( A )
-                    # pos1 = ax1.plot( B  ) # vmin=0.5, vmax=1.2
-
-                    # # divider = make_axes_locatable(ax1)
-                    # # cax = divider.append_axes("right", size="5%", pad=0.05)
-                    # # plt.colorbar(pos1, cax=cax)
-                    # # #plt.show( block = False ) 
-                                
-                    # B = np.imag( A )
-                    # pos2 = ax2.plot( B  ) # vmin=0.5, vmax=1.2
-
-                    # # divider = make_axes_locatable(ax2)
-                    # # cax = divider.append_axes("right", size="5%", pad=0.05)
-                    # # plt.colorbar(pos2, cax=cax)
-                    # # #plt.show( block = False )     
-                           
-                    # plt.savefig( '/net/s8iddata/export/8-id-ECA/Analysis/atripath/pty-chi/tests/outputs/sparsecode.png', dpi = 300 )
-                    # plt.close('all')
-                          
-                          
-                    #A = np.conj( delta_p[:,:,0].cpu().numpy() )
-                    #A = delta_p[:,:,0].cpu().numpy() 
-                    A = probe_vec[0,:,:].cpu().numpy()
-                    
-                    #A = self.parameter_group.probe.data[0,0,...].cpu().numpy()
-                    #A = delta_sparse_code.cpu().numpy()
-            
-                    
-                    fig, ( ax1, ax2 ) = plt.subplots( nrows = 2, ncols = 1, )
-                    plt.subplots_adjust(wspace=0.5, hspace=0.3)
-                    
-                    B = np.abs( A )
-                    pos1 = ax1.imshow( B  ) # vmin=0.5, vmax=1.2
-
-                    divider = make_axes_locatable(ax1)
-                    cax = divider.append_axes("right", size="5%", pad=0.05)
-                    plt.colorbar(pos1, cax=cax)
-                    #plt.show( block = False ) 
-                                
-                    B = np.angle( A )
-                    pos2 = ax2.imshow( B  ) # vmin=0.5, vmax=1.2
-
-                    divider = make_axes_locatable(ax2)
-                    cax = divider.append_axes("right", size="5%", pad=0.05)
-                    plt.colorbar(pos2, cax=cax)
-                    #plt.show( block = False )     
-                          
-                          
-                    plt.savefig( '/net/s8iddata/export/8-id-ECA/Analysis/atripath/pty-chi/tests/outputs/probe_vec2.png', dpi = 300 )            
-                    #plt.savefig( '/net/s8iddata/export/8-id-ECA/Analysis/atripath/pty-chi/tests/outputs/d_probe.png', dpi = 300 )            
-                    #plt.savefig( '/net/s8iddata/export/8-id-ECA/Analysis/atripath/pty-chi/tests/outputs/unique_probe.png', dpi = 300 )
-                    plt.close('all')
-    
-        
-                    # # Update sparse code in probe object
-                    # self.parameter_group.probe.set_sparse_code(sparse_code)
-                        
-                    '''
-                    
                     #===========================================
                     # Enforce sparsity constraint on sparse code
                     
-                    # abs_sparse_code = torch.abs(sparse_code)
-                    # sparse_code_sorted = torch.sort(abs_sparse_code, dim=0, descending=True)
+                    abs_sparse_code = torch.abs(sparse_code)
+                    sparse_code_sorted = torch.sort(abs_sparse_code, dim=0, descending=True)
                     
-                    # sel = sparse_code_sorted[0][self.parameter_group.probe.probe_sparse_code_nnz, :]
+                    sel = sparse_code_sorted[0][self.parameter_group.probe.probe_sparse_code_nnz, :]
                     
-                    # # hard thresholding: 
-                    # sparse_code = sparse_code * (abs_sparse_code >= sel)
+                    # hard thresholding: 
+                    sparse_code = sparse_code * (abs_sparse_code >= sel)
                     
                     #(TODO: soft thresholding option)
-
-                    #=====================================
-                    # Generate new probes vs scan position 
-
-                    # probe_vec = self.parameter_group.probe.dictionary_matrix @ sparse_code
-                    # probe_sdl = torch.reshape( torch.swapaxes( probe_vec, 0, -1), *[delta_exwv_i.shape] )
-
-                    # delta_p_i = probe_sdl - unique_probes[i_slice]
+                    
+                    # Update the new sparse code in the probe class
+                    self.parameter_group.probe.set_sparse_code(sparse_code)
+                    
 
                 else:
                     step_weight = self.calculate_probe_step_weight((obj_patches[:, i_slice, ...])[:, None, ...])
@@ -374,10 +207,6 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                         probe_mode_index=0,
                     )
                     
-                # # Update sparse code in probe class
-                # sparse_code = self.parameter_group.probe.get_sparse_code_weights()
-                # self.parameter_group.probe.set_sparse_code(sparse_code)
-
             if i_slice > 0:
                 delta_exwv_i = delta_exwv_i * obj_patches[:, i_slice : i_slice + 1,...].conj()
                 delta_exwv_i = self.forward_model.propagate_to_previous_slice(delta_exwv_i, slice_index=i_slice) 

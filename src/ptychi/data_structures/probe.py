@@ -476,11 +476,11 @@ class SynthesisDictLearnProbe( Probe ):
         return dictionary_matrix, dictionary_matrix_pinv, dictionary_matrix_H
 
     def get_sparse_code_weights(self):
-        probe_vec = torch.reshape( self.data, (self.data.shape[0], self.data.shape[1], self.data.shape[2] * self.data.shape[3]))
+        
+        sz = self.data.shape
+        probe_vec = torch.reshape( self.data[0,...], (sz[1], sz[2] * sz[3]))
         probe_vec = torch.swapaxes( probe_vec, 0, -1)
-        probe_vec = torch.reshape( probe_vec, ( probe_vec.shape[0], probe_vec.shape[1] * probe_vec.shape[2] ))
         sparse_code_probe = self.dictionary_matrix_pinv @ probe_vec
-        sparse_code_probe = torch.reshape( sparse_code_probe, ( sparse_code_probe.shape[0], self.data.shape[1], self.data.shape[0] ))
         return sparse_code_probe
 
     def generate(self):
@@ -492,15 +492,13 @@ class SynthesisDictLearnProbe( Probe ):
         Tensor
             A (n_opr_modes, n_modes, h, w) tensor giving the generated probe.
         """
-        sparse_code_probe = torch.reshape( self.sparse_code_probe, ( self.sparse_code_probe.shape[0], self.sparse_code_probe.shape[1] * self.sparse_code_probe.shape[2] ))
-        probe_vec = self.dictionary_matrix @ sparse_code_probe
+        probe_vec = self.dictionary_matrix @ self.sparse_code_probe
         probe_vec = torch.swapaxes( probe_vec, 0, -1)
-        probe = torch.reshape( probe_vec, *[self.data.shape] )
+        probe = torch.reshape( probe_vec, *[self.data[0,...].shape] )
+        probe = probe[None,...]
         
-        # # this sets self.tensor.data.grad to zero???
-        # self.tensor.data = torch.stack([probe.real, probe.imag], dim=-1)
-        # # reinitialize the grad here for sdl probes
-        # self.tensor.data.grad = torch.zeros_like(self.tensor.data)
+        # we only use sparse codes for the shared modes, not the OPRs
+        probe = torch.cat((probe, self.data[1:,...]), 0)    
         
         # is this the correct way to retain the originally initialized grad?
         self.tensor.data.data = torch.stack([probe.real, probe.imag], dim=-1)
