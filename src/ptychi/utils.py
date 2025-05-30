@@ -14,6 +14,7 @@ from numpy import ndarray
 import ptychi.maths as pmath
 import ptychi.propagate as propagate
 from ptychi.timing.timer_utils import timer
+from ptychi.device import AcceleratorModuleWrapper
 
 if TYPE_CHECKING:
     from ptychi.api.task import PtychographyTask
@@ -337,11 +338,25 @@ def to_numpy(data: Union[ndarray, Tensor]) -> ndarray:
 
 
 def set_default_complex_dtype(dtype):
+    """Set the default complex dtype.
+    
+    Parameters
+    ----------
+    dtype : torch.dtype
+        The default complex dtype.
+    """
     global _default_complex_dtype
     _default_complex_dtype = dtype
 
 
 def get_default_complex_dtype():
+    """Get the default complex dtype.
+    
+    Returns
+    -------
+    torch.dtype
+        The default complex dtype.
+    """
     return _default_complex_dtype
 
 
@@ -468,7 +483,7 @@ def get_max_batch_size(
     else:
         data_size_gb = 0.0
         
-    mem_avail = torch.cuda.mem_get_info()[0] * (1 - margin_factor) / 1024 ** 3
+    mem_avail = AcceleratorModuleWrapper.get_module().mem_get_info()[0] * (1 - margin_factor) / 1024 ** 3
     mem_compute = mem_avail - data_size_gb
     batch_size = (mem_compute - x1 * n_p - x2 * n_o) / (x0 * n_p)
     batch_size = batch_size * (8 / dtype.itemsize)
@@ -488,13 +503,15 @@ def auto_transfer_to_device(data: Tensor) -> Tensor:
     2.2. If `torch.cuda.device_count()` is not 0, we assume it is the latter case, and
          we transfer the data to `cuda`.
     """
-    if torch.get_default_device().type == "cuda":
-        return data.cuda()
+    accelerator_module_wrapper = AcceleratorModuleWrapper()
+    
+    if torch.get_default_device().type == accelerator_module_wrapper.get_to_device_string():
+        return data.to(accelerator_module_wrapper.get_to_device_string())
     else:
-        if torch.cuda.device_count() == 0:
+        if accelerator_module_wrapper.get_module().device_count() == 0:
             return data
         else:
-            return data.cuda()
+            return data.to(accelerator_module_wrapper.get_to_device_string())
 
 
 def clear_memory(task: Optional["PtychographyTask"] = None):
@@ -506,11 +523,12 @@ def clear_memory(task: Optional["PtychographyTask"] = None):
     task : PtychographyTask, optional
         The `Task` object to be deleted.
     """
+    accelerator_module_wrapper = AcceleratorModuleWrapper()
     if task is not None:
         del task
     gc.collect()
-    torch.cuda.empty_cache()
-    torch.cuda.ipc_collect()
+    accelerator_module_wrapper.get_module().empty_cache()
+    accelerator_module_wrapper.get_module().ipc_collect()
 
 
 def jsonize(val):
