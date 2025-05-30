@@ -14,6 +14,7 @@ import sklearn.cluster
 import numpy as np
 import scipy.spatial
 
+from ptychi.device import AcceleratorModuleWrapper
 from ptychi.utils import to_tensor, to_numpy
 import ptychi.maths as pmath
 
@@ -33,7 +34,7 @@ class PtychographyDataset(Dataset):
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self.patterns = to_tensor(patterns, device="cpu" if not save_data_on_device else "cuda")
+        self.patterns = to_tensor(patterns, device="cpu" if not save_data_on_device else AcceleratorModuleWrapper.get_to_device_string())
         if fft_shift:
             self.patterns = torch.fft.fftshift(self.patterns, dim=(-2, -1))
             logger.info("Diffraction data have been FFT-shifted.")

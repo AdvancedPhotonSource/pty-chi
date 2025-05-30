@@ -26,6 +26,7 @@ import ptychi.utils as utils
 import ptychi.maths as pmath
 from ptychi.timing import timer_utils
 import ptychi.movies as movies
+from ptychi.device import AcceleratorModuleWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ class Task:
         exception_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        torch.cuda.empty_cache()
+        AcceleratorModuleWrapper.get_module().empty_cache()
 
 
 class PtychographyTask(Task):
@@ -100,14 +101,16 @@ class PtychographyTask(Task):
         pmath.set_allow_nondeterministic_algorithms(self.reconstructor_options.allow_nondeterministic_algorithms)
 
     def build_default_device(self):
+        accelerator_module = AcceleratorModuleWrapper.get_module()
+        
         torch.set_default_device(maps.get_device_by_enum(self.reconstructor_options.default_device))
-        if torch.cuda.device_count() > 0:
+        if accelerator_module.device_count() > 0:
             cuda_visible_devices_str = "(unset)"
             if "CUDA_VISIBLE_DEVICES" in os.environ.keys():
                 cuda_visible_devices_str = os.environ["CUDA_VISIBLE_DEVICES"]
             logger.info(
                 "Using device: {} (CUDA_VISIBLE_DEVICES=\"{}\")".format(
-                    [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())],
+                    [accelerator_module.get_device_name(i) for i in range(accelerator_module.device_count())],
                     cuda_visible_devices_str,
                 )
             )

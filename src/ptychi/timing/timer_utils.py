@@ -7,8 +7,9 @@ from typing import Callable, TypeVar, Optional, List, Dict, Union
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
-import torch
 from collections import defaultdict
+
+from ptychi.device import AcceleratorModuleWrapper
 
 
 # Type variables to retain function signatures
@@ -95,10 +96,10 @@ def timer(enabled: bool = True, override_with_name: Optional[str] = None):
                 overhead_time_1 = time.time() - measure_overhead_start_1
 
                 # Measure function execution time
-                torch.cuda.synchronize()
+                AcceleratorModuleWrapper.get_module().synchronize()
                 start_time = time.time()
                 result = func(*args, **kwargs)
-                torch.cuda.synchronize()
+                AcceleratorModuleWrapper.get_module().synchronize()
                 elapsed_time = time.time() - start_time
 
                 # Measure the overhead from running the timer function
@@ -151,7 +152,7 @@ class InlineTimer:
             saved_dict_reference = update_current_dict_reference(self.name)
             self.saved_dict_reference = saved_dict_reference
             self.overhead_time = time.time() - measure_overhead_start
-            torch.cuda.synchronize()
+            AcceleratorModuleWrapper.get_module().synchronize()
             self.start_time = time.time()
 
     def end(self):
@@ -159,7 +160,7 @@ class InlineTimer:
         Stops the timer and records the elapsed time if timing is enabled.
         """
         if self.enabled and globals().get("ENABLE_TIMING", False):
-            torch.cuda.synchronize()
+            AcceleratorModuleWrapper.get_module().synchronize()
             elapsed_time = time.time() - self.start_time
             measure_overhead_start = time.time()
             update_elapsed_time_dict(self.name, elapsed_time)
