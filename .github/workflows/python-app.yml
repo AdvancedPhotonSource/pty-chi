@@ -38,7 +38,7 @@ jobs:
         run: uv pip install ruff
 
       - name: Run Ruff
-        run: uv ruff check src/ --output-format=github
+        run: ruff check src/ --output-format=github
 
   linux-x86-gpu:
 
@@ -74,7 +74,7 @@ jobs:
         uv pip install -e .
 
     - name: List build environment
-      run: uv list
+      run: uv pip list
 
     - name: Test with pytest
       run: |
