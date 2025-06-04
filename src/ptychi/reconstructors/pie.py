@@ -150,7 +150,6 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                     z_plus_w = torch.swapaxes(z + w, 0, 1)
                     
                     delta_exwv = self.adjoint_shift_probe_update_direction(indices, delta_exwv_i, first_mode_only=True)
-                    delta_exwv =  delta_exwv_i
                     delta_exwv = torch.sum(delta_exwv, 0)
                     delta_exwv = torch.reshape( delta_exwv, (n_scpm, rc)).T
                     
