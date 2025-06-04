@@ -146,7 +146,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                     
                     z = torch.sum(abs2_obj_patches, dim = 0)
                     z_max = torch.max(z)
-                    w = 1.0 * (z_max - z)
+                    w = self.parameter_group.probe.options.alpha * (z_max - z)
                     z_plus_w = torch.swapaxes(z + w, 0, 1)
                     
                     delta_exwv = self.adjoint_shift_probe_update_direction(indices, delta_exwv_i, first_mode_only=True)
