@@ -15,16 +15,16 @@ import test_utils as tutils
 if os.environ.get('PTYCHO_CI_DATA_DIR') is None:
     os.environ["PTYCHO_CI_DATA_DIR"] = "/net/s8iddata/export/8-id-ECA/Analysis/atripath/ptychointerim-data/ci_data"
     
-class Test2DPtychoRPIE_SDL(tutils.TungstenDataTester):
-    @tutils.TungstenDataTester.wrap_recon_tester(name="test_2d_ptycho_rpie_synthesisdictlearn")
-    def test_2d_ptycho_rpie_synthesisdictlearn(self):
+class Test2DPtychoMultislice_RPIE_SDL(tutils.TungstenDataTester):
+    @tutils.TungstenDataTester.wrap_recon_tester(name="test_2d_ptycho_multislice_rpie_synthesisdictlearn")
+    def test_2d_ptycho_multislice_rpie_synthesisdictlearn(self):
         self.setup_ptychi(cpu_only=False)
 
         data, probe, pixel_size_m, positions_px = self.load_tungsten_data(additional_opr_modes=3)
 
         npz_dict_file = np.load(
             os.path.join(
-                self.get_ci_input_data_dir(), "zernike2D_dictionaries", "Dlearned_orth.npz"
+                self.get_ci_input_data_dir(), "zernike2D_dictionaries", "testing_sdl_dictionary.npz"
             )
         )
         D = npz_dict_file["D"]
@@ -68,7 +68,7 @@ class Test2DPtychoRPIE_SDL(tutils.TungstenDataTester):
         ).T
         options.probe_options.experimental.sdl_probe_options.d_mat_pinv = D_pinv
         options.probe_options.experimental.sdl_probe_options.probe_sparse_code_nnz = np.round(
-            0.90 * D.shape[-1]
+            0.50 * D.shape[-1]
         )
 
         options.probe_position_options.position_x_px = positions_px[:, 1]
@@ -87,8 +87,8 @@ class Test2DPtychoRPIE_SDL(tutils.TungstenDataTester):
         task = PtychographyTask(options)
         task.run()
 
-        recon = task.get_data_to_cpu("object", as_numpy=True)[0]
-
+        #recon = task.get_data_to_cpu("object", as_numpy=True)[0]
+        recon = task.get_data_to_cpu("object", as_numpy=True)
         return recon
 
 
@@ -97,6 +97,6 @@ if __name__ == "__main__":
     parser.add_argument("--generate-gold", action="store_true")
     args = parser.parse_args()
 
-    tester = Test2DPtychoRPIE_SDL()
+    tester = Test2DPtychoMultislice_RPIE_SDL()
     tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=True)
-    tester.test_2d_ptycho_rpie_synthesisdictlearn()
+    tester.test_2d_ptycho_multislice_rpie_synthesisdictlearn()
