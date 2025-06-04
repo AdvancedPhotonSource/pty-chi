@@ -160,10 +160,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                     
                     delta_p = self.parameter_group.probe.dictionary_matrix @ delta_sparse_code
                     delta_p = torch.reshape( delta_p.T, (  n_scpm, delta_exwv_i.shape[-1] , delta_exwv_i.shape[-2]))
-                    delta_p_i = torch.tile(delta_p, (n_spos,1,1,1))
-                    
-                    # # Undo subpixel shift in probe update directions.
-                    # delta_p_i = self.adjoint_shift_probe_update_direction(indices, delta_p_i, first_mode_only=True)   
+                    delta_p_i = torch.tile(delta_p, (n_spos,1,1,1)) 
                                         
                     # sparse code update 
                     sparse_code = self.parameter_group.probe.get_sparse_code_weights()
