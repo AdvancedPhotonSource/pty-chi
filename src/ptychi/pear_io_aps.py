@@ -1427,7 +1427,7 @@ def _load_data_hdf5(h5_dp_path, h5_position_path, dp_Npix):
     return dp, positions
 
 
-def _load_data_2xfm(base_path, scan_num, det_Npixel, cen_x, cen_y):
+def _load_data_2xfm(base_path, scan_num, det_Npixel, cen_x, cen_y, x_exclude=-2):
     print("Loading scan positions and diffraction patterns measured by the XFM instrument at 2IDE.")
     sys.path.append("/mnt/micdata3/ptycho_tools/utility")
     from readMDA import readMDA
@@ -1450,6 +1450,8 @@ def _load_data_2xfm(base_path, scan_num, det_Npixel, cen_x, cen_y):
     y_pos = np.array(mda_data[1].d[5].data)
     STXM = np.array(mda_data[2].d[1].data)
     Ny, Nx = STXM.shape[0], STXM.shape[1]
+
+    x_pos = x_pos[-x_exclude:]
     x_pos -= x_pos.mean()
     y_pos -= y_pos.mean()
     x_pos *= 1e-3
@@ -1457,6 +1459,8 @@ def _load_data_2xfm(base_path, scan_num, det_Npixel, cen_x, cen_y):
 
     N_scan_x = x_pos.shape[0]
     N_scan_y = y_pos.shape[0]
+    print(x_pos.shape)
+    print(x_pos)
     print(f"N_scan_y={N_scan_y}, N_scan_x={N_scan_x}, N_scan_dp={N_scan_x * N_scan_y}")
 
     # Load diffraction patterns
@@ -1475,13 +1479,13 @@ def _load_data_2xfm(base_path, scan_num, det_Npixel, cen_x, cen_y):
             dp_temp = h5_data[filePath][...]
             dp_temp[dp_temp < 0] = 0
             dp_temp[dp_temp > 1e6] = 0
-            # print(fileName, dp_temp.shape)
+            #print(fileName, dp_temp.shape)
 
             if dp_temp.shape[0] < 5:
                 print(f"A lot of pixels are missed on this line: {dp_temp.shape[0]} pixels, Skip!")
                 continue
 
-            dp_crop = dp_temp[:, index_y_lb:index_y_ub, index_x_lb:index_x_ub]
+            dp_crop = dp_temp[-x_exclude:, index_y_lb:index_y_ub, index_x_lb:index_x_ub]
             dp.append(dp_crop)
             scan_posx.extend(x_pos[: dp_crop.shape[0]])
             scan_posy.extend([y_pos[i]] * dp_crop.shape[0])
