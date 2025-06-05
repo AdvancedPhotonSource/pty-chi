@@ -60,6 +60,34 @@ def get_gpu_usage():
     except:
         return None
 
+def check_gpu_availability(gpu_ids, min_free_memory_mb=1000):
+    """
+    Check which GPUs from the list are actually available with sufficient memory.
+    
+    Args:
+        gpu_ids: List of GPU IDs to check
+        min_free_memory_mb: Minimum free memory required in MB
+        
+    Returns:
+        List of available GPU IDs
+    """
+    try:
+        gpu_stats = get_gpu_usage()
+        if not gpu_stats:
+            return gpu_ids  # Fallback if can't get stats
+        
+        available_gpus = []
+        for gpu in gpu_stats:
+            if gpu['index'] in gpu_ids:
+                free_memory_mb = gpu['memory_total'] - gpu['memory_used']
+                if gpu['utilization'] < 50 and free_memory_mb > min_free_memory_mb:
+                    available_gpus.append(gpu['index'])
+        
+        return available_gpus if available_gpus else gpu_ids  # Fallback to original list
+    except Exception as e:
+        print(f"Warning: Could not check GPU availability: {e}")
+        return gpu_ids  # Fallback to original list
+
 def make_fzp_probe(N, lambda_, dx, Ls, Rn, dRn, D_FZP, D_H):
 
     """

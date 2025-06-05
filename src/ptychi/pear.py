@@ -5,7 +5,7 @@ from ptychi.utils import (set_default_complex_dtype,
 import os
 os.environ['HDF5_PLUGIN_PATH'] = '/mnt/micdata3/ptycho_tools/DectrisFileReader/HDF5Plugin'
 
-from .pear_utils import select_gpu, generate_scan_list, FileBasedTracker
+from .pear_utils import select_gpu, generate_scan_list, FileBasedTracker, check_gpu_availability
 from .pear_plot import plot_affine_evolution, plot_affine_summary
 import numpy as np
 
@@ -874,6 +874,7 @@ ptycho_recon(run_recon=True, **params)
 def ptycho_batch_recon2(base_params):
     """
     Process multiple ptychography scans in parallel with automatic error handling and status tracking.
+    Now includes GPU availability monitoring and automatic retry for GPU-related failures.
     
     Args:
         base_params: Dictionary of parameters to use as a template for all scans
@@ -886,9 +887,16 @@ def ptycho_batch_recon2(base_params):
             max_workers: Maximum number of parallel processes (default: number of available GPUs)
             gpu_ids: List of GPU IDs to use (default: [0])
             print_interval: Interval to print the most recent line (default: 5 seconds)
+            max_gpu_retries: Maximum number of retries for GPU-related failures (default: 2)
             reset_scan_list: Whether to restart from the beginning of the scan list after each reconstruction (default: False)
+    
+    Features:
+        - Dynamic GPU availability checking before starting new tasks
+        - Automatic retry for GPU-related failures (CUDA OOM, device errors, etc.)
+        - Intelligent GPU selection based on current utilization
+        - Proper error handling and cleanup
     """
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     import subprocess
     import sys
     import json
@@ -906,6 +914,7 @@ def ptycho_batch_recon2(base_params):
     gpu_ids = base_params.get('gpu_ids', [0])
     max_workers = base_params.get('max_workers', len(gpu_ids))
     print_interval = base_params.get('print_interval', 5)
+    max_gpu_retries = base_params.get('max_gpu_retries', 2)
 
     # Setup log directory
     log_dir = os.path.join(base_params['data_directory'], 'ptychi_recons', 
@@ -987,47 +996,68 @@ ptycho_recon(run_recon=True, **params)
             process = subprocess.Popen(
                 [sys.executable, script_path],
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Merge stderr into stdout for easier handling
                 text=True,
                 bufsize=1,
+                universal_newlines=True
             )
 
             last_print_time = time.time()
-            output_buffer = []
-            error_output = []
+            output_lines = []
             
-            # Stream output in real-time with GPU identifier
+            # Stream output in real-time with GPU identifier using non-blocking approach
+            import select
+            import sys
+            
             while True:
-                # Read from stdout
-                stdout_line = process.stdout.readline()
-                if stdout_line:
-                    output_buffer.append(stdout_line)
-                    current_time = time.time()
-                    if current_time - last_print_time > print_interval:
-                        if output_buffer:
-                            print(f"[S{scan_num:04d}-GPU{gpu_id}]{output_buffer[-1]}", end='')
-                        output_buffer = []
-                        last_print_time = current_time
-                
-                # Read from stderr
-                stderr_line = process.stderr.readline()
-                if stderr_line:
-                    error_output.append(stderr_line)
-                
-                # Check if process has finished
+                # Check if process is still running
                 if process.poll() is not None:
-                    # Read any remaining output
-                    remaining_stdout, remaining_stderr = process.communicate()
-                    if remaining_stdout:
-                        output_buffer.extend(remaining_stdout.splitlines())
-                    if remaining_stderr:
-                        error_output.extend(remaining_stderr.splitlines())
+                    # Process has finished, read any remaining output
+                    remaining_output = process.stdout.read()
+                    if remaining_output:
+                        output_lines.extend(remaining_output.strip().split('\n'))
                     break
+                
+                # Use select to check if there's data available to read (Unix-like systems)
+                if hasattr(select, 'select'):
+                    ready, _, _ = select.select([process.stdout], [], [], 0.1)  # 0.1 second timeout
+                    if ready:
+                        line = process.stdout.readline()
+                        if line:
+                            output_lines.append(line.rstrip())
+                else:
+                    # Fallback for Windows or systems without select
+                    try:
+                        line = process.stdout.readline()
+                        if line:
+                            output_lines.append(line.rstrip())
+                    except:
+                        pass
+                
+                # Check if it's time to print output based on print_interval
+                current_time = time.time()
+                if current_time - last_print_time > print_interval:
+                    if output_lines:
+                        # Print the most recent line(s)
+                        recent_lines = output_lines[-3:]  # Show last 3 lines
+                        for line in recent_lines:
+                            if line.strip():  # Only print non-empty lines
+                                print(f"[S{scan_num:04d}-GPU{gpu_id}] {line}")
+                        sys.stdout.flush()
+                    last_print_time = current_time
+                
+                # Small sleep to prevent busy waiting
+                time.sleep(0.1)
             
             return_code = process.returncode
             if return_code != 0:
-                error_message = "".join(error_output) if error_output else "Process failed with no error output"
-                raise subprocess.CalledProcessError(return_code, f"{sys.executable} {script_path}", error_message)
+                # Print last few lines for debugging
+                if output_lines:
+                    print(f"[S{scan_num:04d}-GPU{gpu_id}] Error - Last output lines:")
+                    for line in output_lines[-5:]:
+                        if line.strip():
+                            print(f"[S{scan_num:04d}-GPU{gpu_id}] {line}")
+                raise subprocess.CalledProcessError(return_code, f"{sys.executable} {script_path}")
             
             elapsed_time = time.time() - start_time
             print(f"Scan {scan_num} completed successfully in {elapsed_time:.2f} seconds")
@@ -1060,76 +1090,164 @@ ptycho_recon(run_recon=True, **params)
     # Generate scan list based on order
     scan_list = generate_scan_list(start_scan, end_scan, scan_order, exclude_scans)
     
-    # Process scans in parallel
+    # Filter out scans that are already done or ongoing (unless overwrite_ongoing is True)
+    pending_scans = []
     successful_scans = []
-    failed_scans = []
     ongoing_scans = []
     
-    print(f"Processing {len(scan_list)} scans using {max_workers} workers on GPUs: {gpu_ids}")
+    for scan_num in scan_list:
+        status = tracker.get_status(scan_num)
+        if status == 'done':
+            print(f"Scan {scan_num} already completed, skipping reconstruction")
+            successful_scans.append(scan_num)
+        elif status == 'ongoing' and not overwrite_ongoing:
+            print(f"Scan {scan_num} already ongoing, skipping reconstruction")
+            ongoing_scans.append(scan_num)
+        else:
+            pending_scans.append(scan_num)
+    
+    if not pending_scans:
+        print("No scans to process")
+        print_summary(successful_scans, [], ongoing_scans, start_scan, end_scan)
+        return successful_scans, [], ongoing_scans
+    
+    print(f"Processing {len(pending_scans)} scans using {max_workers} workers on GPUs: {gpu_ids}")
+    
+    # Process scans with dynamic task submission
+    failed_scans = []
+    retry_counts = {}  # Track retry attempts for each scan
+    max_retries = max_gpu_retries  # Maximum number of retries for GPU-related failures
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit tasks for each scan, cycling through available GPUs
-        futures = []
-        gpu_usage = {}  # Track which GPUs are in use
+        # Submit initial batch of tasks (up to max_workers)
+        future_to_info = {}  # Maps future to (scan_num, gpu_id)
+        assigned_gpus = set()  # Track which GPUs are currently assigned to running tasks
+        scan_iterator = iter(pending_scans)
         
-        for scan_num in scan_list:
-            # Check status using tracker
-            status = tracker.get_status(scan_num)
-            if status == 'done':
-                print(f"Scan {scan_num} already completed, skipping reconstruction")
-                successful_scans.append(scan_num)
-                continue
-            if status == 'ongoing' and not overwrite_ongoing:
-                print(f"Scan {scan_num} already ongoing, skipping reconstruction")
-                ongoing_scans.append(scan_num)
-                continue
-            
-            # Wait for an available GPU
-            available_gpus = wait_for_available_gpu(gpu_ids, gpu_usage)
-            
-            # Select the best available GPU
-            gpu_id = select_gpu(gpu_list=available_gpus)
-            gpu_usage[gpu_id] = scan_num  # Mark GPU as in use
-            
-            print(f"Starting scan {scan_num} on GPU {gpu_id}")
-            future = executor.submit(run_single_reconstruction, scan_num, gpu_id)
-            futures.append((future, gpu_id))
-            time.sleep(1)  # Small delay between submissions
-        
-        # Collect results and update GPU usage
-        for future, gpu_id in futures:
+        # Submit initial tasks
+        for _ in range(min(max_workers, len(pending_scans))):
             try:
-                status, scan_num, error = future.result()
-                if status == 'success':
-                    successful_scans.append(scan_num)
-                elif status == 'failed':
-                    failed_scans.append((scan_num, error))
-                elif status == 'ongoing':
-                    ongoing_scans.append(scan_num)
+                scan_num = next(scan_iterator)
+                # Check GPU availability and exclude already assigned ones
+                available_gpu_ids = check_gpu_availability(gpu_ids)
+                # Remove already assigned GPUs from the available list
+                free_gpu_ids = [gpu_id for gpu_id in available_gpu_ids if gpu_id not in assigned_gpus]
                 
-                if status in ['success', 'failed']:
-                    del gpu_usage[gpu_id]  # Free up the GPU
-            except Exception as e:
-                print(f"Error processing scan on GPU {gpu_id}: {str(e)}")
-                if gpu_id in gpu_usage:
-                    del gpu_usage[gpu_id]  # Free up the GPU even if there was an error
+                # If no free GPUs available, use round-robin assignment from original list
+                if not free_gpu_ids:
+                    gpu_id = gpu_ids[len(future_to_info) % len(gpu_ids)]
+                    print(f"All GPUs busy, using round-robin assignment: GPU {gpu_id}")
+                else:
+                    gpu_id = select_gpu(gpu_list=free_gpu_ids)
+                
+                # Track this GPU as assigned
+                assigned_gpus.add(gpu_id)
+                
+                print(f"Starting scan {scan_num} on GPU {gpu_id} (assigned GPUs: {sorted(assigned_gpus)})")
+                future = executor.submit(run_single_reconstruction, scan_num, gpu_id)
+                future_to_info[future] = (scan_num, gpu_id)
+                time.sleep(1)  # Small delay between submissions
+            except StopIteration:
+                break
+        
+        # Process completed tasks and submit new ones
+        while future_to_info:
+            # Wait for at least one task to complete
+            for future in as_completed(future_to_info):
+                scan_num, gpu_id = future_to_info[future]
+                
+                try:
+                    status, completed_scan_num, error = future.result()
+                    if status == 'success':
+                        successful_scans.append(completed_scan_num)
+                    elif status == 'failed':
+                        # Check if this might be a GPU-related failure
+                        if error and any(gpu_error in str(error).lower() for gpu_error in 
+                                       ['cuda out of memory', 'gpu', 'device', 'cudnn', 'cublas']):
+                            retry_count = retry_counts.get(completed_scan_num, 0)
+                            if retry_count < max_retries:
+                                print(f"GPU-related error detected for scan {completed_scan_num} (retry {retry_count + 1}/{max_retries}). Will retry with different GPU if available.")
+                                retry_counts[completed_scan_num] = retry_count + 1
+                                # Put the scan back in the queue for retry
+                                pending_scans.append(completed_scan_num)
+                                scan_iterator = iter([completed_scan_num] + list(scan_iterator))
+                            else:
+                                print(f"Scan {completed_scan_num} failed after {max_retries} GPU-related retries. Marking as failed.")
+                                failed_scans.append((completed_scan_num, f"GPU error after {max_retries} retries: {error}"))
+                        else:
+                            failed_scans.append((completed_scan_num, error))
+                    elif status == 'ongoing':
+                        ongoing_scans.append(completed_scan_num)
+                    
+                    print(f"GPU {gpu_id} task completed")
+                    
+                except Exception as e:
+                    print(f"Error processing scan {scan_num} on GPU {gpu_id}: {str(e)}")
+                    # Check if this might be a GPU-related failure
+                    if any(gpu_error in str(e).lower() for gpu_error in 
+                          ['cuda out of memory', 'gpu', 'device', 'cudnn', 'cublas']):
+                        retry_count = retry_counts.get(scan_num, 0)
+                        if retry_count < max_retries:
+                            print(f"GPU-related error detected for scan {scan_num} (retry {retry_count + 1}/{max_retries}). Will retry with different GPU if available.")
+                            retry_counts[scan_num] = retry_count + 1
+                            # Put the scan back in the queue for retry
+                            pending_scans.append(scan_num)
+                            scan_iterator = iter([scan_num] + list(scan_iterator))
+                        else:
+                            print(f"Scan {scan_num} failed after {max_retries} GPU-related retries. Marking as failed.")
+                            failed_scans.append((scan_num, f"GPU error after {max_retries} retries: {str(e)}"))
+                    else:
+                        failed_scans.append((scan_num, str(e)))
+                
+                # Remove the completed future and free up the GPU
+                del future_to_info[future]
+                assigned_gpus.discard(gpu_id)  # Free up this GPU for new tasks
+                print(f"GPU {gpu_id} freed up (assigned GPUs: {sorted(assigned_gpus)})")
+                
+                # Submit next task if available
+                try:
+                    next_scan_num = next(scan_iterator)
+                    
+                    # Check GPU availability and exclude already assigned ones
+                    available_gpu_ids = check_gpu_availability(gpu_ids)
+                    # Remove already assigned GPUs from the available list
+                    free_gpu_ids = [gpu_id for gpu_id in available_gpu_ids if gpu_id not in assigned_gpus]
+                    
+                    if not free_gpu_ids:
+                        print("No GPUs currently available with sufficient resources. Waiting before retry...")
+                        time.sleep(10)  # Wait 10 seconds before trying again
+                        available_gpu_ids = check_gpu_availability(gpu_ids)
+                        free_gpu_ids = [gpu_id for gpu_id in available_gpu_ids if gpu_id not in assigned_gpus]
+                        if not free_gpu_ids:
+                            print(f"Still no GPUs available. Putting scan {next_scan_num} back in queue.")
+                            # Put the scan back at the beginning of the iterator
+                            scan_iterator = iter([next_scan_num] + list(scan_iterator))
+                            continue
+                    
+                    available_gpu = select_gpu(gpu_list=free_gpu_ids)
+                    assigned_gpus.add(available_gpu)  # Track this GPU as assigned
+                    
+                    print(f"Starting scan {next_scan_num} on GPU {available_gpu} (assigned GPUs: {sorted(assigned_gpus)})")
+                    new_future = executor.submit(run_single_reconstruction, next_scan_num, available_gpu)
+                    future_to_info[new_future] = (next_scan_num, available_gpu)
+                    time.sleep(1)  # Small delay between submissions
+                except StopIteration:
+                    # No more scans to process
+                    pass
+                
+                # Break out of the for loop since we modified the dictionary
+                break
     
     # Print summary
     print_summary(successful_scans, failed_scans, ongoing_scans, start_scan, end_scan)
     
+    # Print retry statistics if any retries occurred
+    if retry_counts:
+        print(f"\nGPU retry statistics:")
+        for scan_num, retries in retry_counts.items():
+            print(f"  Scan {scan_num}: {retries} retries")
+    
     return successful_scans, failed_scans, ongoing_scans
-
-def wait_for_available_gpu(gpu_ids, gpu_usage, wait_time=5):
-    """Wait until at least one GPU is available and return the list of available GPUs."""
-    available_gpus = [gpu_id for gpu_id in gpu_ids if gpu_id not in gpu_usage]
-    
-    if not available_gpus:
-        print("Waiting for a GPU to become available...")
-        while not available_gpus:
-            time.sleep(wait_time)
-            available_gpus = [gpu_id for gpu_id in gpu_ids if gpu_id not in gpu_usage]
-    
-    return available_gpus
 
 def print_summary(successful_scans, failed_scans, ongoing_scans, start_scan, end_scan):
     """Print a summary of the reconstruction results."""
