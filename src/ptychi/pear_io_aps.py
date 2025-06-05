@@ -22,7 +22,7 @@ from ptychi.pear_utils import make_fzp_probe, resize_complex_array, find_matchin
 import sys
 import torch
 import json
-
+import shutil
 
 def save_reconstructions(task, recon_path, iter, params):
     if params.get("beam_source", "xray") == "electron":
@@ -436,8 +436,7 @@ def save_reconstructions(task, recon_path, iter, params):
             hdf_file.create_dataset("slice_spacings_m", data=slice_spacings)
 
     if params["number_of_iterations"] == iter:
-        if params.get("collect_object_phase", False):  # copy final recon to a collection folder
-            recon_object = task.get_data_to_cpu("object", as_numpy=False)
+        if params.get("collect_object_phase", False):  # copy final object phase to a collection folder
             obj_ph_collection_dir = os.path.join(
                 params["data_directory"],
                 "ptychi_recons",
@@ -445,21 +444,28 @@ def save_reconstructions(task, recon_path, iter, params):
                 "object_ph_collection",
             )
             os.makedirs(obj_ph_collection_dir, exist_ok=True)
-            object_full_ph_unwrapped = unwrap_phase_2d(
-                recon_object[0,].cuda(),
-                image_grad_method="fourier_differentiation",
-                image_integration_method="fourier",
-            )
             print(
                 f"\nSaving final object phase to {obj_ph_collection_dir}/S{params['scan_num']:04d}.tiff"
             )
-            imwrite(
-                f"{obj_ph_collection_dir}/S{params['scan_num']:04d}.tiff",
-                normalize_by_bit_depth(object_full_ph_unwrapped.cpu(), "16"),
-                photometric="minisblack",
-                resolution=(1 / pixel_size, 1 / pixel_size),
-                metadata={"unit": pixel_unit, "pixel_size": pixel_size},
-                imagej=True,
+            shutil.copy(
+                f"{recon_path}/object_ph/object_ph_Niter{iter}.tiff",
+                f"{obj_ph_collection_dir}/S{params['scan_num']:04d}.tiff"
+            )
+
+        if params.get("collect_probe_magnitude", False):  # copy final probe magnitude to a collection folder
+            probe_mag_collection_dir = os.path.join(
+                params["data_directory"],
+                "ptychi_recons",
+                params["recon_parent_dir"],
+                "probe_mag_collection",
+            )
+            os.makedirs(probe_mag_collection_dir, exist_ok=True)
+            print(
+                f"\nSaving final probe magnitude to {probe_mag_collection_dir}/S{params['scan_num']:04d}.tiff"
+            )
+            shutil.copy(
+                f"{recon_path}/probe_mag/probe_mag_Niter{iter}.tiff",
+                f"{probe_mag_collection_dir}/S{params['scan_num']:04d}.tiff"
             )
 
 
