@@ -101,7 +101,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         )
         psi_prime = self.forward_model.free_space_propagator.propagate_backward(psi_prime)
 
-        delta_exwv_i = (psi_prime - psi)
+        delta_exwv_i = psi_prime - psi
         delta_o = torch.zeros_like(object_.data)
   
         for i_slice in range(object_.n_slices - 1, -1, -1):
@@ -136,7 +136,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
             delta_p_i = None
             if (i_slice == 0) and (probe.optimization_enabled(self.current_epoch)):
                 if (self.parameter_group.probe.representation == "sparse_code"):
-
+                    # TODO: move this into SynthesisDictLearnProbe class
                     rc = delta_exwv_i.shape[-1] * delta_exwv_i.shape[-2]
                     n_scpm = delta_exwv_i.shape[-3]
                     n_spos = delta_exwv_i.shape[-4]
@@ -164,11 +164,9 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                                         
                     # sparse code update 
                     sparse_code = self.parameter_group.probe.get_sparse_code_weights()
-                    sparse_code = sparse_code + 1e-0 * delta_sparse_code
+                    sparse_code = sparse_code + delta_sparse_code
 
-                    #===========================================
                     # Enforce sparsity constraint on sparse code
-                    
                     abs_sparse_code = torch.abs(sparse_code)
                     sparse_code_sorted = torch.sort(abs_sparse_code, dim=0, descending=True)
                     
@@ -181,8 +179,6 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                     
                     # Update the new sparse code in the probe class
                     self.parameter_group.probe.set_sparse_code(sparse_code)
-                    
-
                 else:
                     step_weight = self.calculate_probe_step_weight((obj_patches[:, i_slice, ...])[:, None, ...])
                     delta_p_i = step_weight * delta_exwv_i # get delta p at each position
@@ -354,15 +350,6 @@ class RPIEReconstructor(PIEReconstructor):
             (1 - self.parameter_group.object.options.alpha) * abs2_p
             + self.parameter_group.object.options.alpha * p_max
         )
-        
-        # # use only first mode
-        # abs2_p = (torch.abs(p) ** 2)[:, 0]
-        # p_max = abs2_p.max()
-        # step_weight = p.conj()[:, 0] / (
-        #     (1 - self.parameter_group.object.options.alpha) * abs2_p
-        #     + self.parameter_group.object.options.alpha * p_max
-        # )
-        
         return step_weight[:, None,...]
 
     @timer()

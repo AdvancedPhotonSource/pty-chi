@@ -494,16 +494,13 @@ class SynthesisDictLearnProbe( Probe ):
         """
         probe_vec = self.dictionary_matrix @ self.sparse_code_probe
         probe_vec = torch.swapaxes( probe_vec, 0, -1)
-        probe = torch.reshape( probe_vec, *[self.data[0,...].shape] )
+        probe = torch.reshape(probe_vec, *[self.data[0,...].shape])
         probe = probe[None,...]
         
         # we only use sparse codes for the shared modes, not the OPRs
         probe = torch.cat((probe, self.data[1:,...]), 0)    
         
-        # is this the correct way to retain the originally initialized grad?
-        self.tensor.data.data = torch.stack([probe.real, probe.imag], dim=-1)
-
-        
+        self.set_data(probe)
         return probe
     
     def build_optimizer(self):
