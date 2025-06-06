@@ -68,6 +68,9 @@ class Test2dPtychoAutodiff(tutils.TungstenDataTester):
         options.probe_position_options.position_y_px = positions_px[:, 0]
         options.probe_position_options.optimizable = True
         options.probe_position_options.step_size = 10
+        options.probe_position_options.correction_options.update_magnitude_limit = None
+        options.probe_position_options.correction_options.clip_update_magnitude_by_mad = False
+        options.probe_position_options.correction_options.differentiation_method = api.ImageGradientMethods.GAUSSIAN
         
         options.reconstructor_options.batch_size = 96
         options.reconstructor_options.num_epochs = 32

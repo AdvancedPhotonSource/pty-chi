@@ -5,7 +5,7 @@ from typing import Optional, Union, TYPE_CHECKING, Sequence
 import dataclasses
 from dataclasses import field
 import logging
-from math import inf, ceil
+from math import ceil
 
 from numpy import ndarray
 from torch import Tensor
@@ -588,7 +588,7 @@ class PositionCorrectionOptions(Options):
     correction_type: enums.PositionCorrectionTypes = enums.PositionCorrectionTypes.GRADIENT
     """Type of algorithm used to calculate the position correction update."""
     
-    differentiation_method: enums.ImageGradientMethods = enums.ImageGradientMethods.GAUSSIAN
+    differentiation_method: enums.ImageGradientMethods = enums.ImageGradientMethods.FOURIER_DIFFERENTIATION
     """The method for calculating the gradient of the object. Only used when `correction_type` 
     is `GRADIENT`. `"FOURIER_DIFFERENTIATION"` is usually the fastest, but it might be less
     stable when the object is noisy or non-smooth, under which circumstance `"GAUSSIAN"` or
@@ -609,9 +609,16 @@ class PositionCorrectionOptions(Options):
     is chosen.
     """
     
-    update_magnitude_limit: Optional[float] = inf
+    clip_update_magnitude_by_mad: bool = True
+    """If True, the update magnitude is eventually clipped by 10 times the mean absolute deviation (MAD)
+    of the updates. When `update_magnitude_limit` is set, the limit will be set to the smaller of them,
+    i.e., `min(update_magnitude_limit, 10 * MAD)`.
+    """
+    
+    update_magnitude_limit: Optional[float] = 0.1
     """The maximum allowed magnitude of position update in each axis. Updates larger than this value 
-    are clipped. Set to None or inf to disable the constraint.
+    are clipped. Set to None or inf to disable the constraint. When `clip_update_magnitude_by_mad` is
+    `True`, the actual limit will be set to the smaller of `update_magnitude_limit` and `10 * MAD`.
     """
     
 
@@ -628,7 +635,7 @@ class PositionAffineTransformConstraintOptions(FeatureOptions):
         enums.AffineDegreesOfFreedom.ROTATION,
         enums.AffineDegreesOfFreedom.SCALE,
         enums.AffineDegreesOfFreedom.SHEAR,
-        enums.AffineDegreesOfFreedom.ASSYMETRY,
+        enums.AffineDegreesOfFreedom.ASYMMETRY,
     )
     """The degrees of freedom to include in the affine transformation."""
     
@@ -673,15 +680,14 @@ class ProbePositionMagnitudeLimitOptions(FeatureOptions):
 class ProbePositionOptions(ParameterOptions):
     optimizable: bool = False
     
+    step_size: float = 0.3
+    """The step size for probe position update."""
+    
     position_x_px: Union[ndarray, Tensor] = None
     """The x position in pixel."""
 
     position_y_px: Union[ndarray, Tensor] = None
     """The y position in pixel."""
-
-    magnitude_limit: ProbePositionMagnitudeLimitOptions = dataclasses.field(
-        default_factory=ProbePositionMagnitudeLimitOptions
-    )
 
     constrain_position_mean: bool = False
     """
@@ -711,14 +717,6 @@ class ProbePositionOptions(ParameterOptions):
         
     def check(self, options: "task_options.PtychographyTaskOptions"):
         super().check(options)
-        if self.magnitude_limit.enabled or self.magnitude_limit.limit > 0:
-            raise ValueError(
-                "`probe_position_options.magnitude_limit` is depreciated "
-                "and will be removed in the future. Please use "
-                "`probe_position_options.correction_options.update_magnitude_limit` instead. "
-                "To avoid this error, set `enabled` to `False` and `limit` to 0 in "
-                "`probe_position_options.magnitude_limit`."
-            )
         if self.correction_options.update_magnitude_limit == 0:
             raise ValueError(
                 "`probe_position_options.correction_options.update_magnitude_limit` is "
@@ -726,14 +724,6 @@ class ProbePositionOptions(ParameterOptions):
                 "will at the same time produce unstability. If you want to disable "
                 "position correction, set `optimizable` to `False`. To disable update "
                 "magnitude limit, set `update_magnitude_limit` to None or inf."
-            )
-        if (
-            self.correction_options.update_magnitude_limit is not None
-            and self.correction_options.update_magnitude_limit < inf
-            and options.reconstructor_options.get_reconstructor_type() == enums.Reconstructors.AD_PTYCHO
-        ):
-            raise NotImplementedError(
-                "Update magnitude limit is not supported for AutodiffPtychography."
             )
 
 

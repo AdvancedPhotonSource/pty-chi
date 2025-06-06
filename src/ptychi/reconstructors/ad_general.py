@@ -86,10 +86,10 @@ class AutodiffReconstructor(IterativeReconstructor):
     def step_all_optimizers(self):
         for var in self.parameter_group.get_optimizable_parameters():
             if var.optimization_enabled(self.current_epoch):
-                var.optimizer.step()
+                var.step_optimizer()
                 for sub_module in var.optimizable_sub_modules:
                     if sub_module.optimization_enabled(self.current_epoch):
-                        sub_module.optimizer.step()
+                        sub_module.step_optimizer()
 
     def get_forward_model(self) -> "fm.ForwardModel":
         if isinstance(self.forward_model, torch.nn.DataParallel):

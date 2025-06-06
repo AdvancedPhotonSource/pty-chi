@@ -11,6 +11,8 @@ import ptychi.data_structures.base as dsbase
 import ptychi.image_proc as ip
 import ptychi.maths as pmath
 import ptychi.api.enums as enums
+from ptychi.utils import to_numpy
+
 if TYPE_CHECKING:
     import ptychi.api as api
     from ptychi.data_structures.probe import Probe
@@ -46,6 +48,12 @@ class ProbePositions(dsbase.ReconstructParameter):
             self.get_identity_affine_transform_matrix()
         )
         self.register_buffer("position_weights", torch.ones_like(self.data))
+        self.affine_transform_components = {
+            "scale": 1.0,
+            "asymmetry": 0.0,
+            "rotation": 0.0,
+            "shear": 0.0,
+        }
 
     @property
     def n_scan_points(self):
@@ -152,27 +160,35 @@ class ProbePositions(dsbase.ReconstructParameter):
             x = torch.cat([x, torch.ones_like(x[..., 0:1])], dim=-1)
             x0 = torch.cat([x0, torch.ones_like(x0[..., 0:1])], dim=-1)
         
-        a_mat = pmath.fit_linear_transform_matrix(x0, x)
+        # `fit_linear_transform_matrix(x0, x)` finds A in x0 A = x. When we apply affine transform,
+        # we do x = (A x0^T)^T = x0 A^T. Therefore, we need to take the transpose of the result.
+        a_mat = pmath.fit_linear_transform_matrix(x0, x).T
         
         if enums.AffineDegreesOfFreedom.TRANSLATION in dofs:
             a_mat = a_mat[:, :-1]
         
-        scale, assymetry, rotation, shear = pmath.decompose_2x2_affine_transform_matrix(a_mat)
+        scale, asymmetry, rotation, shear = pmath.decompose_2x2_affine_transform_matrix(a_mat)
         if enums.AffineDegreesOfFreedom.SCALE not in dofs:
             scale = 1.0
-        if enums.AffineDegreesOfFreedom.ASSYMETRY not in dofs:
-            assymetry = 0.0
+        if enums.AffineDegreesOfFreedom.ASYMMETRY not in dofs:
+            asymmetry = 0.0
         if enums.AffineDegreesOfFreedom.ROTATION not in dofs:
             rotation = 0.0
         if enums.AffineDegreesOfFreedom.SHEAR not in dofs:
             shear = 0.0
         
         a_mat = pmath.compose_2x2_affine_transform_matrix(
-            scale, assymetry, rotation, shear
+            scale, asymmetry, rotation, shear
         )
         self.affine_transform_matrix = torch.cat([a_mat, torch.zeros(2, 1, device=a_mat.device)], dim=1)
         
-    def apply_affine_transform_constraint(self):        
+        # Update saved components.
+        self.affine_transform_components["scale"] = to_numpy(scale)
+        self.affine_transform_components["asymmetry"] = to_numpy(asymmetry)
+        self.affine_transform_components["rotation"] = to_numpy(rotation)
+        self.affine_transform_components["shear"] = to_numpy(shear)
+        
+    def apply_affine_transform_constraint(self):
         estimated_positions = self.affine_transform_matrix @ \
             torch.cat([self.initial_positions, torch.ones_like(self.initial_positions[..., 0:1])], dim=-1).T
         estimated_positions = estimated_positions.T
@@ -188,3 +204,39 @@ class ProbePositions(dsbase.ReconstructParameter):
         
         pos_new = self.data * (1 - flexibility) + flexibility * estimated_positions
         self.set_data(pos_new)
+
+    def step_optimizer(self, *args, **kwargs):
+        """Step the optimizer with gradient filled in. This function
+        can optionally impose a limit on the magnitude of the update.
+        """
+        limit_user = self.options.correction_options.update_magnitude_limit
+        if limit_user is not None and limit_user <= 0:
+            raise ValueError("`update_magnitude_limit` should either be None or a positive number.")
+        if limit_user == torch.inf:
+            limit_user = None
+        data0 = self.data
+            
+        self.optimizer.step()
+        
+        if not self.options.correction_options.clip_update_magnitude_by_mad and limit_user is None:
+            return
+        
+        # Get update.
+        data = self.data
+        dx = data - data0
+        update_mag = dx.abs()
+        update_signs = dx.sign()
+        
+        # Truncate update by the limit and reapply it.
+        if self.options.correction_options.clip_update_magnitude_by_mad:
+            limit_mad = pmath.mad(dx, dim=0) * 10
+        else:
+            limit_mad = torch.inf
+        if limit_user is not None:
+            limit = torch.clip(limit_mad, max=limit_user)
+        else:
+            limit = limit_mad
+        dx = update_mag.clip(max=limit) * update_signs
+        
+        with torch.no_grad():
+            self.set_data(data0 + dx)

@@ -468,14 +468,14 @@ def decompose_2x2_affine_transform_matrix(
 
 def compose_2x2_affine_transform_matrix(
     scale: torch.Tensor,
-    assymetry: torch.Tensor,
+    asymmetry: torch.Tensor,
     rotation: torch.Tensor,
     shear: torch.Tensor
 ) -> torch.Tensor:
     """
     Compose a 2x2 affine transformation matrix from scale, asymmetry, rotation, and shear.
     """
-    x = [scale, assymetry, rotation, shear]
+    x = [scale, asymmetry, rotation, shear]
     m = torch.stack([
         (1 + x[1] / 2) * (torch.cos(x[2]) + torch.sin(x[2]) * torch.tan(x[3])),
         (1 + x[1] / 2) * torch.sin(x[2]),
@@ -563,3 +563,9 @@ def redot(a, b, axis=None):
     res = torch.sum(reprod(a, b), axis=axis)
     return res
 
+
+def mad(x: torch.Tensor, dim=None):
+    """
+    Mean absolute deviation
+    """
+    return torch.mean(torch.abs(x - torch.mean(x, dim=dim)), dim=dim)

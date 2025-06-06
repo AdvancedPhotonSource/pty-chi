@@ -106,7 +106,7 @@ class AffineDegreesOfFreedom(StrEnum):
     ROTATION = auto()
     SCALE = auto()
     SHEAR = auto()
-    ASSYMETRY = auto()
+    ASYMMETRY = auto()
 
 
 class DIPModels(StrEnum):

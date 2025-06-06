@@ -4,13 +4,61 @@ Getting Started
 Installation
 ------------
 
-Clone the repository to your workspace, and create a new conda environment::
+Standard installation
+~~~~~~~~~~~~~~~~~~~~~
+The easiest way to install the latest release is through PyPI. 
 
-    conda create -n ptychi -c conda-forge -c nvidia --file requirements-dev.txt
+First, create a new conda environment with Python 3.11:
+::
+
+    conda create -n ptychi python=3.11
+
+Then install Pty-Chi using::
+
+    pip install ptychi
+
+
+Developer installation
+~~~~~~~~~~~~~~~~~~~~~~
+
+Use developer installation when you want to modify the code and test the changes,
+or when you run into build issues that drive you to install the package from source.
+We recommend using Conda/pip or uv for environment and package management.
+
+Installation with Conda and pip
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To install the latest code in the `main` branch, clone the repository to your workspace, and create a new conda environment
+using::
+
+    conda create -n ptychi -c conda-forge -c nvidia --file requirements.txt
 
 Then install the package using::
 
     pip install -e .
+
+
+Installation with uv
+^^^^^^^^^^^^^^^^^^^^
+
+Uv is a modern lightweight package manager for Python featuring fast speed and
+deterministic builds. When creating a uv virtual environment, the environment
+directory and all the packages inatalled in it are kept in the current working
+directory -- unlike Conda, where the environments are centrally managed. Therefore,
+first ``cd`` into the root level of your local clone of the repository, and then create
+a new uv virtual environment with Python 3.11::
+
+    uv venv --python 3.11 .venv
+
+Activate the environment::
+
+    source .venv/bin/activate
+
+Then install Pty-Chi and its dependencies using::
+
+    uv pip install -r requirements.txt
+    uv pip install -e .
+
 
 Basic Usage
 -----------

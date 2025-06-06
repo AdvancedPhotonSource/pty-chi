@@ -65,6 +65,13 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
     You may also want to check `ObjectOptions.remove_object_probe_ambiguity`.
     """
     
+    preconditioning_damping_factor: float = 0.1
+    """
+    The damping factor for applying preconditioning to the object update, which is calculated as::
+    
+        delta_o_hat = delta_o_hat / torch.sqrt(preconditioner ** 2 + (preconditioner.max() * mixing_factor) ** 2)
+    """
+    
     def check(self, options: "LSQMLOptions"):
         super().check(options)
         if self.rescale_probe_intensity_in_first_epoch:
