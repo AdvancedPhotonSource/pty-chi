@@ -57,8 +57,6 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         return super().build_loss_tracker()
 
     def check_inputs(self, *args, **kwargs):
-        if self.parameter_group.object.is_multislice:
-            raise NotImplementedError("EPIEReconstructor only supports 2D objects.")
         for var in self.parameter_group.get_optimizable_parameters():
             if "lr" not in var.optimizer_params.keys():
                 raise ValueError(
@@ -94,8 +92,8 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         obj_patches = self.forward_model.intermediate_variables["obj_patches"]
         psi = self.forward_model.intermediate_variables["psi"]
         psi_far = self.forward_model.intermediate_variables["psi_far"]
-        unique_probes = self.forward_model.intermediate_variables.shifted_unique_probes[0]
-
+        unique_probes = self.forward_model.intermediate_variables.shifted_unique_probes
+        
         psi_prime = self.replace_propagated_exit_wave_magnitude(psi_far, y_true)
         # Do not swap magnitude for bad pixels.
         psi_prime = torch.where(
@@ -103,88 +101,107 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         )
         psi_prime = self.forward_model.free_space_propagator.propagate_backward(psi_prime)
 
-        delta_o = None
-        if object_.optimization_enabled(self.current_epoch):
-            step_weight = self.calculate_object_step_weight(unique_probes)
-            delta_o_patches = step_weight * (psi_prime - psi)
-            delta_o_patches = delta_o_patches.sum(1, keepdim=True)
-            delta_o = ip.place_patches_integer(
-                torch.zeros_like(object_.get_slice(0)),
-                positions.round().int() + object_.pos_origin_coords,
-                delta_o_patches[:, 0],
-                op="add",
-            )
-            # Add slice dimension.
-            delta_o = delta_o.unsqueeze(0)
+        delta_exwv_i = psi_prime - psi
+        delta_o = torch.zeros_like(object_.data)
+  
+        for i_slice in range(object_.n_slices - 1, -1, -1):
+        
+            if object_.optimization_enabled(self.current_epoch):
+                step_weight = self.calculate_object_step_weight(unique_probes[i_slice])
+                delta_o_patches = step_weight * delta_exwv_i
+                delta_o_patches = delta_o_patches.sum(1, keepdim=True)
+                delta_o_i = ip.place_patches_integer(
+                    torch.zeros_like(object_.get_slice(0)),
+                    positions.round().int() + object_.pos_origin_coords,
+                    delta_o_patches[:, 0],
+                    op="add",
+                )
+                
+                delta_o[i_slice, ...] = delta_o_i
 
-        delta_pos = None
-        if probe_positions.optimization_enabled(self.current_epoch) and object_.optimizable:
-            delta_pos = torch.zeros_like(probe_positions.data)
-            delta_pos[indices] = probe_positions.position_correction.get_update(
-                psi_prime - psi,
-                obj_patches,
-                delta_o_patches,
-                self.forward_model.intermediate_variables.shifted_unique_probes[0],
-                object_.optimizer_params["lr"],
-            )
+            delta_pos = None
+            if (probe_positions.optimization_enabled(self.current_epoch) 
+                and object_.optimizable
+                and i_slice == self.parameter_group.probe_positions.get_slice_for_correction(object_.n_slices)
+            ):
+                delta_pos = torch.zeros_like(probe_positions.data)
+                delta_pos[indices] = probe_positions.position_correction.get_update(
+                    delta_exwv_i,
+                    obj_patches[:, i_slice : i_slice + 1, ...],    
+                    delta_o_patches,
+                    self.forward_model.intermediate_variables.shifted_unique_probes[i_slice],
+                    object_.optimizer_params["lr"],
+                )
 
-        delta_p_i = None
-        if probe.optimization_enabled(self.current_epoch) and self.parameter_group.probe.representation == "sparse_code":
-            rc = psi_prime.shape[-1] * psi_prime.shape[-2]
-            n_scpm = psi_prime.shape[-3]
-            n_pos = psi_prime.shape[-4]
+            delta_p_i = None
+            if (i_slice == 0) and (probe.optimization_enabled(self.current_epoch)):
+                if (self.parameter_group.probe.representation == "sparse_code"):
+                    # TODO: move this into SynthesisDictLearnProbe class
+                    rc = delta_exwv_i.shape[-1] * delta_exwv_i.shape[-2]
+                    n_scpm = delta_exwv_i.shape[-3]
+                    n_spos = delta_exwv_i.shape[-4]
             
-            psi_prime_vec = torch.reshape(psi_prime, (n_pos, n_scpm, rc))
-            
-            probe_vec = torch.reshape(self.parameter_group.probe.data[0, ...], (n_scpm , rc))
-            
-            obj_patches_vec = torch.reshape(obj_patches, (n_pos, 1, rc ))
-            
-            conj_obj_patches = torch.conj(obj_patches_vec)
-            abs2_obj_patches = torch.abs(obj_patches_vec) ** 2
-            
-            z = torch.sum(abs2_obj_patches, dim = 0)
-            z_max = torch.max(z)
-            w = 0.9 * (z_max - z)
-            
-            sum_spos_conjT_s_psi = torch.sum(conj_obj_patches * psi_prime_vec, 0)
-            sum_spos_conjT_s_psi = torch.swapaxes(sum_spos_conjT_s_psi, 0, 1)
-            
-            w_phi =  torch.swapaxes(w * probe_vec, 0, 1)
-            z_plus_w = torch.swapaxes(z + w, 0, 1)
-            
-            numer = self.parameter_group.probe.dictionary_matrix_H @ (sum_spos_conjT_s_psi + w_phi)
-            denom = (self.parameter_group.probe.dictionary_matrix_H @ (z_plus_w * self.parameter_group.probe.dictionary_matrix))
-            
-            sparse_code = torch.linalg.solve(denom, numer)
-            
-            # Enforce sparsity constraint on sparse code
-            abs_sparse_code = torch.abs(sparse_code)
-            sparse_code_sorted = torch.sort(abs_sparse_code, dim=0, descending=True)
-            
-            sel = sparse_code_sorted[0][self.parameter_group.probe.probe_sparse_code_nnz, :]
-            
-            sparse_code = sparse_code * (abs_sparse_code >= sel)
-   
-            # Update sparse code in probe object
-            self.parameter_group.probe.set_sparse_code(sparse_code)
-        else:
-            step_weight = self.calculate_probe_step_weight(obj_patches)
-            delta_p_i = step_weight * (psi_prime - psi)  # get delta p at each position
-            delta_p_i = self.adjoint_shift_probe_update_direction(indices, delta_p_i, first_mode_only=True)
+                    obj_patches_vec = torch.reshape(obj_patches[:, i_slice, ...], (n_spos, 1, rc ))
+                    abs2_obj_patches = torch.abs(obj_patches_vec) ** 2
+                    
+                    z = torch.sum(abs2_obj_patches, dim = 0)
+                    z_max = torch.max(z)
+                    w = self.parameter_group.probe.options.alpha * (z_max - z)
+                    z_plus_w = torch.swapaxes(z + w, 0, 1)
+                    
+                    delta_exwv = self.adjoint_shift_probe_update_direction(indices, delta_exwv_i, first_mode_only=True)
+                    delta_exwv = torch.sum(delta_exwv, 0)
+                    delta_exwv = torch.reshape( delta_exwv, (n_scpm, rc)).T
+                    
+                    denom = (self.parameter_group.probe.dictionary_matrix_H @ (z_plus_w * self.parameter_group.probe.dictionary_matrix))
+                    numer = self.parameter_group.probe.dictionary_matrix_H @ delta_exwv
+                    
+                    delta_sparse_code = torch.linalg.solve(denom, numer)
+                    
+                    delta_p = self.parameter_group.probe.dictionary_matrix @ delta_sparse_code
+                    delta_p = torch.reshape( delta_p.T, (  n_scpm, delta_exwv_i.shape[-1] , delta_exwv_i.shape[-2]))
+                    delta_p_i = torch.tile(delta_p, (n_spos,1,1,1)) 
+                                        
+                    # sparse code update 
+                    sparse_code = self.parameter_group.probe.get_sparse_code_weights()
+                    sparse_code = sparse_code + delta_sparse_code
 
-        # Calculate and apply opr mode updates
-        if self.parameter_group.opr_mode_weights.optimization_enabled(self.current_epoch):
-            opr_mode_weights.update_variable_probe(
-                probe,
-                indices,
-                psi_prime - psi,
-                delta_p_i,
-                delta_p_i.mean(0),
-                obj_patches,
-                self.current_epoch,
-                probe_mode_index=0,
-            )
+                    # Enforce sparsity constraint on sparse code
+                    abs_sparse_code = torch.abs(sparse_code)
+                    sparse_code_sorted = torch.sort(abs_sparse_code, dim=0, descending=True)
+                    
+                    sel = sparse_code_sorted[0][self.parameter_group.probe.probe_sparse_code_nnz, :]
+                    
+                    # hard thresholding: 
+                    sparse_code = sparse_code * (abs_sparse_code >= sel)
+                    
+                    #(TODO: soft thresholding option)
+                    
+                    # Update the new sparse code in the probe class
+                    self.parameter_group.probe.set_sparse_code(sparse_code)
+                else:
+                    step_weight = self.calculate_probe_step_weight((obj_patches[:, [i_slice], ...]))
+                    delta_p_i = step_weight * delta_exwv_i # get delta p at each position
+                    
+                    # Undo subpixel shift in probe update directions.
+                    delta_p_i = self.adjoint_shift_probe_update_direction(indices, delta_p_i, first_mode_only=True)
+                        
+                # Calculate and apply opr mode updates
+                if self.parameter_group.opr_mode_weights.optimization_enabled(self.current_epoch):
+                    opr_mode_weights.update_variable_probe(
+                        probe,
+                        indices,
+                        delta_exwv_i,
+                        delta_p_i,                  
+                        delta_p_i.mean(0),
+                        obj_patches,
+                        self.current_epoch,
+                        probe_mode_index=0,
+                    )
+                    
+            if i_slice > 0:
+                delta_exwv_i = delta_exwv_i * obj_patches[:, i_slice : i_slice + 1,...].conj()
+                delta_exwv_i = self.forward_model.propagate_to_previous_slice(delta_exwv_i, slice_index=i_slice) 
 
         return (delta_o, delta_p_i, delta_pos), y
 
