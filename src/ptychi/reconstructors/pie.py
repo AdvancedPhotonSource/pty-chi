@@ -180,7 +180,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                     # Update the new sparse code in the probe class
                     self.parameter_group.probe.set_sparse_code(sparse_code)
                 else:
-                    step_weight = self.calculate_probe_step_weight((obj_patches[:, i_slice, ...])[:, None, ...])
+                    step_weight = self.calculate_probe_step_weight((obj_patches[:, [i_slice], ...]))
                     delta_p_i = step_weight * delta_exwv_i # get delta p at each position
                     
                     # Undo subpixel shift in probe update directions.
@@ -222,9 +222,9 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         numerator = p.abs() * p.conj()
         denominator = p.abs().sum(1, keepdim=True).max() * (
-            (p.abs() ** 2).sum(1, keepdim=True) + self.parameter_group.object.options.alpha * (p.abs() ** 2).sum(1, keepdim=True).max()
+            p.abs() ** 2 + self.parameter_group.object.options.alpha * (p.abs() ** 2).sum(1, keepdim=True).max()
         )
-        step_weight = numerator.sum(1, keepdim=True) / denominator
+        step_weight = numerator / denominator
         return step_weight
 
     @timer()
@@ -250,7 +250,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
             obj_patches.abs() ** 2 + self.parameter_group.probe.options.alpha * obj_max
         )
         step_weight = numerator / denominator
-        return step_weight[:, None, ...]
+        return step_weight
 
     @timer()
     def apply_updates(self, delta_o, delta_p_i, delta_pos, *args, **kwargs):
@@ -302,8 +302,8 @@ class EPIEReconstructor(PIEReconstructor):
 
     @timer()
     def calculate_object_step_weight(self, p: Tensor):
-        p_max = (torch.abs(p) ** 2).sum(1, keepdim=True).max()
-        step_weight = self.parameter_group.object.options.alpha * p.conj().sum(1, keepdim=True) / p_max
+        p_max = (torch.abs(p) ** 2).sum(1).max()
+        step_weight = self.parameter_group.object.options.alpha * p.conj() / p_max
         return step_weight
 
     @timer()
@@ -340,15 +340,12 @@ class RPIEReconstructor(PIEReconstructor):
 
     @timer()
     def calculate_object_step_weight(self, p: Tensor):
-        
-        # apply multimodal update
-        abs2_p = (torch.abs(p) ** 2).sum(1)
-        p_max = abs2_p.max()
-        step_weight = p.conj().sum(1) / (
-            (1 - self.parameter_group.object.options.alpha) * abs2_p
+        p_max = (torch.abs(p) ** 2).sum(1).max()
+        step_weight = p.conj() / (
+            (1 - self.parameter_group.object.options.alpha) * (torch.abs(p) ** 2)
             + self.parameter_group.object.options.alpha * p_max
         )
-        return step_weight[:, None,...]
+        return step_weight
 
     @timer()
     def calculate_probe_step_weight(self, obj_patches: Tensor):
