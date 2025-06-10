@@ -23,7 +23,7 @@ class Test2DPtychoRPIE_SDL(tutils.TungstenDataTester):
                 self.get_ci_input_data_dir(), "zernike2D_dictionaries", "testing_sdl_dictionary.npz"
             )
         )
-        D = npz_dict_file["a"]
+        D = npz_dict_file["D"]
         npz_dict_file.close()
 
         options = api.RPIEOptions()
