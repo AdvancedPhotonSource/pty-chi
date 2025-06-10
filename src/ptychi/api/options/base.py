@@ -501,6 +501,13 @@ class ProbeCenterConstraintOptions(FeatureOptions):
     enabled: bool = False
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+    
+    use_intensity_for_com: bool = False
+    """
+    Whether to use the dominant shared probe mode for computing
+    the center of mass of the probe in order to keep it centered, 
+    or to use the probe intensity.
+    """
 
 
 @dataclasses.dataclass
