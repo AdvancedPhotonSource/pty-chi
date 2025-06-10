@@ -396,7 +396,7 @@ class Probe(dsbase.ReconstructParameter):
         """
         
         if self.options.center_constraint.use_intensity_for_com:
-            probe_to_be_shifted = torch.sum( torch.abs( self.data[0,...] ) ** 2, dim=0 )
+            probe_to_be_shifted = torch.sum(torch.abs(self.data[0,...])**2, dim=0)
         else:
             probe_to_be_shifted = self.get_mode_and_opr_mode(0, 0)
         
