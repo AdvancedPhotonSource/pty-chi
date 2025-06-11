@@ -673,17 +673,6 @@ class PositionAffineTransformConstraintOptions(FeatureOptions):
 
 
 @dataclasses.dataclass
-class ProbePositionMagnitudeLimitOptions(FeatureOptions):
-    """Settings for imposing a magnitude limit on the probe position update."""
-
-    enabled: bool = False
-
-    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
-
-    limit: Optional[float] = 0
-
-
-@dataclasses.dataclass
 class ProbePositionOptions(ParameterOptions):
     optimizable: bool = False
     
