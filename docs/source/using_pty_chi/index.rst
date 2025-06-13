@@ -6,5 +6,6 @@ Using Pty-chi
 
    data_structures
    initialization_recommendations
+   position_mapping
    devices
    engines
