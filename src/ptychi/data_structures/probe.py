@@ -476,7 +476,6 @@ class SynthesisDictLearnProbe( Probe ):
         return dictionary_matrix, dictionary_matrix_pinv, dictionary_matrix_H
 
     def get_sparse_code_weights(self):
-        
         sz = self.data.shape
         probe_vec = torch.reshape( self.data[0,...], (sz[1], sz[2] * sz[3]))
         probe_vec = torch.swapaxes( probe_vec, 0, -1)
