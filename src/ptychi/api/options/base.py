@@ -501,6 +501,13 @@ class ProbeCenterConstraintOptions(FeatureOptions):
     enabled: bool = False
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+    
+    use_intensity_for_com: bool = False
+    """
+    Whether to use the magnitude of the dominant shared probe 
+    mode for computing the center of mass of the probe in order 
+    to keep it centered, or to use the total probe intensity.
+    """
 
 
 @dataclasses.dataclass
@@ -663,17 +670,6 @@ class PositionAffineTransformConstraintOptions(FeatureOptions):
             return True
         else:
             return False
-
-
-@dataclasses.dataclass
-class ProbePositionMagnitudeLimitOptions(FeatureOptions):
-    """Settings for imposing a magnitude limit on the probe position update."""
-
-    enabled: bool = False
-
-    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
-
-    limit: Optional[float] = 0
 
 
 @dataclasses.dataclass
