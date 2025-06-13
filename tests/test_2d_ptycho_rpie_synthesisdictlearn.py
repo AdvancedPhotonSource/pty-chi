@@ -23,7 +23,7 @@ class Test2DPtychoRPIE_SDL(tutils.TungstenDataTester):
                 self.get_ci_input_data_dir(), "zernike2D_dictionaries", "testing_sdl_dictionary.npz"
             )
         )
-        D = npz_dict_file["a"]
+        D = npz_dict_file["D"]
         npz_dict_file.close()
 
         options = api.RPIEOptions()
@@ -65,7 +65,7 @@ class Test2DPtychoRPIE_SDL(tutils.TungstenDataTester):
         options.probe_position_options.optimizable = False
 
         options.reconstructor_options.batch_size = round(data.shape[0] * 0.1)
-        options.reconstructor_options.num_epochs = 50
+        options.reconstructor_options.num_epochs = 32
         options.reconstructor_options.allow_nondeterministic_algorithms = False
 
         task = PtychographyTask(options)

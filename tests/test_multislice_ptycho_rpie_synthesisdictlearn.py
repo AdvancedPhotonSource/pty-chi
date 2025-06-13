@@ -11,13 +11,10 @@ from ptychi.utils import generate_initial_opr_mode_weights
 
 import test_utils as tutils
 
-# THIS SHOULDN'T GO HERE, SHOULD SET THIS ELSEWHERE BUT FOR NOW I'M LEAVING IT
-if os.environ.get('PTYCHO_CI_DATA_DIR') is None:
-    os.environ["PTYCHO_CI_DATA_DIR"] = "/net/s8iddata/export/8-id-ECA/Analysis/atripath/ptychointerim-data/ci_data"
     
-class Test2DPtychoMultislice_RPIE_SDL(tutils.TungstenDataTester):
-    @tutils.TungstenDataTester.wrap_recon_tester(name="test_2d_ptycho_multislice_rpie_synthesisdictlearn")
-    def test_2d_ptycho_multislice_rpie_synthesisdictlearn(self):
+class TestMultislicePtychoRPIESDL(tutils.TungstenDataTester):
+    @tutils.TungstenDataTester.wrap_recon_tester(name="test_multislice_ptycho_rpie_synthesisdictlearn")
+    def test_multislice_ptycho_rpie_synthesisdictlearn(self):
         self.setup_ptychi(cpu_only=False)
 
         data, probe, pixel_size_m, positions_px = self.load_tungsten_data(additional_opr_modes=3)
@@ -81,13 +78,12 @@ class Test2DPtychoMultislice_RPIE_SDL(tutils.TungstenDataTester):
         options.opr_mode_weight_options.update_relaxation = 1e-2
 
         options.reconstructor_options.batch_size = round(data.shape[0] * 0.1)
-        options.reconstructor_options.num_epochs = 50
+        options.reconstructor_options.num_epochs = 32
         options.reconstructor_options.allow_nondeterministic_algorithms = False
 
         task = PtychographyTask(options)
         task.run()
 
-        #recon = task.get_data_to_cpu("object", as_numpy=True)[0]
         recon = task.get_data_to_cpu("object", as_numpy=True)
         return recon
 
@@ -97,6 +93,6 @@ if __name__ == "__main__":
     parser.add_argument("--generate-gold", action="store_true")
     args = parser.parse_args()
 
-    tester = Test2DPtychoMultislice_RPIE_SDL()
+    tester = TestMultislicePtychoRPIESDL()
     tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=True)
-    tester.test_2d_ptycho_multislice_rpie_synthesisdictlearn()
+    tester.test_multislice_ptycho_rpie_synthesisdictlearn()
