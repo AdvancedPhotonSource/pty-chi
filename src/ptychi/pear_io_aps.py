@@ -468,7 +468,6 @@ def save_reconstructions(task, recon_path, iter, params):
                 f"{probe_mag_collection_dir}/S{params['scan_num']:04d}.tiff"
             )
 
-
 def create_reconstruction_path(params, options):
     # Construct the base reconstruction path
     recon_path_base = os.path.join(
@@ -526,7 +525,7 @@ def create_reconstruction_path(params, options):
             recon_path += f"_reg{options.object_options.multislice_regularization.weight}"
 
     if options.probe_position_options.optimizable:
-        recon_path += "_pc"
+        recon_path += f"_pc{options.probe_position_options.optimization_plan.start}" 
         if params.get("position_correction_gradient_method", "gaussian") == "gaussian":
             recon_path += "_g"
         elif params.get("position_correction_gradient_method", "gaussian") == "fourier":
