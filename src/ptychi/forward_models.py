@@ -772,7 +772,12 @@ class PtychographyGaussianNoiseModel(GaussianNoiseModel):
     @timer()
     def backward_to_psi_far(self, y_pred, y_true, psi_far):
         """
-        Compute the gradient of the NLL with respect to far field wavefront.
+        Compute the gradient of the NLL with respect to far field wavefront:
+        $g = \frac{\partial L}{\partial \psi_{far}}$.
+        
+        When `self.valid_pixel_mask` is not None, pixels of the gradient `g` where the
+        mask is False are set to 0. When `g` is used to update the far-field wavefield
+        `psi_far`, the invalid pixels are kept unchanged.
         """
         # Shape of g:       (batch_size, h, w)
         # Shape of psi_far: (batch_size, n_probe_modes, h, w)
