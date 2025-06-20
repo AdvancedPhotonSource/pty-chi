@@ -305,6 +305,18 @@ class PtychographyTask(Task):
                     )
                 else:
                     raise ValueError(f"Invalid parameter name: {param}")
+                
+    def get_options_as_dict(self) -> dict:
+        return self.options.get_dict()
+    
+    def load_options_from_dict(self, d: dict) -> None:
+        self.options.load_from_dict(d)
+        self.data_options = self.options.data_options
+        self.object_options = self.options.object_options
+        self.probe_options = self.options.probe_options
+        self.position_options = self.options.probe_position_options
+        self.opr_mode_weight_options = self.options.opr_mode_weight_options
+        self.reconstructor_options = self.options.reconstructor_options
 
     def __exit__(self, exc_type, exc_value, exc_tb):
         del self.object

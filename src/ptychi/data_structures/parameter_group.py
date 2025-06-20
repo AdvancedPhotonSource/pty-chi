@@ -22,9 +22,6 @@ class ParameterGroup:
                 ovs.append(var)
         return ovs
 
-    def get_config_dict(self):
-        return {var.name: var.get_config_dict() for var in self.get_all_parameters()}
-
 
 @dataclasses.dataclass
 class PtychographyParameterGroup(ParameterGroup):
