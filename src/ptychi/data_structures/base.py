@@ -312,9 +312,6 @@ class ReconstructParameter(Module):
             enabled = False
         logger.debug(f"{self.name} optimization enabled at epoch {epoch}: {enabled}")
         return enabled
-
-    def get_config_dict(self):
-        return self.options.get_non_data_fields()
     
     def step_optimizer(self, limit: float = None):
         """Step the optimizer with gradient filled in. This function

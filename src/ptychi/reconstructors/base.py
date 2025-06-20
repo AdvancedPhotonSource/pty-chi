@@ -174,13 +174,6 @@ class Reconstructor:
         except KeyError:
             return api.options.base.ReconstructorOptions
 
-    def get_config_dict(self) -> dict:
-        d = self.parameter_group.get_config_dict()
-        reconstructor_options = {"name": self.__class__.__name__}
-        reconstructor_options.update(self.options.__dict__)
-        d["reconstructor_options"] = reconstructor_options
-        return d
-
 
 class PtychographyReconstructor(Reconstructor):
     parameter_group: "pg.PtychographyParameterGroup"
@@ -264,11 +257,6 @@ class IterativeReconstructor(Reconstructor):
             leave=False
         )
         self.current_epoch = 0
-
-    def get_config_dict(self) -> dict:
-        d = super().get_config_dict()
-        d.update({"batch_size": self.batch_size, "n_epochs": self.n_epochs})
-        return d
     
     def prepare_batch_data(self, batch_data: Sequence[Tensor]) -> Tuple[Sequence[Tensor], Tensor]:
         input_data = batch_data[:-1]

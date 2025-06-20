@@ -97,12 +97,3 @@ class AutodiffReconstructor(IterativeReconstructor):
         else:
             return self.forward_model
 
-    def get_config_dict(self) -> dict:
-        d = super().get_config_dict()
-        d.update(
-            {
-                "forward_model_class": str(self.forward_model_class),
-                "loss_function": str(self.loss_function),
-            }
-        )
-        return d
