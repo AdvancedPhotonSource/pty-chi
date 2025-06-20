@@ -334,8 +334,8 @@ class PlanarObject(Object):
         patches : Tensor
             Tensor of shape (N, H, W) of image patches.
         integer_mode : bool, optional
-            If True, the patches are placed at the exact center between pixels,
-            so that no interpolation is needed.
+            If True, given positions are assumed to be integer-valued, so that no 
+            interpolation is needed.
         pad_for_shift : int, optional
             If given, patches are either padded (for adjoint mode) or cropped 
             (for forward mode) before applying subpixel shifts.
