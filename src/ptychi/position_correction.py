@@ -129,12 +129,18 @@ class PositionCorrection:
         pdodx = dodx * probe
         dldx = (torch.real(pdodx.conj() * chi_m0)).sum(-1).sum(-1)
         denom_x = (pdodx.abs() ** 2).sum(-1).sum(-1)
-        dldx = dldx / (denom_x + max(denom_x.max(), eps))
+        zero_mask = denom_x == 0
+        if torch.count_nonzero(zero_mask) > 0:
+            denom_x[zero_mask] = denom_x[zero_mask] + max(denom_x.max(), eps)
+        dldx = dldx / denom_x
 
         pdody = dody * probe
         dldy = (torch.real(pdody.conj() * chi_m0)).sum(-1).sum(-1)
         denom_y = (pdody.abs() ** 2).sum(-1).sum(-1)
-        dldy = dldy / (denom_y + max(denom_y.max(), eps))
+        zero_mask = denom_y == 0
+        if torch.count_nonzero(zero_mask) > 0:
+            denom_y[zero_mask] = denom_y[zero_mask] + max(denom_y.max(), eps)
+        dldy = dldy / denom_y
 
         delta_pos = torch.stack([dldy, dldx], dim=1)
 
