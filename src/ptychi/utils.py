@@ -511,3 +511,17 @@ def clear_memory(task: Optional["PtychographyTask"] = None):
     gc.collect()
     torch.cuda.empty_cache()
     torch.cuda.ipc_collect()
+
+
+def jsonize(val):
+    """Convert a value to a JSON-serializable object."""
+    if isinstance(val, np.generic):
+        return val.item()
+    elif isinstance(val, np.ndarray):
+        return val.tolist()
+    elif isinstance(val, torch.Tensor):
+        return val.tolist()
+    elif isinstance(val, (list, tuple, dict, str, int, float, bool, type(None))):
+        return val
+    else:
+        raise TypeError(f"Object of type {type(val).__name__} is not JSON serializable")
