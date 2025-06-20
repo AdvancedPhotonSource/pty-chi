@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 
 _default_complex_dtype = torch.complex64
+_use_torch_compile = False
 
 
 def get_suggested_object_size(positions_px, probe_shape, extra=0):
@@ -358,6 +359,21 @@ def get_default_complex_dtype():
         The default complex dtype.
     """
     return _default_complex_dtype
+
+
+def set_use_torch_compile(use_torch_compile: bool):
+    """Set whether to enable pre-compilation of kernels
+    using `torch.compile`.
+    """
+    global _use_torch_compile
+    _use_torch_compile = use_torch_compile
+
+
+def get_use_torch_compile():
+    """Get whether to enable pre-compilation of kernels
+    using `torch.compile`.
+    """
+    return _use_torch_compile
 
 
 def chunked_processing(
