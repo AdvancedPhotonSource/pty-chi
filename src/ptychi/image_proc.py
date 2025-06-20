@@ -12,6 +12,8 @@ import torch.signal
 import ptychi.maths as pmath
 from ptychi.api.types import ComplexTensor, RealTensor
 from ptychi.timing.timer_utils import timer, InlineTimer
+import ptychi.utils as utils
+
 
 class PlacePatchesProtocol(Protocol):
     def __call__(
@@ -52,12 +54,20 @@ def batch_slice(image: Tensor, sy: Tensor, sx: Tensor, patch_size: Tuple[int, in
     h, w = image.shape[-2:]
     if (
         sy.min() < 0 
-        or sy.max() + patch_size[0] > image.shape[-2] 
+        or sy.max() + patch_size[0] > h
         or sx.min() < 0 
-        or sx.max() + patch_size[1] > image.shape[-1]
+        or sx.max() + patch_size[1] > w
     ):
         raise ValueError("Patch indices are out of bounds.")
     
+    inds = prepare_batch_slice_indices(sx, sy, patch_size, w)
+    patches = image.view(-1)[inds.view(-1)]
+    patches = patches.reshape(len(sy), patch_size[0], patch_size[1])
+    return patches
+
+
+@torch.compile(disable=not utils.get_use_torch_compile())
+def prepare_batch_slice_indices(sx: Tensor, sy: Tensor, patch_size: Tuple[int, int], w: int) -> Tensor:
     x = torch.arange(patch_size[1], device=sx.device)[None, :]
     y = torch.arange(patch_size[0], device=sy.device)[None, :]
     x = x.expand(len(sx), x.shape[1])
@@ -65,10 +75,8 @@ def batch_slice(image: Tensor, sy: Tensor, sx: Tensor, patch_size: Tuple[int, in
     x = x + sx[:, None]
     y = y + sy[:, None]
     inds = (y * w).unsqueeze(-1) + x.unsqueeze(1)
-    patches = image.view(-1)[inds.view(-1)]
-    patches = patches.reshape(len(sy), patch_size[0], patch_size[1])
-    return patches
-    
+    return inds
+
 
 @timer()
 def batch_put(
@@ -104,20 +112,14 @@ def batch_put(
     h, w = image.shape[-2:]
     if (
         sy.min() < 0 
-        or sy.max() + patches.shape[-2] > image.shape[-2] 
+        or sy.max() + patches.shape[-2] > h
         or sx.min() < 0 
-        or sx.max() + patches.shape[-1] > image.shape[-1]
+        or sx.max() + patches.shape[-1] > w
     ):
         raise ValueError("Patch indices are out of bounds.")
     
     patch_size = patches.shape[-2:]
-    x = torch.arange(patch_size[1], device=sx.device)[None, :]
-    y = torch.arange(patch_size[0], device=sy.device)[None, :]
-    x = x.expand(len(sx), x.shape[1])
-    y = y.expand(len(sy), y.shape[1])
-    x = x + sx[:, None]
-    y = y + sy[:, None]
-    inds = (y * w).unsqueeze(-1) + x.unsqueeze(1)
+    inds = prepare_batch_put_indices(sx, sy, patch_size, w)
     image = image.reshape(-1)
     
     try:
@@ -134,6 +136,18 @@ def batch_put(
     else:
         image.index_put_((inds.view(-1),), patches_flattened, accumulate=(op == "add"))
     return image.reshape(h, w)
+
+
+@torch.compile(disable=not utils.get_use_torch_compile())
+def prepare_batch_put_indices(sx: Tensor, sy: Tensor, patch_size: Tuple[int, int], w: int) -> Tensor:
+    x = torch.arange(patch_size[1], device=sx.device)[None, :]
+    y = torch.arange(patch_size[0], device=sy.device)[None, :]
+    x = x.expand(len(sx), x.shape[1])
+    y = y.expand(len(sy), y.shape[1])
+    x = x + sx[:, None]
+    y = y + sy[:, None]
+    inds = (y * w).unsqueeze(-1) + x.unsqueeze(1)
+    return inds
 
 
 @timer()
