@@ -770,7 +770,7 @@ class OPRModeWeightsSmoothingOptions(FeatureOptions):
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
     
-    method: Optional[enums.OPRWeightSmoothingMethods] = None
+    method: enums.OPRWeightSmoothingMethods = enums.OPRWeightSmoothingMethods.MEDIAN
     """
     The method for smoothing OPR mode weights. 
     
