@@ -17,6 +17,7 @@ import ptychi.maths as pmath
 import ptychi.api.enums as enums
 from ptychi.timing.timer_utils import timer
 import ptychi.image_proc as ip
+import ptychi.utils as utils
 
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
@@ -644,10 +645,29 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         if obj_patches is not None:
             obj_patches = obj_patches[:, slice_index]
-            delta_p = chi[:, mode_slicer] * obj_patches.conj()[:, None, :, :]  # Eq. 24a
+            delta_p = self._calculate_probe_gradient(chi[:, mode_slicer], obj_patches)  # Eq. 24a
         else:
             delta_p = chi[:, mode_slicer]
         return delta_p
+    
+    @staticmethod
+    @torch.compile(disable=not utils.get_use_torch_compile())
+    def _calculate_probe_gradient(chi, obj_patches):
+        """Calculate gradient of probe.
+        
+        Parameters
+        ----------
+        chi : torch.Tensor
+            A (batch_size, n_modes, h, w) tensor giving the difference of exit waves.
+        obj_patches : torch.Tensor
+            A (batch_size, h, w) tensor giving the object patches.
+
+        Returns
+        -------
+        torch.Tensor
+            A (batch_size, n_modes, h, w) tensor giving the gradient of probe.
+        """
+        return chi * obj_patches.conj()[:, None, :, :]
 
     @timer()
     def _precondition_probe_update_direction(self, delta_p):
@@ -818,10 +838,29 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         # Shape of chi:          (batch_size, n_probe_modes, h, w)
         # Shape delta_o_patches: (batch_size, h, w)
         # Multiply and sum over probe mode dimension
-        delta_o_patches = torch.sum(chi * p.conj(), dim=1)  # Eq. 24b
+        delta_o_patches = self._calculate_object_patch_gradient(chi, p)  # Eq. 24b
 
         # Add slice dimension.
         return delta_o_patches[:, None, :, :]
+    
+    @staticmethod
+    @torch.compile(disable=not utils.get_use_torch_compile())
+    def _calculate_object_patch_gradient(chi, p):
+        """Calculate gradient of object patches.
+
+        Parameters
+        ----------
+        chi : torch.Tensor
+            A (batch_size, n_modes, h, w) tensor giving the difference of exit waves.
+        p : torch.Tensor
+            A (batch_size, n_modes, h, w) tensor giving the probe.
+
+        Returns
+        -------
+        torch.Tensor
+            A (batch_size, h, w) tensor giving the gradient of object patches.
+        """
+        return torch.sum(chi * p.conj(), dim=1)
 
     @timer()
     def _combine_object_patch_update_directions(

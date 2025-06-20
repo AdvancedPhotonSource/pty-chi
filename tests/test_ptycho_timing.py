@@ -5,7 +5,12 @@ import pytest
 
 import ptychi.api as api
 from ptychi.api.task import PtychographyTask
-from ptychi.utils import get_suggested_object_size, get_default_complex_dtype, generate_initial_opr_mode_weights
+from ptychi.utils import (
+    get_suggested_object_size, 
+    get_default_complex_dtype, 
+    generate_initial_opr_mode_weights, 
+    set_use_torch_compile,
+)
 import ptychi.timing.timer_utils as timer_utils
 
 import test_utils as tutils
@@ -16,6 +21,8 @@ class TestPtychoTiming(tutils.TungstenDataTester):
     @pytest.mark.local
     def test_2d_ptycho_lsqml_opr_timing(self):        
         self.setup_ptychi(cpu_only=False)
+        
+        set_use_torch_compile(True)
 
         data, probe, pixel_size_m, positions_px = self.load_tungsten_data(pos_type='true', additional_opr_modes=3)
         
