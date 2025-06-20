@@ -36,7 +36,7 @@ class Test2dPtychoOptPlan(tutils.TungstenDataTester):
         options.probe_options.initial_guess = probe
         options.probe_options.optimizable = True
         options.probe_options.optimization_plan.start = 2
-        options.probe_options.optimization_plan.end = None
+        options.probe_options.optimization_plan.stop = None
         options.probe_options.optimizer = api.Optimizers.SGD
         options.probe_options.step_size = 1
         
@@ -45,7 +45,7 @@ class Test2dPtychoOptPlan(tutils.TungstenDataTester):
         options.probe_position_options.correction_options.update_magnitude_limit = 1.0
         options.probe_position_options.optimizable = True
         options.probe_position_options.optimization_plan.start = 1
-        options.probe_position_options.optimization_plan.end = 3
+        options.probe_position_options.optimization_plan.stop = 3
         options.probe_position_options.optimization_plan.stride = 2
         options.probe_position_options.optimizer = api.Optimizers.ADAM
         options.probe_position_options.step_size = 1e-1
