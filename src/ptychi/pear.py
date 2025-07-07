@@ -106,6 +106,8 @@ def ptycho_recon(run_recon=True, **params):
     options.probe_position_options.optimizer = api.Optimizers.SGD
     options.probe_position_options.step_size = 1
     options.probe_position_options.correction_options.correction_type = api.PositionCorrectionTypes.GRADIENT
+    options.probe_position_options.optimization_plan.start = params.get('position_correction_start_iteration', 1)
+
     if params.get('position_correction_gradient_method', 'gaussian') == 'gaussian':
         options.probe_position_options.correction_options.differentiation_method = api.ImageGradientMethods.GAUSSIAN
     elif params.get('position_correction_gradient_method', 'gaussian') == 'fourier':
