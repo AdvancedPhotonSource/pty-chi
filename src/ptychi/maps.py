@@ -71,7 +71,11 @@ def get_device_by_enum(key: enums.Devices) -> str:
 
 
 def get_dtype_by_enum(key: enums.Dtypes) -> torch.dtype:
-    return {enums.Dtypes.FLOAT32: torch.float32, enums.Dtypes.FLOAT64: torch.float64}[key]
+    return {
+        enums.Dtypes.FLOAT16: torch.float16,
+        enums.Dtypes.FLOAT32: torch.float32,
+        enums.Dtypes.FLOAT64: torch.float64,
+    }[key]
 
 
 def get_patch_placer_function_by_name(
