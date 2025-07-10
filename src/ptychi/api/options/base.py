@@ -1,11 +1,12 @@
 # Copyright © 2025 UChicago Argonne, LLC All right reserved
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
-from typing import Optional, Union, TYPE_CHECKING, Sequence
+from typing import Optional, Union, TYPE_CHECKING, Sequence, get_origin, get_args
 import dataclasses
-from dataclasses import field
+from dataclasses import field, fields
 import logging
 from math import ceil
+import enum
 
 from numpy import ndarray
 from torch import Tensor
@@ -13,7 +14,7 @@ import torch
 import numpy as np
 
 import ptychi.api.enums as enums
-from ptychi.api.options.plan import OptimizationPlan
+import ptychi.utils as utils
 
 if TYPE_CHECKING:
     import ptychi.api.options.task as task_options
@@ -37,6 +38,89 @@ class Options:
         """Check if options values are valid.
         """
         return
+    
+    def resolve_type(self, ann_type) -> type:
+        """Resolve annotation to underlying type (handles Optional, etc.)."""
+        origin = get_origin(ann_type)
+        if origin is Union:
+            args = get_args(ann_type)
+            # Drop NoneType from Optional[...]
+            return next((arg for arg in args if arg is not type(None)), None)
+        return ann_type
+    
+    def get_non_data_fields(self) -> dict:
+        """Get fields that do not contain large arrays or tensors."""
+        d = self.__dict__.copy()
+        return d
+    
+    def get_dict(self) -> dict:
+        """Get a dictionary representation of the options."""
+        d = self.get_non_data_fields()
+        for k, v in d.items():
+            if isinstance(v, Options):
+                d[k] = v.get_dict()
+            else:
+                d[k] = utils.jsonize(v)
+        return d
+    
+    def load_from_dict(self, d: dict) -> "Options":
+        """Load options from a dictionary."""
+        for k, v in d.items():
+            field_type = self.resolve_type(self.get_field_type(k))
+            if isinstance(field_type, type) and issubclass(field_type, Options):
+                self.__setattr__(k, self.resolve_type(self.get_field_type(k))().load_from_dict(v))
+            elif isinstance(field_type, type) and issubclass(field_type, enum.StrEnum) and isinstance(v, str):
+                self.__setattr__(k, field_type(v))
+            else:
+                self.__setattr__(k, v)
+        return self
+                
+    def get_field_type(self, name: str) -> type:
+        """Get the type of a field."""
+        for f in fields(self):
+            if f.name == name:
+                return f.type
+        raise ValueError(f"Field {name} not found in {self.__class__.__name__}.")
+
+
+@dataclasses.dataclass
+class OptimizationPlan(Options):
+    """
+    When a `ReconstructParameter` has `optimizable == True`, this class is used to specify
+    the start, stop, and stride epochs of the optimization for that parameter. This class is
+    also used by `FeatureOptions`.
+    """
+    start: int = 0
+    """
+    The starting epoch.
+    """
+
+    stop: Optional[int] = None
+    """
+    The starting epoch. If None, optimization will run to the last epoch if the parameter
+    is optimizable.
+    """
+
+    stride: int = 1
+    """
+    The stride in epochs. Optimization will run every `stride` epochs.
+    """
+
+    def is_enabled(self, epoch: int) -> bool:
+        if self.start is not None and epoch < self.start:
+            return False
+        if self.stop is not None and epoch >= self.stop:
+            return False
+        if self.start is None:
+            return True
+        return (epoch - self.start) % self.stride == 0
+
+    def is_in_optimization_interval(self, epoch: int) -> bool:
+        if self.start is not None and epoch < self.start:
+            return False
+        if self.stop is not None and epoch >= self.stop:
+            return False
+        return True
 
 
 @dataclasses.dataclass
@@ -70,10 +154,6 @@ class ParameterOptions(Options):
     
     def check(self, options: "task_options.PtychographyTaskOptions"):
         return super().check(options)
-
-    def get_non_data_fields(self) -> dict:
-        d = self.__dict__.copy()
-        return d
 
 
 @dataclasses.dataclass
@@ -501,6 +581,13 @@ class ProbeCenterConstraintOptions(FeatureOptions):
     enabled: bool = False
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+    
+    use_intensity_for_com: bool = False
+    """
+    Whether to use the magnitude of the dominant shared probe 
+    mode for computing the center of mass of the probe in order 
+    to keep it centered, or to use the total probe intensity.
+    """
 
 
 @dataclasses.dataclass
@@ -666,17 +753,6 @@ class PositionAffineTransformConstraintOptions(FeatureOptions):
 
 
 @dataclasses.dataclass
-class ProbePositionMagnitudeLimitOptions(FeatureOptions):
-    """Settings for imposing a magnitude limit on the probe position update."""
-
-    enabled: bool = False
-
-    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
-
-    limit: Optional[float] = 0
-
-
-@dataclasses.dataclass
 class ProbePositionOptions(ParameterOptions):
     optimizable: bool = False
     
@@ -735,7 +811,7 @@ class OPRModeWeightsSmoothingOptions(FeatureOptions):
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
     
-    method: Optional[enums.OPRWeightSmoothingMethods] = None
+    method: enums.OPRWeightSmoothingMethods = enums.OPRWeightSmoothingMethods.MEDIAN
     """
     The method for smoothing OPR mode weights. 
     

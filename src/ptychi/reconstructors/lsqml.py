@@ -792,8 +792,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             current slice.
         incident_wavefields : Tensor
             A (batch_size, n_modes, h, w) tensor giving $\psi_{i - 1}$, the wavefield
-            modulated by the previous slice and propagated to the current slice. If this
-            is given, multislice mode is assumed.
+            modulated by the previous slice and propagated to the current slice -- in
+            other words, the incident wavefield on the current slice. This quantity is
+            used in lieu of the probe if given.
 
         Returns
         -------
@@ -836,7 +837,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             A (batch_size, 1, h, w) tensor giving the update direction for object patches.
         onto_accumulated : bool
             If True, add the update direction to the accumulated update direction stored in
-            `object.grad`. Otherwise, add the update direction to the object buffer.
+            `object.grad`. Otherwise, just return the update direction accumulated on an empty
+            buffer.
 
         Returns
         -------
@@ -1201,8 +1203,3 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             self.run_real_space_step(psi_opt, indices)
 
         self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
-
-    def get_config_dict(self) -> dict:
-        d = super().get_config_dict()
-        d.update({"noise_model": self.noise_model.noise_statistics})
-        return d

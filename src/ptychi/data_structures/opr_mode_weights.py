@@ -285,8 +285,6 @@ class OPRModeWeights(dsbase.ReconstructParameter):
         """
         Smooth the weights with a median filter.
         """
-        if self.options.smoothing.method is None:
-            return
         weights = self.data
         if self.options.smoothing.method == "median":
             if self.n_scan_points < 81:

@@ -1,8 +1,9 @@
 # Copyright © 2025 UChicago Argonne, LLC All right reserved
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
-from typing import Union, Literal, Callable, Optional, Sequence
+from typing import Union, Literal, Callable, Optional, Sequence, TYPE_CHECKING
 import math
+import gc
 
 import torch
 from torch import Tensor
@@ -13,6 +14,10 @@ from numpy import ndarray
 import ptychi.maths as pmath
 import ptychi.propagate as propagate
 from ptychi.timing.timer_utils import timer
+
+if TYPE_CHECKING:
+    from ptychi.api.task import PtychographyTask
+
 
 _default_complex_dtype = torch.complex64
 
@@ -468,3 +473,55 @@ def get_max_batch_size(
     batch_size = (mem_compute - x1 * n_p - x2 * n_o) / (x0 * n_p)
     batch_size = batch_size * (8 / dtype.itemsize)
     return max(int(batch_size), 1)
+
+
+def auto_transfer_to_device(data: Tensor) -> Tensor:
+    """Automatically determine the device that the data should be placed on, 
+    and transfer the data to that device.
+    
+    The logic of this function is as follows:
+    1. If `torch.get_default_device()` is `cuda`, transfer the data to `cuda`.
+    2. If `torch.get_default_device()` is `cpu`, it could either be GPU is unavailable or
+       intentionally disabled, OR the current code is executed by DataParallel. 
+    2.1. If `torch.cuda.device_count()` is 0, we assume it is the former case, and
+         we keep the data as is.
+    2.2. If `torch.cuda.device_count()` is not 0, we assume it is the latter case, and
+         we transfer the data to `cuda`.
+    """
+    if torch.get_default_device().type == "cuda":
+        return data.cuda()
+    else:
+        if torch.cuda.device_count() == 0:
+            return data
+        else:
+            return data.cuda()
+
+
+def clear_memory(task: Optional["PtychographyTask"] = None):
+    """Clear the memory of the device used. If a `Task` object is provided,
+    it will be deleted and the memory will be released.
+    
+    Parameters
+    ----------
+    task : PtychographyTask, optional
+        The `Task` object to be deleted.
+    """
+    if task is not None:
+        del task
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.ipc_collect()
+
+
+def jsonize(val):
+    """Convert a value to a JSON-serializable object."""
+    if isinstance(val, np.generic):
+        return val.item()
+    elif isinstance(val, np.ndarray):
+        return val.tolist()
+    elif isinstance(val, torch.Tensor):
+        return val.tolist()
+    elif isinstance(val, (list, tuple, dict, str, int, float, bool, type(None))):
+        return val
+    else:
+        raise TypeError(f"Object of type {type(val).__name__} is not JSON serializable")

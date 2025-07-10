@@ -39,3 +39,9 @@ class PtychographyDataOptions(base.Options):
     
     save_data_on_device: bool = False
     """Whether to save the diffraction data on acceleration devices like GPU."""
+    
+    def get_non_data_fields(self) -> dict:
+        d = self.__dict__.copy()
+        del d['data']
+        del d['valid_pixel_mask']
+        return d
