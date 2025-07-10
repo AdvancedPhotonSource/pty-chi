@@ -447,7 +447,7 @@ def save_reconstructions(task, recon_path, iter, params):
             print(
                 f"\nSaving final object phase to {obj_ph_collection_dir}/S{params['scan_num']:04d}.tiff"
             )
-            shutil.copy(
+            shutil.copyfile(
                 f"{recon_path}/object_ph/object_ph_Niter{iter}.tiff",
                 f"{obj_ph_collection_dir}/S{params['scan_num']:04d}.tiff"
             )
@@ -463,7 +463,7 @@ def save_reconstructions(task, recon_path, iter, params):
             print(
                 f"\nSaving final probe magnitude to {probe_mag_collection_dir}/S{params['scan_num']:04d}.tiff"
             )
-            shutil.copy(
+            shutil.copyfile(
                 f"{recon_path}/probe_mag/probe_mag_Niter{iter}.tiff",
                 f"{probe_mag_collection_dir}/S{params['scan_num']:04d}.tiff"
             )
