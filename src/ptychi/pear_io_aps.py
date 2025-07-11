@@ -469,13 +469,16 @@ def save_reconstructions(task, recon_path, iter, params):
             )
 
 def create_reconstruction_path(params, options):
-    # Construct the base reconstruction path
-    recon_path_base = os.path.join(
-        params["data_directory"],
-        "ptychi_recons",
-        params["recon_parent_dir"],
-        f"S{params['scan_num']:04d}",
-    )
+    # Check if user has specified a custom reconstruction path to overwrite the default
+    if params.get("recon_dir_base", ''):
+        recon_dir_base = params["recon_dir_base"]
+    else:
+        recon_dir_base = os.path.join(
+            params["data_directory"],
+            "ptychi_recons",
+            params["recon_parent_dir"],
+            f"S{params['scan_num']:04d}",
+        )
 
     # Append batching mode to the path
     batching_mode_suffix = {
@@ -485,7 +488,7 @@ def create_reconstruction_path(params, options):
     }.get(options.reconstructor_options.batching_mode, "")
 
     recon_path = (
-        recon_path_base
+        recon_dir_base
         + f"/Ndp{options.data_options.data.shape[1]}_LSQML_{batching_mode_suffix}{options.reconstructor_options.batch_size}"
     )
     if options.reconstructor_options.momentum_acceleration_gain > 0:
