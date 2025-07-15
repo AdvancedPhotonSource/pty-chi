@@ -1437,8 +1437,7 @@ def _load_data_hdf5(h5_dp_path, h5_position_path, dp_Npix):
 
 def _load_data_2xfm(base_path, scan_num, det_Npixel, cen_x, cen_y, x_exclude=-2):
     print("Loading scan positions and diffraction patterns measured by the XFM instrument at 2IDE.")
-    sys.path.append("/mnt/micdata3/ptycho_tools/utility")
-    from readMDA import readMDA
+    from ptychi.pear_utils_aps import readMDA
 
     dp_dir = f"{base_path}/ptycho/"
     filePath = "/entry/data/data"
