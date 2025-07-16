@@ -30,15 +30,18 @@ jobs:
       - name: Create environment
         id: create_env
         run: |
-          pip install uv
           uv venv --python 3.11 .venv_lint
           source .venv_lint/bin/activate
 
       - name: Install Ruff
-        run: uv pip install ruff
+        run: |
+          source .venv_lint/bin/activate
+          uv pip install ruff==0.11.12
 
       - name: Run Ruff
-        run: ruff check src/ --output-format=github
+        run: |
+          source .venv_lint/bin/activate
+          ruff check src/ --output-format=github
 
   linux-x86-gpu:
 
@@ -62,22 +65,25 @@ jobs:
     - name: Create environment
       id: create_env
       run: |
-        pip install uv
         uv venv --python 3.11 .venv_pytest
         source .venv_pytest/bin/activate
 
     - name: Install dependencies
       run: |
+        source .venv_pytest/bin/activate
         uv pip install --upgrade pip
         uv pip install pytest
         uv pip install -r requirements.txt
         uv pip install -e .
 
     - name: List build environment
-      run: uv pip list
+      run: |
+        source .venv_pytest/bin/activate
+        uv pip list
 
     - name: Test with pytest
       run: |
+        source .venv_pytest/bin/activate
         echo $(which python)
         cd tests
         pytest -s --high-tol --save-timing
