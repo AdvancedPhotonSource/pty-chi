@@ -83,7 +83,7 @@ How to run test scripts
 4. Run any test scripts in ``tests`` with Python.
 
 ======================
-To use GPUs of alternative vendors
+To use non-Nvidia GPUs
 ======================
 
 Pty-Chi works on GPUs from different vendors than NVidia. For example, Intel.
