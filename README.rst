@@ -82,6 +82,17 @@ How to run test scripts
    repository: ``export PTYCHO_CI_DATA_DIR="path_to_data_repo/ci_data"``.
 4. Run any test scripts in ``tests`` with Python.
 
+======================
+To use non-Nvidia GPUs
+======================
+
+Pty-Chi works on GPUs from different vendors than NVidia. For example, Intel.
+To run Pty-Chi with Intel GPUs, add these lines right after importing `torch`
+and `ptychi`::
+
+   torch.set_default_device("xpu")
+   ptychi.device.set_torch_accelerator_module(torch.xpu)
+
 
 ======================
 Reading documentations
