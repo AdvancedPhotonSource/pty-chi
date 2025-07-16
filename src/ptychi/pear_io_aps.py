@@ -1829,17 +1829,28 @@ def _load_data_bnp(base_path, scan_num, det_Npixel, cen_x, cen_y):
         "Loading scan positions and diffraction patterns measured by the Bionanoprobe instrument."
     )
 
+    import re
+    match = re.search(r'(20\d{2})', base_path)
+    year = match.group(1) if match else None
+    
+    if year >= '2025': #after APS-U
+        XRFfile_path = f"{base_path}/mda/bnp_fly{scan_num:04d}.mda" 
+        if not os.path.exists(XRFfile_path):
+            raise FileNotFoundError(f"The XRF file path does not exist: {XRFfile_path}")
+        from ptychi.pear_utils_aps import readMDA
+        XRFfile = readMDA(XRFfile_path)
+        y_pos=np.array(XRFfile[1].p[0].data)
+        x_pos=np.array(XRFfile[2].p[0].data)[0]
+    else: # before APS-U
+        XRFfile_path = f"{base_path}/img.dat/bnp_fly{scan_num:04d}.mda.h5"
+        if not os.path.exists(XRFfile_path):
+            raise FileNotFoundError(f"The XRF file path does not exist: {XRFfile_path}")
+        XRFfile = h5py.File(XRFfile_path)
+        x_pos = XRFfile["MAPS/x_axis"][:]
+        y_pos = XRFfile["MAPS/y_axis"][:]
+
     dp_dir = f"{base_path}/ptycho/"
     filePath = "/entry/data/data"
-
-    # Load scan positions from original file
-    XRFfile_path = f"{base_path}/img.dat/bnp_fly{scan_num:04d}.mda.h5"
-    if not os.path.exists(XRFfile_path):
-        raise FileNotFoundError(f"The XRF file path does not exist: {XRFfile_path}")
-
-    XRFfile = h5py.File(XRFfile_path)
-    x_pos = XRFfile["MAPS/x_axis"][:]
-    y_pos = XRFfile["MAPS/y_axis"][:]
 
     x_pos -= x_pos.mean()
     y_pos -= y_pos.mean()
