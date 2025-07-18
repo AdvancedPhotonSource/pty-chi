@@ -4,6 +4,7 @@
 from typing import Union, Literal, Callable, Optional, Sequence, TYPE_CHECKING
 import math
 import gc
+import os
 
 import torch
 from torch import Tensor
@@ -361,19 +362,14 @@ def get_default_complex_dtype():
     return _default_complex_dtype
 
 
-def set_use_torch_compile(use_torch_compile: bool):
-    """Set whether to enable pre-compilation of kernels
-    using `torch.compile`.
-    """
-    global _use_torch_compile
-    _use_torch_compile = use_torch_compile
-
-
 def get_use_torch_compile():
     """Get whether to enable pre-compilation of kernels
     using `torch.compile`.
     """
-    return _use_torch_compile
+    if os.environ.get("PTYCHI_USE_TORCH_COMPILE", "0") == "1":
+        return True
+    else:
+        return False
 
 
 def chunked_processing(

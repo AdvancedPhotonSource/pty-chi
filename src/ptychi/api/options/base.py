@@ -963,11 +963,6 @@ class ReconstructorOptions(Options):
     default_dtype: enums.Dtypes = enums.Dtypes.FLOAT32
     """The default data type to use for computation."""
     
-    use_torch_compile: bool = False
-    """If True, some routines will be pre-compiled for speed up on GPUs.
-    This will lead to a longer first epoch where the kernels are compiled.
-    """
-    
     use_double_precision_for_fft: bool = False
     """If True, use double precision for critical FFT operations. When set to `True`,
     this option overrides `default_dtype`: even if `default_dtype` is set to `FLOAT32`,

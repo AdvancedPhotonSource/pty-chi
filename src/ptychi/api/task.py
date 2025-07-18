@@ -86,7 +86,6 @@ class PtychographyTask(Task):
         self.build_random_seed()
         self.build_default_device()
         self.build_default_dtype()
-        self.build_backend()
         self.build_data()
         self.build_object()
         self.build_probe()
@@ -125,11 +124,6 @@ class PtychographyTask(Task):
         )
         pmath.set_use_double_precision_for_fft(
             self.reconstructor_options.use_double_precision_for_fft
-        )
-        
-    def build_backend(self):
-        utils.set_use_torch_compile(
-            self.reconstructor_options.use_torch_compile
         )
 
     def build_data(self):
