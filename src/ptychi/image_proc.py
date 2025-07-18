@@ -12,7 +12,7 @@ import torch.signal
 import ptychi.maths as pmath
 from ptychi.api.types import ComplexTensor, RealTensor
 from ptychi.timing.timer_utils import timer, InlineTimer
-import ptychi.utils as utils
+import ptychi.global_settings  as glb
 
 
 class PlacePatchesProtocol(Protocol):
@@ -66,7 +66,7 @@ def batch_slice(image: Tensor, sy: Tensor, sx: Tensor, patch_size: Tuple[int, in
     return patches
 
 
-@torch.compile(disable=not utils.get_use_torch_compile())
+@torch.compile(disable=not glb.get_use_torch_compile())
 def prepare_batch_slice_indices(sx: Tensor, sy: Tensor, patch_size: Tuple[int, int], w: int) -> Tensor:
     x = torch.arange(patch_size[1], device=sx.device)[None, :]
     y = torch.arange(patch_size[0], device=sy.device)[None, :]
@@ -138,7 +138,7 @@ def batch_put(
     return image.reshape(h, w)
 
 
-@torch.compile(disable=not utils.get_use_torch_compile())
+@torch.compile(disable=not glb.get_use_torch_compile())
 def prepare_batch_put_indices(sx: Tensor, sy: Tensor, patch_size: Tuple[int, int], w: int) -> Tensor:
     x = torch.arange(patch_size[1], device=sx.device)[None, :]
     y = torch.arange(patch_size[0], device=sy.device)[None, :]
