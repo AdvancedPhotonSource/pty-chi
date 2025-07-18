@@ -7,6 +7,7 @@ import torch
 import numpy as np
 
 from ptychi.timing.timer_utils import timer
+import ptychi.global_settings as glb
 
 _use_double_precision_for_fft = True
 _allow_nondeterministic_algorithms = False
@@ -569,3 +570,29 @@ def mad(x: torch.Tensor, dim=None):
     Mean absolute deviation
     """
     return torch.mean(torch.abs(x - torch.mean(x, dim=dim)), dim=dim)
+
+
+@torch.compile(disable=not glb.get_use_torch_compile())
+def complex_mul_ra(
+    a_real: torch.Tensor,
+    a_imag: torch.Tensor,
+    b_real: torch.Tensor,
+    b_imag: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Complex multiplication with real-valued arguments and returns.
+    """
+    return a_real * b_real - a_imag * b_imag, a_real * b_imag + a_imag * b_real
+
+
+@torch.compile(disable=not glb.get_use_torch_compile())
+def complex_mul_conj_ra(
+    a_real: torch.Tensor,
+    a_imag: torch.Tensor,
+    b_real: torch.Tensor,
+    b_imag: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Calculate a * b.conj() with real-valued arguments and returns.
+    """ 
+    return a_real * b_real + a_imag * b_imag, -a_real * b_imag + a_imag * b_real

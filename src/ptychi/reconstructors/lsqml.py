@@ -651,9 +651,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         return delta_p
     
     @staticmethod
-    @torch.compile(disable=not utils.get_use_torch_compile())
     def _calculate_probe_gradient(chi, obj_patches):
         """Calculate gradient of probe.
+        
+        This function uses complex multiplication with real-valued arguments
+        and returns which is torch.compile friendly.
         
         Parameters
         ----------
@@ -667,7 +669,10 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         torch.Tensor
             A (batch_size, n_modes, h, w) tensor giving the gradient of probe.
         """
-        return chi * obj_patches.conj()[:, None, :, :]
+        a = chi
+        b = obj_patches[:, None, :, :]
+        z_r, z_i = pmath.complex_mul_conj_ra(a.real, a.imag, b.real, b.imag)
+        return z_r + 1j * z_i
 
     @timer()
     def _precondition_probe_update_direction(self, delta_p):
@@ -844,9 +849,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         return delta_o_patches[:, None, :, :]
     
     @staticmethod
-    @torch.compile(disable=not utils.get_use_torch_compile())
     def _calculate_object_patch_gradient(chi, p):
         """Calculate gradient of object patches.
+
+        This function uses complex multiplication with real-valued arguments
+        and returns which is torch.compile friendly.
 
         Parameters
         ----------
@@ -860,7 +867,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         torch.Tensor
             A (batch_size, h, w) tensor giving the gradient of object patches.
         """
-        return torch.sum(chi * p.conj(), dim=1)
+        z_r, z_i = pmath.complex_mul_conj_ra(chi.real, chi.imag, p.real, p.imag)
+        z = z_r + 1j * z_i
+        return torch.sum(z, dim=1)
 
     @timer()
     def _combine_object_patch_update_directions(
