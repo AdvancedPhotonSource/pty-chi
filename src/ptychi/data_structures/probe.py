@@ -366,8 +366,8 @@ class Probe(dsbase.ReconstructParameter):
 
         # TODO: use propagator for forward simulation
         propagated_probe = propagator.propagate_forward(probe_composed)
-        propagated_probe_power = torch.sum(propagated_probe.abs() ** 2)
-        power_correction = torch.sqrt(self.probe_power / propagated_probe_power)
+        propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) / self.data.size().numel()
+        power_correction = torch.sqrt(self.probe_power / propagated_probe_power) 
 
         self.set_data(self.data * power_correction)
         object_.set_data(object_.data / power_correction)
