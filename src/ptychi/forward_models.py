@@ -19,7 +19,7 @@ from ptychi.propagate import (
 from ptychi.metrics import MSELossOfSqrt
 import ptychi.image_proc as ip
 from ptychi.timing.timer_utils import timer
-
+import ptychi.utils as utils
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group
     import ptychi.data_structures.base as dsbase
@@ -366,13 +366,31 @@ class PlanarPtychographyForwardModel(ForwardModel):
             # Modulate wavefield.
             # Shape of slice_psi: (batch_size, n_modes, h, w)
             slice_patches = obj_patches[:, i_slice, ...]
-            slice_psi = slice_patches[:, None, :, :] * slice_psi
+            slice_psi = self.modulate_wavefield(slice_psi, slice_patches)
 
             # Propagate wavefield.
             if i_slice < self.parameter_group.object.n_slices - 1:
                 slice_psi = self.propagate_to_next_slice(slice_psi, i_slice)
         self.record_intermediate_variable("psi", slice_psi)
         return slice_psi
+    
+    @torch.compile(disable=not utils.get_use_torch_compile())
+    def modulate_wavefield(self, psi, slice_patches):
+        """Modulate wavefield.
+
+        Parameters
+        ----------
+        psi : Tensor
+            A (batch_size, n_modes, h, w) tensor of incident wavefields.
+        slice_patches : Tensor
+            A (batch_size, h, w) tensor of object patches.
+
+        Returns
+        -------
+        Tensor
+            A (batch_size, n_modes, h, w) tensor of wavefields at the exiting plane.
+        """
+        return slice_patches[:, None, :, :] * psi
 
     @timer()
     def forward_real_space(self, indices, obj_patches):
@@ -770,6 +788,7 @@ class PtychographyGaussianNoiseModel(GaussianNoiseModel):
         super().__init__(sigma=sigma, eps=eps, *args, **kwargs)
 
     @timer()
+    @torch.compile(disable=not utils.get_use_torch_compile())
     def backward_to_psi_far(self, y_pred, y_true, psi_far):
         """
         Compute the gradient of the NLL with respect to far field wavefront:
