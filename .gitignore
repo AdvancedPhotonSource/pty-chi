@@ -152,7 +152,6 @@ workspace/
 *.tif
 *.pdf
 *.date
-*.png
 *.npy
 *.mat
 *.hdf5
