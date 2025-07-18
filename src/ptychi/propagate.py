@@ -11,6 +11,7 @@ import math
 import torch
 from torch.fft import fftfreq
 
+from ptychi.global_settings import get_default_complex_dtype
 from ptychi.timing.timer_utils import timer
 import ptychi.maths as pmath
 import ptychi.utils as utils
@@ -177,7 +178,7 @@ class AngularSpectrumPropagator(WavefieldPropagator):
         ratio = self.F2 / (parameters.pixel_width_wlu**2)
         tf = torch.exp(i2piz * torch.sqrt(1 - ratio))
         tf = torch.where(ratio < 1, tf, 1)
-        tf = tf.to(utils.get_default_complex_dtype())
+        tf = tf.to(get_default_complex_dtype())
         return tf
 
     def propagate_forward(self, wavefield: ComplexTensor) -> ComplexTensor:
@@ -216,17 +217,17 @@ class FresnelTransformPropagator(WavefieldPropagator):
         C1C2 = C1 * C2
         B = torch.exp(ipi * Fr * (torch.square(XX) + torch.square(YY / ar)))
         
-        C1C2 = C1C2.to(utils.get_default_complex_dtype())
-        B = B.to(utils.get_default_complex_dtype())
+        C1C2 = C1C2.to(get_default_complex_dtype())
+        B = B.to(get_default_complex_dtype())
         return C0, C1C2, B
 
     def propagate_forward(self, wavefield: ComplexTensor) -> ComplexTensor:
         A = self._C1C2 * self._C0
-        return (A * pmath.fft2_precise(wavefield * self._B)).to(utils.get_default_complex_dtype())
+        return (A * pmath.fft2_precise(wavefield * self._B)).to(get_default_complex_dtype())
 
     def propagate_backward(self, wavefield: ComplexTensor) -> ComplexTensor:
         A = self._C1C2 / self._C0
-        return (self._B * pmath.ifft2_precise(wavefield * A)).to(utils.get_default_complex_dtype())
+        return (self._B * pmath.ifft2_precise(wavefield * A)).to(get_default_complex_dtype())
 
 
 class FraunhoferPropagator(WavefieldPropagator):

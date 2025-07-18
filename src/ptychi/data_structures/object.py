@@ -9,6 +9,7 @@ import math
 import torch
 from torch import Tensor
 
+from ptychi.global_settings import get_default_complex_dtype
 import ptychi.image_proc as ip
 import ptychi.data_structures as ds
 import ptychi.data_structures.base as dsbase
@@ -16,7 +17,6 @@ import ptychi.maths as pmath
 from ptychi.timing.timer_utils import timer
 import ptychi.api.enums as enums
 from ptychi.utils import (
-    get_default_complex_dtype, 
     to_numpy, 
     chunked_processing,
     get_probe_renormalization_factor

@@ -5,9 +5,9 @@ import pytest
 
 import ptychi.api as api
 from ptychi.api.task import PtychographyTask
+from ptychi.global_settings import get_default_complex_dtype
 from ptychi.utils import (
     get_suggested_object_size, 
-    get_default_complex_dtype, 
     generate_initial_opr_mode_weights, 
     set_use_torch_compile,
 )

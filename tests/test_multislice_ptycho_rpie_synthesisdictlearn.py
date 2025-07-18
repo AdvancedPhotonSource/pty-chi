@@ -6,8 +6,8 @@ import numpy as np
 
 import ptychi.api as api
 from ptychi.api.task import PtychographyTask
-from ptychi.utils import get_suggested_object_size, get_default_complex_dtype
-from ptychi.utils import generate_initial_opr_mode_weights
+from ptychi.global_settings import get_default_complex_dtype
+from ptychi.utils import get_suggested_object_size, generate_initial_opr_mode_weights
 
 import test_utils as tutils
 

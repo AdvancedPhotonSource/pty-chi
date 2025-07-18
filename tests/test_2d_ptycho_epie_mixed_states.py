@@ -4,7 +4,8 @@ import torch
 
 import ptychi.api as api
 from ptychi.api.task import PtychographyTask
-from ptychi.utils import get_suggested_object_size, get_default_complex_dtype, rescale_probe
+from ptychi.global_settings import get_default_complex_dtype
+from ptychi.utils import get_suggested_object_size, rescale_probe
 from ptychi.maths import orthogonalize_gs
 
 import test_utils as tutils

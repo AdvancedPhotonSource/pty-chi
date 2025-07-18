@@ -22,7 +22,7 @@ import ptychi.maps as maps
 from ptychi.io_handles import PtychographyDataset
 from ptychi.reconstructors.base import Reconstructor
 from ptychi.utils import to_tensor
-import ptychi.utils as utils
+import ptychi.global_settings  as glb
 import ptychi.maths as pmath
 from ptychi.timing import timer_utils
 import ptychi.movies as movies
@@ -119,7 +119,7 @@ class PtychographyTask(Task):
 
     def build_default_dtype(self):
         torch.set_default_dtype(maps.get_dtype_by_enum(self.reconstructor_options.default_dtype))
-        utils.set_default_complex_dtype(
+        glb.set_default_complex_dtype(
             maps.get_complex_dtype_by_enum(self.reconstructor_options.default_dtype)
         )
         pmath.set_use_double_precision_for_fft(
