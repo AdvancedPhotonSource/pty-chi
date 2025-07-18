@@ -40,7 +40,7 @@ The table below compares their merits and limitations.
      - Yes
    * - Multislice support
      - Yes
-     - No
+     - Yes
      - No
      - Yes
 

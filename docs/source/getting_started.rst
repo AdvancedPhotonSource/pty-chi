@@ -95,7 +95,7 @@ algorithm. A few key points:
     from ptychi.utils import get_suggested_object_size, get_default_complex_dtype, generate_initial_opr_mode_weights
 
 
-    torch.set_default_device('cpu' if cpu_only else 'cuda')
+    torch.set_default_device("cuda")  # Important: set default device to enable GPU
     torch.set_default_dtype(torch.float32)
     set_default_complex_dtype(torch.complex64)
 
@@ -106,7 +106,10 @@ algorithm. A few key points:
     
     options.data_options.data = your_diffraction_data
     
-    options.object_options.initial_guess = torch.ones([1, *get_suggested_object_size(positions_px, probe.shape[-2:], extra=100)], dtype=get_default_complex_dtype())
+    options.object_options.initial_guess = torch.ones(
+        [1, *get_suggested_object_size(positions_px, probe.shape[-2:], extra=100)],
+        dtype=get_default_complex_dtype()
+    )
     options.object_options.pixel_size_m = pixel_size_m
     options.object_options.optimizable = True
     options.object_options.optimizer = api.Optimizers.SGD
@@ -144,3 +147,6 @@ algorithm. A few key points:
     # Or use
     # recon = task.object.get_object_in_roi().cpu().numpy()
     # To get the reconstructed object within the ROI.
+
+Pty-Chi's repository contains a collection of testers that also serve as example scripts.
+You can find them in the `test/` directory.
