@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 
 
 _default_complex_dtype = torch.complex64
-_use_torch_compile = True
 
 
 def get_suggested_object_size(positions_px, probe_shape, extra=0):
