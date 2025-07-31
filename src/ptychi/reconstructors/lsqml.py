@@ -225,13 +225,43 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 )
             )
 
-            # Calculate probe update direction.
-            delta_p_i_unshifted = self._calculate_probe_update_direction(
-                chi, obj_patches=obj_patches, slice_index=i_slice, probe_mode_index=None
-            )  # Eq. 24a
-            delta_p_i = self.adjoint_shift_probe_update_direction(
-                indices, delta_p_i_unshifted, first_mode_only=True
-            )
+            if (self.parameter_group.probe.representation == "sparse_code"):
+                
+                rc = chi.shape[-1] * chi.shape[-2]
+                n_scpm = chi.shape[-3]
+                n_spos = chi.shape[-4]
+                
+                obj_patches_vec = torch.reshape(obj_patches[:, i_slice, ...], (n_spos, 1, rc ))
+                
+                obj_patches_slice_i_conj = torch.conj( obj_patches[:, i_slice, ...] )
+                delta_sparse_code = chi * torch.conj( obj_patches_slice_i_conj[:, None, ... ] )
+                delta_sparse_code = torch.reshape(delta_sparse_code, (n_spos, n_scpm, rc ))
+                delta_sparse_code = torch.swapaxes(delta_sparse_code, 0, -1 )
+                delta_sparse_code = torch.swapaxes(delta_sparse_code, -2, -1 )
+                
+                # Use einsum for efficient batch matrix multiplication
+                # delta_sparse_code: (256², 926, 5)
+                # dictionary_matrix_H.T: (256², 200)
+                # Result: (200, 926, 5)
+                delta_sparse_code = torch.einsum('ijk,il->ljk', delta_sparse_code, self.parameter_group.probe.dictionary_matrix_H.T)
+                
+                
+                
+                chi_rm_subpx_shft = self.adjoint_shift_probe_update_direction(indices, chi, first_mode_only=True)
+                
+                # delta_sparse_code = self.parameter_group.probe.dictionary_matrix_H
+                # #delta_sparse_code = delta_sparse_code * 
+                
+            else:
+                # Calculate probe update direction.
+                delta_p_i_unshifted = self._calculate_probe_update_direction(
+                    chi, obj_patches=obj_patches, slice_index=i_slice, probe_mode_index=None
+                )  # Eq. 24a
+                
+                delta_p_i = self.adjoint_shift_probe_update_direction(
+                    indices, delta_p_i_unshifted, first_mode_only=True
+                )
+            
             delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
 
             # Update OPR modes and weights.
