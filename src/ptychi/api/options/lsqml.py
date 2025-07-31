@@ -100,6 +100,10 @@ class LSQMLObjectOptions(base.ObjectOptions):
     propagation always uses all probe modes regardless of this option.
     """
 
+@dataclasses.dataclass
+class LSQMLProbeExperimentalOptions(base.Options):
+    sdl_probe_options: base.SynthesisDictLearnProbeOptions = dataclasses.field(default_factory=base.SynthesisDictLearnProbeOptions)
+
 
 @dataclasses.dataclass
 class LSQMLProbeOptions(base.ProbeOptions):
@@ -107,8 +111,9 @@ class LSQMLProbeOptions(base.ProbeOptions):
     """
     A scaler for the solved optimal step size (beta_LSQ in PtychoShelves).
     """
-    
-    
+    experimental: LSQMLProbeExperimentalOptions = dataclasses.field(default_factory=LSQMLProbeExperimentalOptions)
+        
+
 @dataclasses.dataclass
 class LSQMLProbePositionOptions(base.ProbePositionOptions):
     pass
