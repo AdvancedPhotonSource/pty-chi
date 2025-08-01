@@ -5,6 +5,8 @@ import torch
 import ptychi.image_proc as ip
 import ptychi.api as api
 from ptychi.timing.timer_utils import timer
+import ptychi.global_settings as glb
+import ptychi.maths as pmath
 
 
 class PositionCorrection:
@@ -126,16 +128,36 @@ class PositionCorrection:
             dody, dodx = ip.fourier_shift_gradient(obj_patches)
         elif self.options.differentiation_method == api.ImageGradientMethods.NEAREST:
             dody, dodx = ip.nearest_neighbor_gradient(obj_patches, "backward")
-        pdodx = dodx * probe
-        dldx = (torch.real(pdodx.conj() * chi_m0)).sum(-1).sum(-1)
-        denom_x = (pdodx.abs() ** 2).sum(-1).sum(-1)
-        dldx = dldx / (denom_x + max(denom_x.max(), eps))
-
-        pdody = dody * probe
-        dldy = (torch.real(pdody.conj() * chi_m0)).sum(-1).sum(-1)
-        denom_y = (pdody.abs() ** 2).sum(-1).sum(-1)
-        dldy = dldy / (denom_y + max(denom_y.max(), eps))
-
+        dldy, dldx = self._calculate_normalized_position_gradient(
+            dodx.real, dodx.imag, dody.real, dody.imag, chi_m0.real, chi_m0.imag, probe.real, probe.imag
+        )
         delta_pos = torch.stack([dldy, dldx], dim=1)
-
         return delta_pos
+    
+    @torch.compile(disable=not glb.get_use_torch_compile())
+    def _calculate_normalized_position_gradient(
+        self,
+        dodx_real,
+        dodx_imag,
+        dody_real,
+        dody_imag,
+        chi_real,
+        chi_imag,
+        probe_real,
+        probe_imag,
+        eps=1e-6,
+    ):
+        pdodx_r, pdodx_i = pmath.complex_mul_ra(dodx_real, dodx_imag, probe_real, probe_imag)
+        numer_x, _ = pmath.complex_mul_conj_ra(chi_real, chi_imag, pdodx_r, pdodx_i)
+        denom_x = pdodx_r ** 2 + pdodx_i ** 2
+        numer_x = torch.sum(numer_x, dim=(-2, -1))
+        denom_x = torch.sum(denom_x, dim=(-2, -1))
+        dldx = numer_x / (denom_x + max(denom_x.max(), eps))
+        
+        pdody_r, pdody_i = pmath.complex_mul_ra(dody_real, dody_imag, probe_real, probe_imag)
+        numer_y, _ = pmath.complex_mul_conj_ra(chi_real, chi_imag, pdody_r, pdody_i)
+        denom_y = pdody_r ** 2 + pdody_i ** 2
+        numer_y = torch.sum(numer_y, dim=(-2, -1))
+        denom_y = torch.sum(denom_y, dim=(-2, -1))
+        dldy = numer_y / (denom_y + max(denom_y.max(), eps))
+        return dldy, dldx
