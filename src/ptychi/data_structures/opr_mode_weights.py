@@ -242,7 +242,8 @@ class OPRModeWeights(dsbase.ReconstructParameter):
             # The denominator can get smaller and smaller as eigenmode_i goes down.
             # Weight update needs to be clamped.
             denom = torch.mean((torch.abs(psi) ** 2), dim=(-2, -1))
-            num = torch.mean((chi[:, 0, :, :] * psi.conj()).real, dim=(-2, -1))
+            chi_psic_r, _ = pmath.complex_mul_conj_ra(chi[:, 0, :, :].real, chi[:, 0, :, :].imag, psi.real, psi.imag)
+            num = torch.mean(chi_psic_r, dim=(-2, -1))
             weight_update = num / (denom + 0.1 * torch.mean(denom))
             # weight_update = weight_update.clamp(max=10)
             weights_i = weights_i + relax_v * weight_update
