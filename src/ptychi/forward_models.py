@@ -814,20 +814,14 @@ class PtychographyGaussianNoiseModel(GaussianNoiseModel):
             A (batch_size, n_probe_modes, h, w) tensor giving the adjoint of 
             the far field wavefront.
         """
-        g = self.backward_to_psi_far_real_ops(y_pred, y_true, psi_far.shape[-2:])
-        g = g * psi_far
-        return g
-    
-    @torch.compile(disable=not glb.get_use_torch_compile())
-    def backward_to_psi_far_real_ops(self, y_pred, y_true, psi_far_shape):
         y_pred, y_true, valid_pixel_mask = self.conform_to_exit_wave_size(
-            y_pred, y_true, self.valid_pixel_mask, psi_far_shape
+            y_pred, y_true, self.valid_pixel_mask, psi_shape=psi_far.shape[-2:]
         )
         g = 1 - torch.sqrt(y_true) / (torch.sqrt(y_pred) + self.eps)  # Eq. 12b
         if valid_pixel_mask is not None:
             g[:, torch.logical_not(valid_pixel_mask)] = 0
         w = 1 / (2 * self.sigma) ** 2
-        g = 2 * w * g[:, None, :, :]
+        g = 2 * w * g[:, None, :, :] * psi_far
         return g
 
 
