@@ -19,7 +19,7 @@ from ptychi.propagate import (
 from ptychi.metrics import MSELossOfSqrt
 import ptychi.image_proc as ip
 from ptychi.timing.timer_utils import timer
-
+import ptychi.global_settings as glb
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group
     import ptychi.data_structures.base as dsbase
@@ -366,13 +366,33 @@ class PlanarPtychographyForwardModel(ForwardModel):
             # Modulate wavefield.
             # Shape of slice_psi: (batch_size, n_modes, h, w)
             slice_patches = obj_patches[:, i_slice, ...]
-            slice_psi = slice_patches[:, None, :, :] * slice_psi
+            slice_psi = self.modulate_wavefield(slice_psi, slice_patches)
 
             # Propagate wavefield.
             if i_slice < self.parameter_group.object.n_slices - 1:
                 slice_psi = self.propagate_to_next_slice(slice_psi, i_slice)
         self.record_intermediate_variable("psi", slice_psi)
         return slice_psi
+    
+    def modulate_wavefield(self, psi, slice_patches):
+        """Modulate wavefield.
+        
+        This function uses complex multiplication with real-valued arguments
+        and returns which is torch.compile friendly.
+
+        Parameters
+        ----------
+        psi : Tensor
+            A (batch_size, n_modes, h, w) tensor of incident wavefields.
+        slice_patches : Tensor
+            A (batch_size, h, w) tensor of object patches.
+
+        Returns
+        -------
+        Tensor
+            A (batch_size, n_modes, h, w) tensor of wavefields at the exiting plane.
+        """
+        return slice_patches[:, None, :, :] * psi
 
     @timer()
     def forward_real_space(self, indices, obj_patches):
@@ -778,17 +798,36 @@ class PtychographyGaussianNoiseModel(GaussianNoiseModel):
         When `self.valid_pixel_mask` is not None, pixels of the gradient `g` where the
         mask is False are set to 0. When `g` is used to update the far-field wavefield
         `psi_far`, the invalid pixels are kept unchanged.
+        
+        Parameters
+        ----------
+        y_pred : Tensor
+            A (batch_size, h, w) tensor of predicted intensities.
+        y_true : Tensor
+            A (batch_size, h, w) tensor of true intensities.
+        psi_far : Tensor
+            A (batch_size, n_probe_modes, h, w) tensor of far field wavefronts.
+
+        Returns
+        -------
+        Tensor
+            A (batch_size, n_probe_modes, h, w) tensor giving the adjoint of 
+            the far field wavefront.
         """
-        # Shape of g:       (batch_size, h, w)
-        # Shape of psi_far: (batch_size, n_probe_modes, h, w)
+        g = self.backward_to_psi_far_real_ops(y_pred, y_true, psi_far.shape[-2:])
+        g = g * psi_far
+        return g
+    
+    @torch.compile(disable=not glb.get_use_torch_compile())
+    def backward_to_psi_far_real_ops(self, y_pred, y_true, psi_far_shape):
         y_pred, y_true, valid_pixel_mask = self.conform_to_exit_wave_size(
-            y_pred, y_true, self.valid_pixel_mask, psi_far.shape[-2:]
+            y_pred, y_true, self.valid_pixel_mask, psi_far_shape
         )
         g = 1 - torch.sqrt(y_true) / (torch.sqrt(y_pred) + self.eps)  # Eq. 12b
         if valid_pixel_mask is not None:
             g[:, torch.logical_not(valid_pixel_mask)] = 0
         w = 1 / (2 * self.sigma) ** 2
-        g = 2 * w * g[:, None, :, :] * psi_far
+        g = 2 * w * g[:, None, :, :]
         return g
 
 
