@@ -2,17 +2,14 @@ import random
 import os
 import datetime
 import logging
-import configparser
-from typing import Union
 
 import torch
 import h5py
 import numpy as np
 import pytest
-import subprocess
-import socket
 
-from ptychi.utils import rescale_probe, add_additional_opr_probe_modes_to_probe, set_default_complex_dtype, to_tensor
+from ptychi.global_settings import set_default_complex_dtype
+from ptychi.utils import rescale_probe, add_additional_opr_probe_modes_to_probe, to_tensor
 import ptychi.timing.timer_utils as timer_utils
 from ptychi.timing.io import save_timing_data_to_unique_file_path
 

@@ -15,12 +15,10 @@ import ptychi.maths as pmath
 import ptychi.propagate as propagate
 from ptychi.timing.timer_utils import timer
 from ptychi.device import AcceleratorModuleWrapper
+from ptychi.global_settings import get_default_complex_dtype
 
 if TYPE_CHECKING:
     from ptychi.api.task import PtychographyTask
-
-
-_default_complex_dtype = torch.complex64
 
 
 def get_suggested_object_size(positions_px, probe_shape, extra=0):
@@ -335,29 +333,6 @@ def to_numpy(data: Union[ndarray, Tensor]) -> ndarray:
     if isinstance(data, Tensor):
         data = data.detach().cpu().numpy()
     return data
-
-
-def set_default_complex_dtype(dtype):
-    """Set the default complex dtype.
-    
-    Parameters
-    ----------
-    dtype : torch.dtype
-        The default complex dtype.
-    """
-    global _default_complex_dtype
-    _default_complex_dtype = dtype
-
-
-def get_default_complex_dtype():
-    """Get the default complex dtype.
-    
-    Returns
-    -------
-    torch.dtype
-        The default complex dtype.
-    """
-    return _default_complex_dtype
 
 
 def chunked_processing(

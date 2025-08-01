@@ -9,7 +9,9 @@ import numpy as np
 import cv2
 import ptychi.api as api
 from ptychi.api.task import PtychographyTask
-from ptychi.utils import get_suggested_object_size, get_default_complex_dtype
+from ptychi.utils import get_suggested_object_size
+from ptychi.global_settings import get_default_complex_dtype
+
 
 # Add the folder containing "tests/" to the path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

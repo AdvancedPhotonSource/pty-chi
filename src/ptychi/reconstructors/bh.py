@@ -11,7 +11,7 @@ from ptychi.reconstructors.base import (
 )
 from ptychi.metrics import MSELossOfSqrt
 from ptychi.maths import reprod, redot
-from ptychi.utils import get_default_complex_dtype
+from ptychi.global_settings import get_default_complex_dtype
 import ptychi.forward_models as fm
 
 if TYPE_CHECKING:
