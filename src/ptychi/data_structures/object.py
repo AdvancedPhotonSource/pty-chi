@@ -117,12 +117,6 @@ class Object(dsbase.ReconstructParameter):
     def get_object_in_roi(self):
         raise NotImplementedError
     
-    def update_preconditioner(self):
-        raise NotImplementedError
-    
-    def initialize_preconditioner(self):
-        raise NotImplementedError
-    
     def remove_object_probe_ambiguity(self):
         raise NotImplementedError
     
@@ -595,6 +589,7 @@ class PlanarObject(Object):
             self.initialize_preconditioner(probe, probe_positions, patterns)
         illum_map = self.calculate_illumination_map(probe, probe_positions, use_all_modes=use_all_modes)
         self.preconditioner = (self.preconditioner + illum_map) / 2
+        self.preconditioner_max = self.preconditioner.max()
     
     def initialize_preconditioner(
         self, 
@@ -621,6 +616,7 @@ class PlanarObject(Object):
         probe_data = probe_data / (math.sqrt(probe.shape[-1] * probe.shape[-2]) * 2 * probe_renormalization_factor)
         probe_temp = ds.probe.Probe(data=probe_data, options=copy.deepcopy(probe.options))
         self.preconditioner = self.calculate_illumination_map(probe_temp, probe_positions, use_all_modes=False)
+        self.preconditioner_max = self.preconditioner.max()
 
 
 class DIPObject(Object):

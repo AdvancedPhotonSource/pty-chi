@@ -7,6 +7,7 @@ import torch
 import numpy as np
 
 from ptychi.timing.timer_utils import timer
+import ptychi.global_settings as glb
 
 _use_double_precision_for_fft = True
 _allow_nondeterministic_algorithms = False
@@ -215,19 +216,34 @@ def project(a, b, dim=None):
     projected_length = inner(a, b, dim=dim, keepdims=True) / inner(b, b, dim=dim, keepdims=True)
     return projected_length * b
 
+
 def inner(x, y, dim=None, keepdims=False):
     """Return the complex inner product; the order of the operands matters."""
-    return (x * y.conj()).sum(dim, keepdims=keepdims)
+    if torch.is_complex(x):
+        z_r, z_i = complex_mul_conj_ra(x.real, x.imag, y.real, y.imag)
+        z = torch.complex(z_r, z_i)
+        return torch.sum(z, dim=dim, keepdims=keepdims)
+    else:
+        return torch.sum(x * y, dim=dim, keepdims=keepdims)
 
 
 def mnorm(x, dim=-1, keepdims=False):
     """Return the vector 2-norm of x but replace sum with mean."""
-    return torch.sqrt(torch.mean((x * x.conj()).real, dim=dim, keepdims=keepdims))
+    if torch.is_complex(x):
+        x2_r, _ = complex_mul_conj_ra(x.real, x.imag, x.real, x.imag)
+        return torch.sqrt(torch.mean(x2_r, dim=dim, keepdims=keepdims))
+    else:
+        return torch.sqrt(torch.mean((x ** 2), dim=dim, keepdims=keepdims))
 
 
 def norm(x, dim=-1, keepdims=False):
     """Return the vector 2-norm of x along given axis."""
-    return torch.sqrt(torch.sum((x * x.conj()).real, dim=dim, keepdims=keepdims))
+    if torch.is_complex(x):
+        x_r, x_i = complex_mul_conj_ra(x.real, x.imag, x.real, x.imag)
+        x2 = torch.complex(x_r, x_i)
+        return torch.sqrt(torch.sum(x2.real, dim=dim, keepdims=keepdims))
+    else:
+        return torch.sqrt(torch.sum(x ** 2, dim=dim, keepdims=keepdims))
 
 
 def _prepare_data_for_orthogonalization(
@@ -569,3 +585,29 @@ def mad(x: torch.Tensor, dim=None):
     Mean absolute deviation
     """
     return torch.mean(torch.abs(x - torch.mean(x, dim=dim)), dim=dim)
+
+
+@torch.compile(disable=not glb.get_use_torch_compile())
+def complex_mul_ra(
+    a_real: torch.Tensor,
+    a_imag: torch.Tensor,
+    b_real: torch.Tensor,
+    b_imag: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Complex multiplication with real-valued arguments and returns.
+    """
+    return a_real * b_real - a_imag * b_imag, a_real * b_imag + a_imag * b_real
+
+
+@torch.compile(disable=not glb.get_use_torch_compile())
+def complex_mul_conj_ra(
+    a_real: torch.Tensor,
+    a_imag: torch.Tensor,
+    b_real: torch.Tensor,
+    b_imag: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Calculate a * b.conj() with real-valued arguments and returns.
+    """ 
+    return a_real * b_real + a_imag * b_imag, -a_real * b_imag + a_imag * b_real

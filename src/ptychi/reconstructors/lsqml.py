@@ -17,6 +17,7 @@ import ptychi.maths as pmath
 import ptychi.api.enums as enums
 from ptychi.timing.timer_utils import timer
 import ptychi.image_proc as ip
+import ptychi.global_settings as glb
 
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
@@ -644,10 +645,34 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         if obj_patches is not None:
             obj_patches = obj_patches[:, slice_index]
-            delta_p = chi[:, mode_slicer] * obj_patches.conj()[:, None, :, :]  # Eq. 24a
+            delta_p = self._calculate_probe_gradient(chi[:, mode_slicer], obj_patches)  # Eq. 24a
         else:
             delta_p = chi[:, mode_slicer]
         return delta_p
+    
+    @staticmethod
+    def _calculate_probe_gradient(chi, obj_patches):
+        """Calculate gradient of probe.
+        
+        This function uses complex multiplication with real-valued arguments
+        and returns which is torch.compile friendly.
+        
+        Parameters
+        ----------
+        chi : torch.Tensor
+            A (batch_size, n_modes, h, w) tensor giving the difference of exit waves.
+        obj_patches : torch.Tensor
+            A (batch_size, h, w) tensor giving the object patches.
+
+        Returns
+        -------
+        torch.Tensor
+            A (batch_size, n_modes, h, w) tensor giving the gradient of probe.
+        """
+        a = chi
+        b = obj_patches[:, None, :, :]
+        z_r, z_i = pmath.complex_mul_conj_ra(a.real, a.imag, b.real, b.imag)
+        return torch.complex(z_r, z_i)
 
     @timer()
     def _precondition_probe_update_direction(self, delta_p):
@@ -689,13 +714,22 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         # To do this, we pad the update vector with zeros in the OPR mode dimension.
         mode_slicer = self.parameter_group.probe._get_probe_mode_slicer(probe_mode_index)
 
+        upd_r, upd_i = self._calculate_step_size_scaled_probe_update(
+            alpha_p_i, delta_p_hat.real, delta_p_hat.imag
+        )
+        upd = torch.complex(upd_r, upd_i)
+        self.parameter_group.probe.set_grad(upd, slicer=(0, mode_slicer))
+        self.parameter_group.probe.optimizer.step()
+        
+    @torch.compile(disable=not glb.get_use_torch_compile())
+    def _calculate_step_size_scaled_probe_update(self, alpha_p_i, delta_p_hat_real, delta_p_hat_imag):
         if self.options.batching_mode == enums.BatchingModes.COMPACT:
             # In compact mode, object is updated only once per epoch. To match the probe to this,
             # we divide the probe step size by the number of minibatches before each probe update.
             alpha_p_i = alpha_p_i / len(self.dataloader)
         alpha_p_mean = torch.mean(alpha_p_i)
-        self.parameter_group.probe.set_grad(-delta_p_hat * alpha_p_mean, slicer=(0, mode_slicer))
-        self.parameter_group.probe.optimizer.step()
+        upd_r, upd_i = pmath.complex_mul_ra(-delta_p_hat_real, -delta_p_hat_imag, alpha_p_mean, 0)
+        return upd_r, upd_i
 
     @timer()
     def _apply_probe_momentum(self, alpha_p_mean, delta_p_hat):
@@ -818,10 +852,33 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         # Shape of chi:          (batch_size, n_probe_modes, h, w)
         # Shape delta_o_patches: (batch_size, h, w)
         # Multiply and sum over probe mode dimension
-        delta_o_patches = torch.sum(chi * p.conj(), dim=1)  # Eq. 24b
+        delta_o_patches = self._calculate_object_patch_gradient(chi, p)  # Eq. 24b
 
         # Add slice dimension.
         return delta_o_patches[:, None, :, :]
+    
+    @staticmethod
+    def _calculate_object_patch_gradient(chi, p):
+        """Calculate gradient of object patches.
+
+        This function uses complex multiplication with real-valued arguments
+        and returns which is torch.compile friendly.
+
+        Parameters
+        ----------
+        chi : torch.Tensor
+            A (batch_size, n_modes, h, w) tensor giving the difference of exit waves.
+        p : torch.Tensor
+            A (batch_size, n_modes, h, w) tensor giving the probe.
+
+        Returns
+        -------
+        torch.Tensor
+            A (batch_size, h, w) tensor giving the gradient of object patches.
+        """
+        z_r, z_i = pmath.complex_mul_conj_ra(chi.real, chi.imag, p.real, p.imag)
+        z = torch.complex(z_r, z_i)
+        return torch.sum(z, dim=1)
 
     @timer()
     def _combine_object_patch_update_directions(
@@ -876,10 +933,14 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         delta_o_hat = delta_o_hat[slice_index]
 
-        preconditioner = self.parameter_group.object.preconditioner
-        delta_o_hat = delta_o_hat / torch.sqrt(
-            preconditioner**2 + (preconditioner.max() * alpha_mix) ** 2
+        delta_o_hat_real, delta_o_hat_imag = self._divide_delta_o_by_preconditioner(
+            delta_o_hat.real, 
+            delta_o_hat.imag, 
+            self.parameter_group.object.preconditioner, 
+            self.parameter_group.object.preconditioner_max, 
+            alpha_mix
         )
+        delta_o_hat = torch.complex(delta_o_hat_real, delta_o_hat_imag)
 
         # Re-extract delta O patches
         if positions is not None:
@@ -891,6 +952,14 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
             return delta_o_hat[None, ...], delta_o_patches[:, None, :, :]
         return delta_o_hat[None, ...]
+    
+    @torch.compile(disable=not glb.get_use_torch_compile())
+    def _divide_delta_o_by_preconditioner(
+        self, delta_o_hat_real, delta_o_hat_imag, preconditioner, preconditioner_max, alpha_mix
+    ):
+        denorm = preconditioner**2 + (preconditioner_max * alpha_mix) ** 2
+        denorm = torch.sqrt(denorm)
+        return delta_o_hat_real / denorm, delta_o_hat_imag / denorm
 
     @timer()
     def _precondition_accumulated_object_update_direction(self):

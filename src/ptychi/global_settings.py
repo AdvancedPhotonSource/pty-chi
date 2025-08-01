@@ -29,3 +29,12 @@ def get_default_complex_dtype():
     """
     return _default_complex_dtype
 
+
+def get_use_torch_compile():
+    """Get whether to enable pre-compilation of kernels
+    using `torch.compile`.
+    """
+    if os.environ.get("PTYCHI_USE_TORCH_COMPILE", "0") == "1":
+        return True
+    else:
+        return False

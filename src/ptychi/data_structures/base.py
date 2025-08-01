@@ -145,6 +145,7 @@ class ReconstructParameter(Module):
         self.optimizable_sub_modules = []
         self.is_complex = is_complex
         self.preconditioner = None
+        self.preconditioner_max = 0.0
         self.update_buffer = None
 
         if is_complex:
@@ -336,6 +337,12 @@ class ReconstructParameter(Module):
             exceed_mask = update_mag > limit
             dx[exceed_mask] = dx[exceed_mask] * limit / update_mag[exceed_mask]
             self.set_data(data0 + dx)
+            
+    def update_preconditioner(self, *args, **kwargs):
+        pass
+    
+    def initialize_preconditioner(self, *args, **kwargs):
+        pass
 
 
 class DummyParameter(ReconstructParameter):
