@@ -649,6 +649,11 @@ class ProbeOptions(ParameterOptions):
 @dataclasses.dataclass
 class SynthesisDictLearnProbeOptions(Options):
     
+    use_avg_spos_sparse_code: bool = True
+    """When computing the sparse code updates, we can either solve for
+    sparse codes that are scan position dependent or we can use the average
+    over scan positions before solving for the average sparse code."""
+    
     d_mat: Union[ndarray, Tensor] = None
     """The synthesis sparse dictionary matrix; contains the basis functions 
     that will be used to represent the probe via the sparse code weights."""

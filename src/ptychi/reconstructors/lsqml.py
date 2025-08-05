@@ -230,27 +230,93 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 rc = chi.shape[-1] * chi.shape[-2]
                 n_scpm = chi.shape[-3]
                 n_spos = chi.shape[-4]
-                
-                obj_patches_vec = torch.reshape(obj_patches[:, i_slice, ...], (n_spos, 1, rc ))
+            
+                #======================================================================                              
+                # sparse code update directions vs scan position and shared probe modes  
                 
                 obj_patches_slice_i_conj = torch.conj( obj_patches[:, i_slice, ...] )
-                delta_sparse_code = chi * torch.conj( obj_patches_slice_i_conj[:, None, ... ] )
-                delta_sparse_code = torch.reshape(delta_sparse_code, (n_spos, n_scpm, rc ))
-                delta_sparse_code = torch.swapaxes(delta_sparse_code, 0, -1 )
-                delta_sparse_code = torch.swapaxes(delta_sparse_code, -2, -1 )
+
+                delta_sparse_code = chi * obj_patches_slice_i_conj[:, None, ... ]
+                delta_sparse_code = self.adjoint_shift_probe_update_direction(indices, delta_sparse_code, first_mode_only=True)
+
+                delta_sparse_code = torch.reshape( delta_sparse_code, 
+                                                  ( n_spos, n_scpm, rc ))
                 
-                # Use einsum for efficient batch matrix multiplication
-                # delta_sparse_code: (256², 926, 5)
-                # dictionary_matrix_H.T: (256², 200)
-                # Result: (200, 926, 5)
-                delta_sparse_code = torch.einsum('ijk,il->ljk', delta_sparse_code, self.parameter_group.probe.dictionary_matrix_H.T)
+                delta_sparse_code = torch.einsum('ijk,kl->lij', 
+                                                 delta_sparse_code, 
+                                                 self.parameter_group.probe.dictionary_matrix_H.T)
+                                             
+                #===================================================                                
+                # compute optimal step length for sparse code update    
+                          
+                dict_delta_sparse_code = torch.einsum('ij,jkl->ikl', 
+                                                      self.parameter_group.probe.dictionary_matrix, 
+                                                      delta_sparse_code)
                 
+                obj_patches_vec = torch.reshape( obj_patches[:, i_slice, ...], ( n_spos, rc ))
+                      
+                denom = torch.abs( dict_delta_sparse_code )**2 * obj_patches_vec.swapaxes(0,-1)[...,None]
                 
+                denom = torch.einsum('ij,jik->ik', 
+                                     torch.conj( obj_patches_vec ), 
+                                     denom)
+
+                #=====
                 
                 chi_rm_subpx_shft = self.adjoint_shift_probe_update_direction(indices, chi, first_mode_only=True)
+                 
+                numer = torch.conj( dict_delta_sparse_code ) * torch.reshape( chi_rm_subpx_shft, 
+                                                                             ( n_spos, n_scpm, rc )).permute(2,0,1)        
+                numer = torch.einsum('ij,jik->ik', 
+                                     torch.conj( obj_patches_vec ), 
+                                     numer)          
+                       
+                # real is used to throw away small imag part due to numerical precision errors                    
+                optimal_step_sparse_code = ( numer / denom ).real   
+
+                #=====
+                                
+                optimal_delta_sparse_code = optimal_step_sparse_code[None,...] * delta_sparse_code
                 
-                # delta_sparse_code = self.parameter_group.probe.dictionary_matrix_H
-                # #delta_sparse_code = delta_sparse_code * 
+                optimal_delta_sparse_code_mean_spos = ( optimal_delta_sparse_code.mean(1).T )[None, ...]
+                              
+                # sparse code update 
+                sparse_code = self.parameter_group.probe.get_sparse_code_weights()
+                sparse_code = sparse_code + optimal_delta_sparse_code_mean_spos
+
+                #===========================================
+                # Enforce sparsity constraint on sparse code
+                
+                abs_sparse_code = torch.abs(sparse_code)
+                sparse_code_sorted = torch.sort(abs_sparse_code, dim=-1, descending=True)
+                
+                sel = sparse_code_sorted[0][...,self.parameter_group.probe.probe_sparse_code_nnz]
+                
+                # hard thresholding: 
+                sparse_code = sparse_code * (abs_sparse_code >= sel[...,None])
+                
+                #(TODO: soft thresholding option)
+                
+                #==============================================
+                # Update the new sparse code in the probe class
+                
+                self.parameter_group.probe.set_sparse_code(sparse_code)
+  
+                #===============================================================
+                # Create the probe update vs scan position using the sparse code
+                
+                delta_p_i = torch.einsum('ij,jlk->ilk', self.parameter_group.probe.dictionary_matrix, 
+                                                        optimal_delta_sparse_code)
+                delta_p_i = delta_p_i.permute(1,2,0)
+                
+                # if self.parameter_group.probe.use_avg_spos_sparse_code:
+                #     delta_p_i = torch.tile( delta_p_i, ( n_spos, 1, 1 ) )
+                
+                delta_p_i = torch.reshape(delta_p_i, ( n_spos, n_scpm, 
+                                                        chi.shape[-1], 
+                                                        chi.shape[-2] ))
+                
+                delta_p_i_unshifted = self.forward_model.shift_unique_probes(indices, delta_p_i, first_mode_only=True)
                 
             else:
                 # Calculate probe update direction.

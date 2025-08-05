@@ -473,6 +473,9 @@ class SynthesisDictLearnProbe( Probe ):
         sparse_code_probe = self.get_sparse_code_weights()
         self.register_parameter("sparse_code_probe", torch.nn.Parameter(sparse_code_probe))
     
+        use_avg_spos_sparse_code = self.options.experimental.sdl_probe_options.use_avg_spos_sparse_code
+        self.register_buffer("use_avg_spos_sparse_code", torch.tensor(use_avg_spos_sparse_code, dtype=torch.bool))
+        
         self.build_optimizer()
 
     def get_dictionary(self):
@@ -482,10 +485,11 @@ class SynthesisDictLearnProbe( Probe ):
         return dictionary_matrix, dictionary_matrix_pinv, dictionary_matrix_H
 
     def get_sparse_code_weights(self):
+        
         sz = self.data.shape
-        probe_vec = torch.reshape( self.data[0,...], (sz[1], sz[2] * sz[3]))
-        probe_vec = torch.swapaxes( probe_vec, 0, -1)
-        sparse_code_probe = self.dictionary_matrix_pinv @ probe_vec
+        probe_vec = torch.reshape(self.data, (sz[0], sz[1], sz[2] * sz[3]))
+        sparse_code_probe = torch.einsum('ij,klj->kli', self.dictionary_matrix_pinv, probe_vec)
+        
         return sparse_code_probe
 
     def generate(self):
@@ -497,13 +501,9 @@ class SynthesisDictLearnProbe( Probe ):
         Tensor
             A (n_opr_modes, n_modes, h, w) tensor giving the generated probe.
         """
-        probe_vec = self.dictionary_matrix @ self.sparse_code_probe
-        probe_vec = torch.swapaxes( probe_vec, 0, -1)
-        probe = torch.reshape(probe_vec, *[self.data[0,...].shape])
-        probe = probe[None,...]
         
-        # we only use sparse codes for the shared modes, not the OPRs
-        probe = torch.cat((probe, self.data[1:,...]), 0)    
+        probe = torch.einsum('ij,klj->kli', self.dictionary_matrix, self.sparse_code_probe)
+        probe = torch.reshape( probe, *[self.data.shape] )
         
         self.set_data(probe)
         return probe
