@@ -364,10 +364,18 @@ class Probe(dsbase.ReconstructParameter):
         else:
             probe_composed = self.get_opr_mode(0)
 
-        # TODO: use propagator for forward simulation
         propagated_probe = propagator.propagate_forward(probe_composed)
-        propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) / self.data.size().numel()
-        power_correction = torch.sqrt(self.probe_power / propagated_probe_power) 
+        if isinstance(propagator, FourierPropagator):
+            # Cancel the normalization factor so that the power is conserved.
+            if propagator.norm == "backward" or propagator.norm is None:
+                propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) / self.data.size().numel()
+            elif propagator.norm == "forward":
+                propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) * self.data.size().numel()
+            else:
+                propagated_probe_power = torch.sum(propagated_probe.abs() ** 2)
+        else:
+            propagated_probe_power = torch.sum(propagated_probe.abs() ** 2)
+        power_correction = torch.sqrt(self.probe_power / propagated_probe_power)
 
         self.set_data(self.data * power_correction)
         object_.set_data(object_.data / power_correction)
