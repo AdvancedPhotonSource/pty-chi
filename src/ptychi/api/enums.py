@@ -74,6 +74,7 @@ class Devices(StrEnum):
 
 
 class Dtypes(StrEnum):
+    FLOAT16 = auto()
     FLOAT32 = auto()
     FLOAT64 = auto()
 

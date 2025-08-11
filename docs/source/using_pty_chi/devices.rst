@@ -17,3 +17,13 @@ Note that it is always recommended to set the variable in terminal before runnin
 If you have to set the variable in the Python code, make sure to set it before importing PyTorch
 using ``os.environ["CUDA_VISIBLE_DEVICES"] = "<GPU index>"``. Setting the variable in Python
 will not take effect if it is done after PyTorch is imported.
+
+Non-Nvidia GPUs
+---------------
+
+Pty-Chi works on GPUs from different vendors than NVidia. For example, Intel.
+To run Pty-Chi with Intel GPUs, add these lines right after importing `torch`
+and `ptychi`::
+
+   torch.set_default_device("xpu")
+   ptychi.device.set_torch_accelerator_module(torch.xpu)

@@ -2,6 +2,7 @@
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
 from typing import Type
+from functools import partial
 
 import torch
 
@@ -12,8 +13,7 @@ import ptychi.forward_models as fm
 from ptychi.reconstructors.base import Reconstructor
 import ptychi.image_proc as ip
 import ptychi.reconstructors.nn as pnn
-from functools import partial
-
+from ptychi.device import AcceleratorModuleWrapper
 
 def get_complex_dtype_by_enum(key: enums.Dtypes) -> torch.dtype:
     return {enums.Dtypes.FLOAT32: torch.complex64, enums.Dtypes.FLOAT64: torch.complex128}[key]
@@ -67,11 +67,15 @@ def get_noise_model_by_enum(key: enums.NoiseModels) -> str:
 
 
 def get_device_by_enum(key: enums.Devices) -> str:
-    return {enums.Devices.CPU: "cpu", enums.Devices.GPU: "cuda"}[key]
+    return {enums.Devices.CPU: "cpu", enums.Devices.GPU: AcceleratorModuleWrapper.get_to_device_string()}[key]
 
 
 def get_dtype_by_enum(key: enums.Dtypes) -> torch.dtype:
-    return {enums.Dtypes.FLOAT32: torch.float32, enums.Dtypes.FLOAT64: torch.float64}[key]
+    return {
+        enums.Dtypes.FLOAT16: torch.float16,
+        enums.Dtypes.FLOAT32: torch.float32,
+        enums.Dtypes.FLOAT64: torch.float64,
+    }[key]
 
 
 def get_patch_placer_function_by_name(

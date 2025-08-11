@@ -5,6 +5,7 @@ Using Pty-chi
    :maxdepth: 2
 
    data_structures
+   io
    initialization_recommendations
    position_mapping
    devices
