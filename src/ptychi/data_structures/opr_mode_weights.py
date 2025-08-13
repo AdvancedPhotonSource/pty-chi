@@ -101,6 +101,7 @@ class OPRModeWeights(dsbase.ReconstructParameter):
         chi: Tensor,
         delta_p_i: Tensor,
         delta_p_hat: Tensor,
+        probe_current_slice: Tensor,
         obj_patches: Tensor,
         current_epoch: int,
         probe_mode_index: Optional[int] = None,
@@ -118,7 +119,7 @@ class OPRModeWeights(dsbase.ReconstructParameter):
             or (self.eigenmode_weight_optimization_enabled(current_epoch))
         ):
             self.update_opr_probe_modes_and_weights(
-                probe, indices, chi, delta_p_i, delta_p_hat, obj_patches, current_epoch
+                probe, indices, chi, delta_p_i, delta_p_hat, probe_current_slice, obj_patches, current_epoch
             )
 
         if self.intensity_variation_optimization_enabled(current_epoch):
@@ -138,6 +139,7 @@ class OPRModeWeights(dsbase.ReconstructParameter):
         chi: Tensor,
         delta_p_i: Tensor,
         delta_p_hat: Tensor,
+        probe_current_slice: Tensor,
         obj_patches: Tensor,
         current_epoch: int,
     ):
@@ -158,6 +160,69 @@ class OPRModeWeights(dsbase.ReconstructParameter):
         if batch_size == 1:
             return
 
+        update_eigenmode = probe.optimization_enabled(current_epoch)
+        
+        # TODO: need to introduce a separate OPR mode representation 
+        # parameter; this just uses the probe representation parameter.
+        # This is for if we want to e.g. use dense representation for 
+        # the shared probe modes and sparse representation for the OPRs.
+        
+        if (probe.representation == "sparse_code") and update_eigenmode:
+            
+            sz = delta_p_i.shape
+            rc = sz[-2] * sz[-1]
+            Nspos = sz[0]
+    
+            weights_ALL = self.get_weights(indices)[:,1:]
+            
+            probe_current_slice_vec = torch.reshape( probe_current_slice[:,0,...], (Nspos, rc) ).T
+            
+            #==================================================================================
+            # need to use regularization here because weights_ALL has terrible condition number
+            
+            sparse_code_opr = probe.dictionary_matrix_pinv @ probe_current_slice_vec 
+            
+            A = weights_ALL.to(torch.complex64)
+            b = sparse_code_opr.T
+            
+            lambda_value = 1e-2             # Tikhonov regularization parameter
+            L = torch.eye(A.shape[1])       # L matrix (identity for standard Tikhonov)
+
+            A_reg = torch.cat((A, lambda_value * L), dim=0)
+            b_reg = torch.cat((b, torch.zeros(L.shape[0], b.shape[1])), dim=0)
+
+            sparse_code_opr = torch.linalg.lstsq(A_reg, b_reg).solution.T
+
+            #print( torch.linalg.norm( sparse_code_opr, dim=0 ) )
+            
+            #============================
+            # enforce sparsity constraint
+            
+            abs_sparse_code_opr = torch.abs(sparse_code_opr)
+            abs_sparse_code_opr_sorted = torch.sort(abs_sparse_code_opr, dim=0, descending=True)
+            
+            sparsity_nnz = 50
+            
+            sel = abs_sparse_code_opr_sorted[0][sparsity_nnz,:]
+            
+            sparse_code_opr = sparse_code_opr * (abs_sparse_code_opr >= sel)
+    
+            eigenmodes_updated = probe.dictionary_matrix @ sparse_code_opr
+
+            eigenmodes_updated =  torch.reshape( eigenmodes_updated.T, ( eigenmodes_updated.shape[-1], 
+                                                                        sz[-2], sz[-1] ))
+            
+            # scaling_ratio = torch.linalg.norm( probe.data[1:,0,...], dim=(-1,-2)) / torch.linalg.norm( eigenmodes_updated, dim=(-1,-2))
+                        
+            # print( torch.linalg.norm( eigenmodes_updated, dim=(-1,-2)))
+
+            # print( torch.linalg.norm( probe.data[1:,0,...], dim=(-1,-2)))
+
+            probe_data[1:, 0, :, :] = eigenmodes_updated
+            probe.set_data(probe_data)
+            
+            update_eigenmode = False
+            
         # FIXME: reduced relax_u/v by a factor of 10 for stability, but PtychoShelves works without this.
         relax_u = min(0.1, batch_size / n_points_total) * probe.options.eigenmode_update_relaxation
         relax_v = self.options.update_relaxation
@@ -180,7 +245,7 @@ class OPRModeWeights(dsbase.ReconstructParameter):
                 relax_v,
                 obj_patches,
                 chi,
-                update_eigenmode=probe.optimization_enabled(current_epoch),
+                update_eigenmode = update_eigenmode,
                 update_weights=self.eigenmode_weight_optimization_enabled(current_epoch),
             )
 
@@ -193,8 +258,8 @@ class OPRModeWeights(dsbase.ReconstructParameter):
             probe_data[i_opr_mode, 0, :, :] = eigenmode_i
             weights_data[indices, i_opr_mode] = weights_i
 
-        if probe.optimization_enabled(current_epoch):
-            probe.set_data(probe_data)
+        if probe.optimization_enabled(current_epoch):   # and not (probe.representation == "sparse_code")
+            probe.set_data(probe_data)                  # do we need to do this again if using sparse code?
         if self.eigenmode_weight_optimization_enabled(current_epoch):
             self.set_data(weights_data)
 
