@@ -516,6 +516,24 @@ class SynthesisDictLearnProbe( Probe ):
         
         return sparse_code
 
+    def get_sparse_code_probe_shared_weights(self):
+        
+        probe_shared = self.data[0,...]
+        sz = probe_shared.shape
+        probe_vec = torch.reshape(probe_shared, (sz[0], sz[1] * sz[2]))
+        sparse_code = torch.einsum('ij,klj->kli', self.dictionary_matrix_pinv, probe_vec)
+        
+        return sparse_code[None,...]
+    
+    def get_sparse_code_probe_opr_weights(self):
+        
+        probe_opr = self.data[1:,0,...]
+        sz = probe_opr.shape
+        probe_vec = torch.reshape(probe_opr, (sz[0], sz[1] * sz[2]))
+        sparse_code = torch.einsum('ij,klj->kli', self.dictionary_matrix_pinv, probe_vec)
+        
+        return sparse_code[:,None,...]
+    
     def generate(self):
         """Generate the probe using the sparse code, and set the
         generated probe to self.data.
