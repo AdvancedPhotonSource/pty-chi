@@ -462,35 +462,59 @@ class SynthesisDictLearnProbe( Probe ):
         
         super().__init__(name, options, build_optimizer=False, data_as_parameter=False, *args, **kwargs)
 
-        dictionary_matrix, dictionary_matrix_pinv, dictionary_matrix_H = self.get_dictionary()
+        dictionary_matrix, dictionary_matrix_pinv = self.get_dictionary()
         self.register_buffer("dictionary_matrix", dictionary_matrix)
         self.register_buffer("dictionary_matrix_pinv", dictionary_matrix_pinv)
-        self.register_buffer("dictionary_matrix_H", dictionary_matrix_H)
-        
-        probe_sparse_code_nnz = torch.tensor( self.options.experimental.sdl_probe_options.probe_sparse_code_nnz, dtype=torch.uint32 )
-        self.register_buffer("probe_sparse_code_nnz", probe_sparse_code_nnz )
 
-        sparse_code_probe = self.get_sparse_code_weights()
-        self.register_parameter("sparse_code_probe", torch.nn.Parameter(sparse_code_probe))
+        sparse_code_probe_shared_nnz = torch.tensor( self.options.experimental.sdl_probe_options.sparse_code_probe_shared_nnz, dtype=torch.uint32 )
+        self.register_buffer("sparse_code_probe_nnz", sparse_code_probe_shared_nnz )
+        
+        sparse_code_probe_opr_nnz = torch.tensor( self.options.experimental.sdl_probe_options.sparse_code_probe_opr_nnz, dtype=torch.uint32 )
+        self.register_buffer("sparse_code_opr_nnz", sparse_code_probe_opr_nnz )
+
+        sparse_code_probe_shared = self.get_sparse_code_weights()
+        self.register_parameter("sparse_code_probe_shared", torch.nn.Parameter(sparse_code_probe_shared))
+        
+        sparse_code_probe_opr = self.get_sparse_code_weights()
+        self.register_parameter("sparse_code_probe_opr", torch.nn.Parameter(sparse_code_probe_opr))
     
         use_avg_spos_sparse_code = self.options.experimental.sdl_probe_options.use_avg_spos_sparse_code
         self.register_buffer("use_avg_spos_sparse_code", torch.tensor(use_avg_spos_sparse_code, dtype=torch.bool))
         
+        sparse_code_probe_shared_start = torch.tensor( self.options.experimental.sdl_probe_options.sparse_code_probe_shared_start )
+        self.register_buffer("sparse_code_probe_shared_start", sparse_code_probe_shared_start )
+        
+        sparse_code_probe_shared_stop = torch.tensor( self.options.experimental.sdl_probe_options.sparse_code_probe_shared_stop )
+        self.register_buffer("sparse_code_probe_shared_stop", sparse_code_probe_shared_stop )
+        
+        sparse_code_probe_shared_stride = torch.tensor( self.options.experimental.sdl_probe_options.sparse_code_probe_shared_stride )
+        self.register_buffer("sparse_code_probe_shared_stride", sparse_code_probe_shared_stride )
+
+        sparse_code_probe_opr_start = torch.tensor( self.options.experimental.sdl_probe_options.sparse_code_probe_opr_start )
+        self.register_buffer("sparse_code_probe_opr_start", sparse_code_probe_opr_start )
+        
+        sparse_code_probe_opr_stop = torch.tensor( self.options.experimental.sdl_probe_options.sparse_code_probe_opr_stop )
+        self.register_buffer("sparse_code_probe_opr_stop", sparse_code_probe_opr_stop )
+        
+        sparse_code_probe_opr_stride = torch.tensor( self.options.experimental.sdl_probe_options.sparse_code_probe_opr_stride )
+        self.register_buffer("sparse_code_probe_opr_stride", sparse_code_probe_opr_stride )
+        
         self.build_optimizer()
 
     def get_dictionary(self):
-        dictionary_matrix = torch.tensor( self.options.experimental.sdl_probe_options.d_mat, dtype=torch.complex64 )
-        dictionary_matrix_pinv = torch.tensor( self.options.experimental.sdl_probe_options.d_mat_pinv, dtype=torch.complex64 )
-        dictionary_matrix_H = torch.tensor( self.options.experimental.sdl_probe_options.d_mat_conj_transpose, dtype=torch.complex64 )
-        return dictionary_matrix, dictionary_matrix_pinv, dictionary_matrix_H
+        
+        dictionary_matrix = torch.tensor( self.options.experimental.sdl_probe_options.dictionary_matrix, dtype=torch.complex64 )
+        dictionary_matrix_pinv = torch.tensor( self.options.experimental.sdl_probe_options.dictionary_matrix_pinv, dtype=torch.complex64 )
+
+        return dictionary_matrix, dictionary_matrix_pinv 
 
     def get_sparse_code_weights(self):
         
         sz = self.data.shape
         probe_vec = torch.reshape(self.data, (sz[0], sz[1], sz[2] * sz[3]))
-        sparse_code_probe = torch.einsum('ij,klj->kli', self.dictionary_matrix_pinv, probe_vec)
+        sparse_code = torch.einsum('ij,klj->kli', self.dictionary_matrix_pinv, probe_vec)
         
-        return sparse_code_probe
+        return sparse_code
 
     def generate(self):
         """Generate the probe using the sparse code, and set the
@@ -502,10 +526,18 @@ class SynthesisDictLearnProbe( Probe ):
             A (n_opr_modes, n_modes, h, w) tensor giving the generated probe.
         """
         
-        probe = torch.einsum('ij,klj->kli', self.dictionary_matrix, self.sparse_code_probe)
-        probe = torch.reshape( probe, *[self.data.shape] )
-        
-        self.set_data(probe)
+        if (self.options.experimental.sdl_probe_options.enabled_shared):
+            
+            # GENERATE OPR MODES FOR probe[1:,...] HERE USING self.sparse_code_probe_opr
+            
+            probe = torch.einsum('ij,klj->kli', self.dictionary_matrix, self.sparse_code_probe_shared)
+            probe = torch.reshape( probe, *[self.data.shape] )
+            
+            self.set_data(probe)
+            
+        else:
+            probe = self.probe.data 
+
         return probe
     
     def build_optimizer(self):
@@ -514,12 +546,15 @@ class SynthesisDictLearnProbe( Probe ):
                 "Parameter {} is optimizable but no optimizer is specified.".format(self.name)
             )
         if self.optimizable:
-            self.optimizer = self.optimizer_class([self.sparse_code_probe], **self.optimizer_params)
+            self.optimizer = self.optimizer_class([self.sparse_code_probe_shared], **self.optimizer_params)
 
-    def set_sparse_code(self, data):
-        self.sparse_code_probe.data = data
-
-
+    def set_sparse_code_probe_shared(self, data):
+        self.sparse_code_probe_shared.data = data
+        
+    def set_sparse_code_probe_opr(self, data):
+        self.sparse_code_probe_opr.data = data
+        
+        
 class DIPProbe(Probe):
     
     options: "api.options.ad_ptychography.AutodiffPtychographyProbeOptions"

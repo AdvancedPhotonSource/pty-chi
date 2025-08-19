@@ -225,7 +225,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 )
             )
 
-            if (self.parameter_group.probe.representation == "sparse_code"):
+            if (self.parameter_group.probe.representation == "sparse_code") and (self.parameter_group.probe.options.experimental.sdl_probe_options.enabled_shared): 
                 
                 rc = chi.shape[-1] * chi.shape[-2]
                 n_scpm = chi.shape[-3]
@@ -244,7 +244,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 
                 delta_sparse_code = torch.einsum('ijk,kl->lij', 
                                                  delta_sparse_code, 
-                                                 self.parameter_group.probe.dictionary_matrix_H.T)
+                                                 self.parameter_group.probe.dictionary_matrix.conj())
                                              
                 #===================================================                                
                 # compute optimal step length for sparse code update    
@@ -278,6 +278,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                                 
                 optimal_delta_sparse_code = optimal_step_sparse_code[None,...] * delta_sparse_code
                 
+                # TODO: At some point we'll want to use scan position dependent sparse codes instead of this averaged sparse code
                 optimal_delta_sparse_code_mean_spos = ( optimal_delta_sparse_code.mean(1).T )[None, ...]
                               
                 # sparse code update 
@@ -286,11 +287,12 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
                 #===========================================
                 # Enforce sparsity constraint on sparse code
+                # !!!!! MOVE THIS TO BEFORE OPTIMAL STEP CALC !!!!!
                 
                 abs_sparse_code = torch.abs(sparse_code)
                 sparse_code_sorted = torch.sort(abs_sparse_code, dim=-1, descending=True)
                 
-                sel = sparse_code_sorted[0][...,self.parameter_group.probe.probe_sparse_code_nnz]
+                sel = sparse_code_sorted[0][...,self.parameter_group.probe.sparse_code_probe_nnz]
                 
                 # hard thresholding: 
                 sparse_code = sparse_code * (abs_sparse_code >= sel[...,None])
@@ -300,18 +302,16 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 #==============================================
                 # Update the new sparse code in the probe class
                 
-                self.parameter_group.probe.set_sparse_code(sparse_code)
+                self.parameter_group.probe.set_sparse_code_probe_shared(sparse_code)
   
                 #===============================================================
                 # Create the probe update vs scan position using the sparse code
                 
                 delta_p_i = torch.einsum('ij,jlk->ilk', self.parameter_group.probe.dictionary_matrix, 
                                                         optimal_delta_sparse_code)
-                delta_p_i = delta_p_i.permute(1,2,0)
+                delta_p_i = delta_p_i.permute(1, 2, 0)
                 
-                delta_p_i = torch.reshape(delta_p_i, ( n_spos, n_scpm, 
-                                                        chi.shape[-1], 
-                                                        chi.shape[-2] ))
+                delta_p_i = torch.reshape(delta_p_i, (n_spos, n_scpm, chi.shape[-1], chi.shape[-2]))
                 
                 delta_p_i_unshifted = self.forward_model.shift_unique_probes(indices, delta_p_i, first_mode_only=True)
                 

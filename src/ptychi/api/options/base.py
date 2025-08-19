@@ -654,24 +654,38 @@ class SynthesisDictLearnProbeOptions(Options):
     sparse codes that are scan position dependent or we can use the average
     over scan positions before solving for the average sparse code."""
     
-    d_mat: Union[ndarray, Tensor] = None
+    dictionary_matrix: Union[ndarray, Tensor] = None
     """The synthesis sparse dictionary matrix; contains the basis functions 
     that will be used to represent the probe via the sparse code weights."""
     
-    d_mat_conj_transpose: Union[ndarray, Tensor] = None
-    """Conjugate transpose of the synthesis sparse dictionary matrix."""
-    
-    d_mat_pinv: Union[ndarray, Tensor] = None
+    dictionary_matrix_pinv: Union[ndarray, Tensor] = None
     """Moore-Penrose pseudoinverse of the synthesis sparse dictionary matrix."""
     
-    probe_sparse_code: Union[ndarray, Tensor] = None
+    sparse_code_probe_shared: Union[ndarray, Tensor] = None
     """Sparse code weights vector."""
     
-    probe_sparse_code_nnz: float = None
+    sparse_code_probe_shared_nnz: float = None
     """Number of non-zeros we will keep when enforcing sparsity constraint on
-    the sparse code weights vector probe_sparse_code."""
+    the sparse code weights vector sparse_code_probe."""
+
+    sparse_code_probe_opr: Union[ndarray, Tensor] = None
+    """Sparse code weights vector for the OPRs."""
+    
+    sparse_code_probe_opr_nnz: float = None
+    """Number of non-zeros we will keep when enforcing sparsity constraint on
+    the sparse code weights vector sparse_code_opr."""
+    
+    sparse_code_probe_shared_start: int = torch.inf
+    sparse_code_probe_shared_stop: int = torch.inf
+    sparse_code_probe_shared_stride: int = 1
+
+    sparse_code_probe_opr_start: int = torch.inf
+    sparse_code_probe_opr_stop: int = torch.inf
+    sparse_code_probe_opr_stride: int = 1
     
     enabled: bool = False
+    enabled_shared: bool = False
+    enabled_opr: bool = False
 
 @dataclasses.dataclass
 class PositionCorrectionOptions(Options):
