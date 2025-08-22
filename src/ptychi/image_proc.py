@@ -1378,7 +1378,9 @@ def remove_grid_artifacts(
 
                 f_img[window_y_lb:window_y_ub, window_x_lb:window_x_ub] = 0
 
-    img_new = torch.real(torch.fft.ifft2(torch.fft.ifftshift(f_img)))
+    img_new = torch.fft.ifft2(torch.fft.ifftshift(f_img))
+    if not img.is_complex():
+        img_new = torch.real(img_new)
     return img_new
 
 

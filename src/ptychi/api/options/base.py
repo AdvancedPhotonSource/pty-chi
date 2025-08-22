@@ -295,6 +295,9 @@ class RemoveGridArtifactsOptions(FeatureOptions):
     direction: enums.Directions = enums.Directions.XY
     """The direction of grid artifact removal."""
     
+    component: enums.MagPhaseComponents = enums.MagPhaseComponents.PHASE
+    """The component of the object to remove grid artifacts from."""
+    
 
 @dataclasses.dataclass
 class RemoveObjectProbeAmbiguityOptions(FeatureOptions):

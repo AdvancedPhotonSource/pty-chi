@@ -396,16 +396,28 @@ class PlanarObject(Object):
     def remove_grid_artifacts(self):
         data = self.data
         for i_slice in range(self.n_slices):
-            phase = torch.angle(data[i_slice])
-            phase = ip.remove_grid_artifacts(
-                phase,
+            if self.options.remove_grid_artifacts.component == enums.MagPhaseComponents.PHASE:
+                slice_data = torch.angle(data[i_slice])
+            elif self.options.remove_grid_artifacts.component == enums.MagPhaseComponents.MAGNITUDE:
+                slice_data = torch.abs(data[i_slice])
+            elif self.options.remove_grid_artifacts.component == enums.MagPhaseComponents.BOTH:
+                slice_data = data[i_slice]
+            else:
+                raise ValueError(f"Invalid value for `component`: {self.options.remove_grid_artifacts.component}")
+            slice_data = ip.remove_grid_artifacts(
+                slice_data,
                 pixel_size_m=self.pixel_size_m,
                 period_x_m=self.options.remove_grid_artifacts.period_x_m,
                 period_y_m=self.options.remove_grid_artifacts.period_y_m,
                 window_size=self.options.remove_grid_artifacts.window_size,
                 direction=self.options.remove_grid_artifacts.direction,
             )
-            data = data[i_slice].abs() * torch.exp(1j * phase)
+            if self.options.remove_grid_artifacts.component == enums.MagPhaseComponents.PHASE:
+                data[i_slice] = data[i_slice].abs() * torch.exp(1j * slice_data)
+            elif self.options.remove_grid_artifacts.component == enums.MagPhaseComponents.MAGNITUDE:
+                data[i_slice] = torch.sgn(data[i_slice]) * torch.abs(slice_data)
+            elif self.options.remove_grid_artifacts.component == enums.MagPhaseComponents.BOTH:
+                data[i_slice] = slice_data
         self.set_data(data)
 
     @timer()
