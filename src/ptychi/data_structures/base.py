@@ -1,7 +1,7 @@
 # Copyright © 2025 UChicago Argonne, LLC All right reserved
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
-from typing import Optional, Union, Tuple, Sequence, TYPE_CHECKING
+from typing import Optional, Union, Tuple, Sequence, Literal, TYPE_CHECKING
 import logging
 
 import torch
@@ -67,7 +67,7 @@ class ComplexTensor(Module):
     def shape(self) -> Tuple[int, ...]:
         return self.data.shape[:-1]
 
-    def set_data(self, data: Union[Tensor, ndarray], slicer=None):
+    def set_data(self, data: Union[Tensor, ndarray], slicer=None, op: Literal["add", "set"] = "set"):
         if slicer is None:
             slicer = (slice(None),)
         elif not isinstance(slicer, Sequence):
@@ -75,7 +75,10 @@ class ComplexTensor(Module):
         data = to_tensor(data)
         data = torch.stack([data.real, data.imag], dim=-1)
         data = data.type(torch.get_default_dtype())
-        self.data[*slicer].copy_(to_tensor(data))
+        if op == "add":
+            self.data[*slicer].copy_(self.data[*slicer] + to_tensor(data))
+        else:
+            self.data[*slicer].copy_(to_tensor(data))
 
 
 class ReconstructParameter(Module):
@@ -234,16 +237,22 @@ class ReconstructParameter(Module):
         return var
 
     def set_data(
-        self, data, slicer: Optional[Union[slice, int] | tuple[Union[slice, int], ...]] = None
+        self, 
+        data, 
+        slicer: Optional[Union[slice, int] | tuple[Union[slice, int], ...]] = None,
+        op: Literal["add", "set"] = "set",
     ):
         if slicer is None:
             slicer = (slice(None),)
         elif not isinstance(slicer, Sequence):
             slicer = (slicer,)
         if isinstance(self.tensor, ComplexTensor):
-            self.tensor.set_data(data, slicer=slicer)
+            self.tensor.set_data(data, slicer=slicer, op=op)
         else:
-            self.tensor[*slicer].copy_(to_tensor(data))
+            if op == "add":
+                self.tensor[*slicer].copy_(self.data + to_tensor(data))
+            else:
+                self.tensor[*slicer].copy_(to_tensor(data))
 
     def get_grad(self):
         if isinstance(self.tensor, ComplexTensor):
@@ -255,6 +264,7 @@ class ReconstructParameter(Module):
         self,
         grad: Tensor,
         slicer: Optional[Union[slice, int] | tuple[Union[slice, int], ...]] = None,
+        op: Literal["add", "set"] = "set",
     ):
         """
         Populate the `grad` field of the contained tensor, so that it can optimized
@@ -272,6 +282,9 @@ class ReconstructParameter(Module):
             A tuple of, or a single slice object or integer, that defines the region of
             the region of the gradient to update. The shape of `grad` should match
             the region given by `slicer`, if given. If None, the whole gradient is updated.
+        op : Literal["add", "set"]
+            The operation to perform on the gradient. If "add", the gradient is added to the existing gradient.
+            If "set", the gradient is set to the given value.
         """
         if self.tensor.data.grad is None and slicer is not None:
             raise ValueError("Setting gradient with slicing is not allowed when gradient is None.")
@@ -286,12 +299,18 @@ class ReconstructParameter(Module):
             if self.tensor.data.grad is None:
                 self.tensor.data.grad = grad
             else:
-                self.tensor.data.grad[*slicer, ..., :] = grad
+                if op == "add":
+                    self.tensor.data.grad[*slicer, ..., :] += grad
+                else:
+                    self.tensor.data.grad[*slicer, ..., :] = grad
         else:
             if self.tensor.grad is None:
                 self.tensor.grad = grad
             else:
-                self.tensor.grad[*slicer] = grad
+                if op == "add":
+                    self.tensor.grad[*slicer] += grad
+                else:
+                    self.tensor.grad[*slicer] = grad
 
     def initialize_grad(self):
         """
