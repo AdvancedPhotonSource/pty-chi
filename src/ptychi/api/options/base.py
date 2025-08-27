@@ -671,14 +671,14 @@ class SynthesisDictLearnProbeOptions(Options):
     
     sparse_code_probe_shared_nnz: float = None
     """Number of non-zeros we will keep when enforcing sparsity constraint on
-    the sparse code weights vector sparse_code_probe_shared."""
+    the SHARED sparse code weights vector sparse_code_probe_shared."""
 
     sparse_code_probe_opr: Union[ndarray, Tensor] = None
     """Sparse code weights vector for the OPRs."""
     
     sparse_code_probe_opr_nnz: float = None
     """Number of non-zeros we will keep when enforcing sparsity constraint on
-    the sparse code weights vector sparse_code_probe_opr."""
+    the OPR sparse code weights vector sparse_code_probe_opr."""
 
 @dataclasses.dataclass
 class PositionCorrectionOptions(Options):
