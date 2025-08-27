@@ -97,11 +97,11 @@ class OPRModeWeights(dsbase.ReconstructParameter):
     def update_variable_probe(
         self,
         probe: "Probe",
+        adjoint_shift_probe_update_direction,   # what do I do for type hint here?
         indices: Tensor,
         chi: Tensor,
         delta_p_i: Tensor,
         delta_p_hat: Tensor,
-        probe_current_slice: Tensor,
         obj_patches: Tensor,
         current_epoch: int,
         probe_mode_index: Optional[int] = None,
@@ -118,8 +118,14 @@ class OPRModeWeights(dsbase.ReconstructParameter):
             probe.optimization_enabled(current_epoch)
             or (self.eigenmode_weight_optimization_enabled(current_epoch))
         ):
-            self.update_opr_probe_modes_and_weights(
-                probe, indices, chi, delta_p_i, delta_p_hat, probe_current_slice, obj_patches, current_epoch
+            self.update_opr_probe_modes_and_weights(probe, 
+                                                    adjoint_shift_probe_update_direction, 
+                                                    indices, 
+                                                    chi, 
+                                                    delta_p_i, 
+                                                    delta_p_hat, 
+                                                    obj_patches, 
+                                                    current_epoch
             )
 
         if self.intensity_variation_optimization_enabled(current_epoch):
@@ -135,24 +141,22 @@ class OPRModeWeights(dsbase.ReconstructParameter):
     def update_opr_probe_modes_and_weights(
         self,
         probe: "Probe",
+        adjoint_shift_probe_update_direction,   # what do I do for type hint here?
         indices: Tensor,
         chi: Tensor,
         delta_p_i: Tensor,
         delta_p_hat: Tensor,
-        probe_current_slice: Tensor,
         obj_patches: Tensor,
         current_epoch: int,
     ):
         """
         Update the eigenmodes of the first incoherent mode of the probe, and update the OPR mode weights.
 
-        This implementation is adapted from PtychoShelves code (update_variable_probe.m) and has some
-        differences from Eq. 31 of Odstrcil (2018).
+        The default (for self.options.use_optimal_update = False) implementation below is adapted from 
+        PtychoShelves code (update_variable_probe.m) and has some differences from Eq. 31 of Odstrcil (2018).
         """
         probe_data = probe.data
         weights_data = self.data
-        
-        # print( torch.linalg.norm(probe_data,dim=(-1,-2)), torch.linalg.norm( weights_data,dim=(0)) )
         
         batch_size = len(delta_p_i)
         n_points_total = self.n_scan_points
@@ -162,127 +166,165 @@ class OPRModeWeights(dsbase.ReconstructParameter):
         if batch_size == 1:
             return
 
-        update_eigenmode = probe.optimization_enabled(current_epoch)
+        update_eigenmode = probe.optimization_enabled(current_epoch)        # why is this needed again? To even get into this function, we need this to already be true?
+        update_eigenmode_weights = self.eigenmode_weight_optimization_enabled(current_epoch)
 
-        if (update_eigenmode
-            and probe.representation == "sparse_code"  
-            and probe.options.experimental.sdl_probe_options.enabled_opr
-            and probe.options.experimental.sdl_probe_options.sparse_code_probe_opr_start >= current_epoch
-            and probe.options.experimental.sdl_probe_options.sparse_code_probe_opr_stop <= current_epoch
-            and (current_epoch % probe.options.experimental.sdl_probe_options.sparse_code_probe_opr_stride) == 0 
-        ): 
+        if self.options.use_optimal_update:
             
-            sz = delta_p_i.shape
-            weights_ALL = self.get_weights(indices)[:,1:]
+            rc = obj_patches.shape[-2] * obj_patches.shape[-1]
+            n_spos = obj_patches.shape[0]
             
-            #print( torch.linalg.cond( weights_ALL ) )
+            U = probe_data[1:, 0, ...]
             
-            probe_current_slice_vec = torch.reshape( probe_current_slice[:,0,...], (sz[0], sz[-2] * sz[-1]) ).T
-            sparse_code_opr = probe.dictionary_matrix_pinv @ probe_current_slice_vec 
+            Ws = (weights_data[ indices, 1:]).to(torch.complex64)
             
-            # need to use regularization here because weights_ALL has terrible condition number
-            if torch.linalg.cond( weights_ALL ) > 5:
+            Tsconj_chi = (obj_patches[:,0,...].conj() * chi[:,0,...])
+            Tsconj_chi = adjoint_shift_probe_update_direction( indices, Tsconj_chi[:,None,...], first_mode_only=True)
             
-                A = weights_ALL.to(torch.complex64)
-                b = sparse_code_opr.T
+            chi = adjoint_shift_probe_update_direction( indices, chi, first_mode_only=True)
+            
+            U = torch.reshape(U, (U.shape[0], rc))
+            chi_vec = torch.reshape(chi[:,0,...], (n_spos, rc))
+            Ts = torch.reshape(obj_patches[:,0,...], (n_spos, rc))   
+            Tsconj_chi = torch.reshape(Tsconj_chi[:,0,...], (n_spos, rc)).T   
+            
+            # Optimal OPR weight updates
+            
+            if update_eigenmode_weights:
                 
-                lambda_value = 1e-3             # Tikhonov regularization parameter
-                L = torch.eye(A.shape[1])       # L matrix (identity for standard Tikhonov)
+                delta_Ws = -2 * torch.real(U.conj() @ Tsconj_chi).to(torch.complex64)
 
-                A_reg = torch.cat((A, lambda_value * L), dim=0)
-                b_reg = torch.cat((b, torch.zeros(L.shape[0], b.shape[1])), dim=0)
+                Ts_U_deltaWs = Ts.T * (U.T @ delta_Ws)
+                numer = torch.sum(torch.real(chi_vec * Ts_U_deltaWs.H))
+                denom = torch.sum(torch.real( Ts_U_deltaWs.conj() * Ts_U_deltaWs ))
+                optimal_step_deltaWs = self.options.update_relaxation * (numer / denom)
 
-                sparse_code_opr = torch.linalg.lstsq(A_reg, b_reg).solution.T
-            else:
-                sparse_code_opr = sparse_code_opr @ torch.linalg.pinv( weights_ALL.to(torch.complex64) ).T
-            
-            #print( torch.linalg.cond( sparse_code_opr ) )
-            #print( torch.linalg.norm( sparse_code_opr, dim=0 ) )
-            
-            # enforce sparsity constraint
-                     
-            sparsity_nnz = 195
-            abs_sparse_code_opr = torch.abs(sparse_code_opr)
-            
-            # abs_sparse_code_opr_sorted = torch.sort(abs_sparse_code_opr, dim=0, descending=True)
-            # sel = abs_sparse_code_opr_sorted[0][sparsity_nnz,:]
-            sel = torch.sort(abs_sparse_code_opr, dim=0, descending=True)[0][sparsity_nnz,:]
-            sparse_code_opr_mask = (abs_sparse_code_opr >= sel)
-  
-            sparse_code_opr = sparse_code_opr * sparse_code_opr_mask                                                                # Hard Thresholding
-            #sparse_code_opr = ( abs_sparse_code_opr - sel) * sparse_code_opr_mask * torch.exp(1j * torch.angle(sparse_code_opr))   # Soft Thresholding
-            
-            # SET THE NEW OPR SPARSE CODES
-            
-            probe.options.experimental.sdl_probe_options.set_sparse_code_probe_opr( sparse_code_opr )
-            
-            
-            
-            
-            # Use updated OPR sparse code to generate the dense representation OPR modes
-            eigenmodes_updated = probe.dictionary_matrix @ sparse_code_opr
+                Ws = (Ws + optimal_step_deltaWs * delta_Ws.T)
+ 
+            if (probe.representation == "sparse_code"
+                and probe.options.experimental.sdl_probe_options.enabled_opr):
+                
+                # Optimal sparse code OPR mode updates
+                    
+                delta_U = -1 * Tsconj_chi @ Ws
 
-            eigenmodes_updated =  torch.reshape(eigenmodes_updated.T, 
-                                                (eigenmodes_updated.shape[-1], sz[-2], sz[-1]))
-            
-            #================================================
-            # rescale so that all OPR modes have correct norm
-            
-            eigenmodes_current_scaling = torch.linalg.norm(eigenmodes_updated, axis=(-1,-2), keepdims=True)
-            eigenmodes_updated_scaling = torch.sqrt(torch.prod(torch.tensor(eigenmodes_updated.shape[-2:])))
-            
-            scaling_ratio = eigenmodes_updated_scaling / eigenmodes_current_scaling
-            
-            eigenmodes_updated = eigenmodes_updated * scaling_ratio
+                delta_sparse_code_probe_opr = probe.dictionary_matrix.H @ delta_U
+                
+                Gs = probe.dictionary_matrix @ delta_sparse_code_probe_opr @ Ws.T
+                TsHGsH = Ts.H * Gs.conj()
+                numer = torch.sum( torch.real(TsHGsH * chi_vec.T))
+                denom = torch.sum( torch.real(TsHGsH * TsHGsH.conj()))
+                optimal_step_sparse_code_probe_opr = probe.options.eigenmode_update_relaxation * (numer / denom)
 
-            #=====
+                sparse_code_probe_opr = probe.get_sparse_code_probe_opr_weights()
+                
+                optimal_sparse_code_probe_opr = (sparse_code_probe_opr 
+                                                 + optimal_step_sparse_code_probe_opr * delta_sparse_code_probe_opr.T)
+                
+                # Enforce sparsity constraint on sparse code
+                abs_sparse_code = torch.abs(optimal_sparse_code_probe_opr)
+                abs_sparse_code_sorted = torch.sort(abs_sparse_code, dim=-1, descending=True)
+                sel = abs_sparse_code_sorted[0][:, probe.sparse_code_probe_nnz]
+                sparse_code_mask = (abs_sparse_code >= sel[:,None])
+                
+                # Hard or Soft thresholding
+                if probe.options.experimental.sdl_probe_options.thresholding_type_opr == 'hard':
+                    optimal_sparse_code_probe_opr = optimal_sparse_code_probe_opr * sparse_code_mask
+                elif probe.options.experimental.sdl_probe_options.thresholding_type_opr == 'soft':
+                    optimal_sparse_code_probe_opr = ( abs_sparse_code - sel[:,None] ) * sparse_code_mask * torch.exp(1j * torch.angle(optimal_sparse_code_probe_opr))
 
-            w = 1 - 0e-6
-            probe_data[1:, 0, :, :]   = w * eigenmodes_updated + ( 1 - w ) * probe_data[:, 0, :, :]   
+                probe.set_sparse_code_probe_opr(optimal_sparse_code_probe_opr)
+                
+                # Back to dense OPR representation
+                U = (probe.dictionary_matrix @ optimal_sparse_code_probe_opr.T).T
+                
+                # the OPR modes must have L2 norm = torch.sqrt(torch.tensor(rc))
+                U = U * torch.sqrt(torch.tensor(rc)) / torch.sqrt(torch.sum(torch.abs(U)**2, -1))[:,None]
+
+                U = torch.reshape(U, (U.shape[0], obj_patches.shape[-2], obj_patches.shape[-1]))
+
+                probe_data[1:, 0, :, :] = U
+                weights_data[indices, 1:] = Ws.real
+                
+                # DELETE THIS FOR FINAL MERGING
+                # DELETE THIS FOR FINAL MERGING
+                
+                # Test the rank of the new scan position dependent probe:
+                
+                # probe_data_TEST = torch.reshape(probe_data[:,0,...], (probe_data.shape[0], probe_data.shape[-1] * probe_data.shape[-2]))
+                # Z1 = torch.sum(probe_data[:, 0, :, :][None,...] * weights_data[indices][...,None,None], 1)
+                # Z1 = torch.reshape(Z1, (Z1.shape[0], Z1.shape[1] * Z1.shape[2]))
+                # Z2 = probe_data_TEST.T @ weights_data[indices, :].T.to(torch.complex64)
+                # print( torch.linalg.matrix_rank(Z1) )
+                # print( torch.linalg.matrix_rank(Z2) )
+                
+                # DELETE THIS FOR FINAL MERGING
+                # DELETE THIS FOR FINAL MERGING
+                
+            else: 
+                                
+                # Optimal dense OPR mode updates:
             
-            probe.set_data(probe_data)
-            update_eigenmode = False
+                delta_U = -1 * Tsconj_chi @ Ws
+
+                Ts_deltaU_Ws = Ts.T * (delta_U @ Ws.T)
+                numer = torch.sum(torch.real(chi_vec * Ts_deltaU_Ws.H))
+                denom = torch.sum(torch.real( Ts_deltaU_Ws.conj() * Ts_deltaU_Ws ))
+                optimal_step_deltaU = probe.options.eigenmode_update_relaxation * (numer / denom)
+                
+                U = U + optimal_step_deltaU * delta_U.T
+                
+                # the OPR modes must have L2 norm = torch.sqrt(torch.tensor(rc))
+                U = U * torch.sqrt(torch.tensor(rc)) / torch.sqrt(torch.sum(torch.abs(U)**2, -1))[:,None]
+                
+                U = torch.reshape(U, (U.shape[0], obj_patches.shape[-2], obj_patches.shape[-1]))
+                
+                probe_data[1:, 0, :, :] = U
+                weights_data[indices, 1:] = Ws.real
+                
+        else:
             
-        # FIXME: reduced relax_u/v by a factor of 10 for stability, but PtychoShelves works without this.
-        relax_u = min(0.1, batch_size / n_points_total) * probe.options.eigenmode_update_relaxation
-        relax_v = self.options.update_relaxation
-        # Shape of delta_p_i:       (batch_size, n_probe_modes, h, w)
-        # Use only the first incoherent mode
-        delta_p_i = delta_p_i[:, 0, :, :]
-        delta_p_hat = delta_p_hat[0, :, :]
-        residue_update = delta_p_i - delta_p_hat
+            # Ptychoshelves method for OPR updates
+            
+            # FIXME: reduced relax_u/v by a factor of 10 for stability, but PtychoShelves works without this.
+            relax_u = min(0.1, batch_size / n_points_total) * probe.options.eigenmode_update_relaxation
+            relax_v = self.options.update_relaxation
+            # Shape of delta_p_i:       (batch_size, n_probe_modes, h, w)
+            # Use only the first incoherent mode
+            delta_p_i = delta_p_i[:, 0, :, :]
+            delta_p_hat = delta_p_hat[0, :, :]
+            residue_update = delta_p_i - delta_p_hat
 
-        # Start from the second OPR mode which is the first after the main mode - i.e., the first eigenmode.
-        for i_opr_mode in range(1, probe.n_opr_modes):
-            # Just take the first incoherent mode.
-            eigenmode_i = probe.get_mode_and_opr_mode(mode=0, opr_mode=i_opr_mode)
-            weights_i = self.get_weights(indices)[:, i_opr_mode]
-            eigenmode_i, weights_i = self._update_first_eigenmode_and_weight(
-                residue_update,
-                eigenmode_i,
-                weights_i,
-                relax_u,
-                relax_v,
-                obj_patches,
-                chi,
-                update_eigenmode = update_eigenmode,
-                update_weights=self.eigenmode_weight_optimization_enabled(current_epoch),
-            )
-
-            # Project residue on this eigenmode, then subtract it.
-            if i_opr_mode < probe.n_opr_modes - 1:
-                residue_update = residue_update - pmath.project(
-                    residue_update, eigenmode_i, dim=(-2, -1)
+            # Start from the second OPR mode which is the first after the main mode - i.e., the first eigenmode.
+            for i_opr_mode in range(1, probe.n_opr_modes):
+                # Just take the first incoherent mode.
+                eigenmode_i = probe.get_mode_and_opr_mode(mode=0, opr_mode=i_opr_mode)
+                weights_i = self.get_weights(indices)[:, i_opr_mode]
+                eigenmode_i, weights_i = self._update_first_eigenmode_and_weight(
+                    residue_update,
+                    eigenmode_i,
+                    weights_i,
+                    relax_u,
+                    relax_v,
+                    obj_patches,
+                    chi,
+                    update_eigenmode=update_eigenmode,
+                    update_weights=self.eigenmode_weight_optimization_enabled(current_epoch),
                 )
 
-            probe_data[i_opr_mode, 0, :, :] = eigenmode_i
-            weights_data[indices, i_opr_mode] = weights_i
+                # Project residue on this eigenmode, then subtract it.
+                if i_opr_mode < probe.n_opr_modes - 1:
+                    residue_update = residue_update - pmath.project(
+                        residue_update, eigenmode_i, dim=(-2, -1)
+                    )
 
-        # print( torch.linalg.norm(probe_data,dim=(-1,-2)), torch.linalg.norm( weights_data,dim=(0)) )
+                probe_data[i_opr_mode, 0, :, :] = eigenmode_i
+                weights_data[indices, i_opr_mode] = weights_i
         
-        if update_eigenmode and not (probe.representation == "sparse_code"):
-            probe.set_data(probe_data)                  
-        if self.eigenmode_weight_optimization_enabled(current_epoch):
+        if update_eigenmode:
+            probe.set_data(probe_data)      
+                        
+        if update_eigenmode_weights:
             self.set_data(weights_data)
 
     @timer()
