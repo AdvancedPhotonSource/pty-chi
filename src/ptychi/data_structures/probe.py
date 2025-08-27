@@ -221,7 +221,12 @@ class Probe(dsbase.ReconstructParameter):
             return
 
         probe = self.data
-
+        
+        if self.options.orthogonalize_incoherent_modes.sort_by_occupancy:
+            shared_occupancy = torch.sum(torch.abs(probe[0,...])**2,(-2,-1)) / torch.sum(torch.abs(probe[0,...])**2)
+            shared_occupancy = torch.sort(shared_occupancy, dim=0, descending=True)
+            probe[0,...] = probe[ 0, shared_occupancy[1],...]
+        
         norm_first_mode_orig = pmath.norm(probe[0, 0], dim=(-2, -1))
 
         if self.orthogonalize_incoherent_modes_method == "gs":
@@ -470,32 +475,58 @@ class SynthesisDictLearnProbe( Probe ):
         
         super().__init__(name, options, build_optimizer=False, data_as_parameter=False, *args, **kwargs)
 
-        dictionary_matrix, dictionary_matrix_pinv, dictionary_matrix_H = self.get_dictionary()
+        dictionary_matrix, dictionary_matrix_pinv = self.get_dictionary()
+        
         self.register_buffer("dictionary_matrix", dictionary_matrix)
         self.register_buffer("dictionary_matrix_pinv", dictionary_matrix_pinv)
-        self.register_buffer("dictionary_matrix_H", dictionary_matrix_H)
         
-        probe_sparse_code_nnz = torch.tensor( self.options.experimental.sdl_probe_options.probe_sparse_code_nnz, dtype=torch.uint32 )
-        self.register_buffer("probe_sparse_code_nnz", probe_sparse_code_nnz )
+        sparse_code_probe_shared_nnz = torch.tensor( self.options.experimental.sdl_probe_options.sparse_code_probe_shared_nnz, dtype=torch.uint32 )
+        sparse_code_probe_opr_nnz = torch.tensor( self.options.experimental.sdl_probe_options.sparse_code_probe_opr_nnz, dtype=torch.uint32 )
+        
+        self.register_buffer("sparse_code_probe_nnz", sparse_code_probe_shared_nnz )
+        self.register_buffer("sparse_code_opr_nnz", sparse_code_probe_opr_nnz )
 
-        sparse_code_probe = self.get_sparse_code_weights()
-        self.register_parameter("sparse_code_probe", torch.nn.Parameter(sparse_code_probe))
-    
+        sparse_code_probe_shared = self.get_sparse_code_probe_shared_weights()
+        sparse_code_probe_opr = self.get_sparse_code_probe_opr_weights()
+        
+        self.register_parameter("sparse_code_probe_shared", torch.nn.Parameter(sparse_code_probe_shared))
+        self.register_parameter("sparse_code_probe_opr", torch.nn.Parameter(sparse_code_probe_opr))
+
         self.build_optimizer()
 
     def get_dictionary(self):
-        dictionary_matrix = torch.tensor( self.options.experimental.sdl_probe_options.d_mat, dtype=torch.complex64 )
-        dictionary_matrix_pinv = torch.tensor( self.options.experimental.sdl_probe_options.d_mat_pinv, dtype=torch.complex64 )
-        dictionary_matrix_H = torch.tensor( self.options.experimental.sdl_probe_options.d_mat_conj_transpose, dtype=torch.complex64 )
-        return dictionary_matrix, dictionary_matrix_pinv, dictionary_matrix_H
+        
+        dictionary_matrix = torch.tensor( self.options.experimental.sdl_probe_options.dictionary_matrix, dtype=torch.complex64 )
+        dictionary_matrix_pinv = torch.tensor( self.options.experimental.sdl_probe_options.dictionary_matrix_pinv, dtype=torch.complex64 )
 
-    def get_sparse_code_weights(self):
-        sz = self.data.shape
-        probe_vec = torch.reshape( self.data[0,...], (sz[1], sz[2] * sz[3]))
-        probe_vec = torch.swapaxes( probe_vec, 0, -1)
-        sparse_code_probe = self.dictionary_matrix_pinv @ probe_vec
-        return sparse_code_probe
+        return dictionary_matrix, dictionary_matrix_pinv 
 
+    def get_sparse_code_weights_vs_scanpositions(self, probe_vs_scanpositions ):
+        
+        sz = probe_vs_scanpositions.shape
+        probe_vec = torch.reshape(probe_vs_scanpositions, (sz[0], sz[1], sz[2]*sz[3]))
+        sparse_code_vs_scanpositions = torch.einsum('ij,klj->ikl', self.dictionary_matrix_pinv, probe_vec)
+        
+        return sparse_code_vs_scanpositions
+
+    def get_sparse_code_probe_shared_weights(self):
+        
+        probe_shared = self.data[0,...]
+        sz = probe_shared.shape
+        probe_vec = torch.reshape(probe_shared, (sz[0], sz[1]*sz[2]))
+        sparse_code_probe_shared = self.dictionary_matrix_pinv @ probe_vec.T
+        
+        return sparse_code_probe_shared.T
+    
+    def get_sparse_code_probe_opr_weights(self):
+        
+        probe_opr = self.data[1:,0,...]
+        sz = probe_opr.shape
+        probe_vec = torch.reshape(probe_opr, (sz[0], sz[1]*sz[2]))
+        sparse_code_probe_opr = self.dictionary_matrix_pinv @ probe_vec.T
+        
+        return sparse_code_probe_opr.T
+    
     def generate(self):
         """Generate the probe using the sparse code, and set the
         generated probe to self.data.
@@ -505,15 +536,51 @@ class SynthesisDictLearnProbe( Probe ):
         Tensor
             A (n_opr_modes, n_modes, h, w) tensor giving the generated probe.
         """
-        probe_vec = self.dictionary_matrix @ self.sparse_code_probe
-        probe_vec = torch.swapaxes( probe_vec, 0, -1)
-        probe = torch.reshape(probe_vec, *[self.data[0,...].shape])
-        probe = probe[None,...]
         
-        # we only use sparse codes for the shared modes, not the OPRs
-        probe = torch.cat((probe, self.data[1:,...]), 0)    
-        
-        self.set_data(probe)
+        if (self.options.experimental.sdl_probe_options.enabled_shared 
+            and self.options.experimental.sdl_probe_options.enabled_opr):
+            
+            sz = self.data.shape
+            probe = torch.zeros( *[sz], dtype = torch.complex64 )
+            
+            probe_shared = self.dictionary_matrix @ self.sparse_code_probe_shared.T
+            probe_opr = self.dictionary_matrix @ self.sparse_code_probe_opr.T
+            
+            probe[0,...] = torch.reshape( probe_shared.T, *[sz[1:]] )
+            probe[1:,0,...] = torch.reshape( probe_opr.T, [sz[0] - 1, sz[-2], sz[-1]] )
+   
+            self.set_data(probe)
+            
+        elif (self.options.experimental.sdl_probe_options.enabled_shared 
+              and not self.options.experimental.sdl_probe_options.enabled_opr):
+            
+            sz = self.data.shape
+            probe = torch.zeros( *[sz], dtype = torch.complex64 )
+            
+            probe_shared = self.dictionary_matrix @ self.sparse_code_probe_shared.T
+   
+            probe[0,...] = torch.reshape( probe_shared.T, *[sz[1:]] )
+            probe[1:,0,...] = self.data[1:,0,...]
+   
+            self.set_data(probe)
+            
+        elif (self.options.experimental.sdl_probe_options.enabled_opr 
+              and not self.options.experimental.sdl_probe_options.enabled_shared):
+            
+            sz = self.data.shape
+            probe = torch.zeros( *[sz], dtype = torch.complex64 )
+            
+            probe_opr = self.dictionary_matrix @ self.sparse_code_probe_opr.T
+   
+            probe[0,...] = self.data[0,...]
+            probe[1:,0,...] = torch.reshape( probe_opr.T, [sz[0] - 1, sz[-2], sz[-1]] )
+   
+            self.set_data(probe)
+            
+        else:
+            
+            probe = self.data 
+
         return probe
     
     def build_optimizer(self):
@@ -522,12 +589,15 @@ class SynthesisDictLearnProbe( Probe ):
                 "Parameter {} is optimizable but no optimizer is specified.".format(self.name)
             )
         if self.optimizable:
-            self.optimizer = self.optimizer_class([self.sparse_code_probe], **self.optimizer_params)
+            self.optimizer = self.optimizer_class([self.sparse_code_probe_shared], **self.optimizer_params)
 
-    def set_sparse_code(self, data):
-        self.sparse_code_probe.data = data
-
-
+    def set_sparse_code_probe_shared(self, data):
+        self.sparse_code_probe_shared.data = data
+        
+    def set_sparse_code_probe_opr(self, data):
+        self.sparse_code_probe_opr.data = data
+        
+        
 class DIPProbe(Probe):
     
     options: "api.options.ad_ptychography.AutodiffPtychographyProbeOptions"

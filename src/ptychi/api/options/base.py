@@ -545,7 +545,9 @@ class ProbeOrthogonalizeIncoherentModesOptions(FeatureOptions):
 
     method: enums.OrthogonalizationMethods = enums.OrthogonalizationMethods.SVD
     """The method to use for incoherent_mode orthogonalization."""
-
+    
+    sort_by_occupancy: bool = False
+    """Keep the probes sorted so that mode with highest occupancy is the 0th shared mode"""
 
 @dataclasses.dataclass
 class ProbeOrthogonalizeOPRModesOptions(FeatureOptions):
@@ -651,25 +653,35 @@ class ProbeOptions(ParameterOptions):
 
 @dataclasses.dataclass
 class SynthesisDictLearnProbeOptions(Options):
-    
-    d_mat: Union[ndarray, Tensor] = None
+
+    enabled: bool = False
+    enabled_shared: bool = False
+    enabled_opr: bool = False
+
+    thresholding_type_shared: str = 'hard'
+    thresholding_type_opr: str = 'hard'
+    """Choose between 'hard' or 'soft' thresholding."""
+
+    dictionary_matrix: Union[ndarray, Tensor] = None
     """The synthesis sparse dictionary matrix; contains the basis functions 
     that will be used to represent the probe via the sparse code weights."""
     
-    d_mat_conj_transpose: Union[ndarray, Tensor] = None
-    """Conjugate transpose of the synthesis sparse dictionary matrix."""
-    
-    d_mat_pinv: Union[ndarray, Tensor] = None
+    dictionary_matrix_pinv: Union[ndarray, Tensor] = None
     """Moore-Penrose pseudoinverse of the synthesis sparse dictionary matrix."""
     
-    probe_sparse_code: Union[ndarray, Tensor] = None
-    """Sparse code weights vector."""
+    sparse_code_probe_shared: Union[ndarray, Tensor] = None
+    """Sparse code weights vector for the shared modes."""
     
-    probe_sparse_code_nnz: float = None
+    sparse_code_probe_shared_nnz: float = None
     """Number of non-zeros we will keep when enforcing sparsity constraint on
-    the sparse code weights vector probe_sparse_code."""
+    the SHARED sparse code weights vector sparse_code_probe_shared."""
+
+    sparse_code_probe_opr: Union[ndarray, Tensor] = None
+    """Sparse code weights vector for the OPRs."""
     
-    enabled: bool = False
+    sparse_code_probe_opr_nnz: float = None
+    """Number of non-zeros we will keep when enforcing sparsity constraint on
+    the OPR sparse code weights vector sparse_code_probe_opr."""
 
 @dataclasses.dataclass
 class PositionCorrectionOptions(Options):
@@ -872,6 +884,12 @@ class OPRModeWeightsOptions(ParameterOptions):
     A separate step size for eigenmode weight update.
     """
 
+    use_optimal_update: bool = False
+    """ 
+    We do not compute an optimal update step for OPR weights and eigenmodes
+    using the default method; this add the option to do this.
+    """
+    
     def check(self, options: "task_options.PtychographyTaskOptions"):
         super().check(options)
         if self.optimizable:
