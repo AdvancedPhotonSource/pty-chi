@@ -62,6 +62,19 @@ def get_reconstructor_by_enum(key: enums.Reconstructors) -> Type["Reconstructor"
     }[key]
 
 
+def get_multiprocess_reconstructor_by_enum(key: enums.Reconstructors) -> Type["Reconstructor"]:
+    d = {
+        enums.Reconstructors.LSQML: reconstructors.MultiprocessLSQMLReconstructor,
+    }
+    reconstructor_class = d.get(key, None)
+    if reconstructor_class is None:
+        raise ValueError(
+            f"{key} does not support multiprocessing. Either launch the task in "
+            f"single-process mode or use a reconstructor that supports multiprocessing."
+        )
+    return reconstructor_class
+
+
 def get_noise_model_by_enum(key: enums.NoiseModels) -> str:
     return {enums.NoiseModels.GAUSSIAN: "gaussian", enums.NoiseModels.POISSON: "poisson"}[key]
 
