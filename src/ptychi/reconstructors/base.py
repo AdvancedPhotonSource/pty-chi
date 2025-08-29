@@ -1,10 +1,9 @@
 # Copyright © 2025 UChicago Argonne, LLC All right reserved
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
-from typing import Optional, Tuple, Sequence, TYPE_CHECKING, Literal, Any
+from typing import Optional, Tuple, Sequence, TYPE_CHECKING, Any
 import logging
 
-import numpy as np
 import pandas as pd
 import torch
 from torch import Tensor
