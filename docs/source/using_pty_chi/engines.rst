@@ -19,7 +19,7 @@ The table below compares their merits and limitations.
      - No
      - Yes
    * - GPU support
-     - Single
+     - Multiple (multi-process)
      - Single
      - Single
      - Multiple
