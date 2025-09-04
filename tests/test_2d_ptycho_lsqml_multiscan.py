@@ -87,8 +87,8 @@ class Test2dPtychoLsqmlMultiscan(tutils.TungstenDataTester):
             for i_task, task in enumerate(all_tasks):
                 task.run(1)
                 # Copy object to next task
-                if i_task < len(all_tasks) - 1:
-                    all_tasks[i_task + 1].copy_data_from_task(task, params_to_copy=("object",))
+                i_next_task = (i_task + 1) % len(all_tasks)
+                all_tasks[i_next_task].copy_data_from_task(task, params_to_copy=("object",))
         
         recon = all_tasks[-1].get_data_to_cpu('object', as_numpy=True)[0]
         return recon
