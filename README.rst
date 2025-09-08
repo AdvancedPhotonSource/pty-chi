@@ -47,14 +47,24 @@ a new uv virtual environment with Python 3.11::
 
     uv venv --python 3.11
 
-Activate the environment::
+Then install Pty-Chi and its dependencies using::
+
+    uv sync
+
+You can now run scripts *inside the project directory* with::
+
+    uv run <script.py>
+
+without activating the environment. Alternatively, you can activate the environment
+with::
 
     source .venv/bin/activate
 
-Then install Pty-Chi and its dependencies using::
+and then run scripts with::
 
-    uv pip install -r requirements.txt
-    uv pip install -e .
+    python <script.py>
+
+This allows you to run scripts located anywhere in your system.
 
 Option 2: Installation with Conda and pip
 +++++++++++++++++++++++++++++++++++++++++

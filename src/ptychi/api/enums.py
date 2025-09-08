@@ -119,3 +119,9 @@ class ObjectPosOriginCoordsMethods(StrEnum):
     POSITIONS = auto()
     SUPPORT = auto()
     SPECIFIED = auto()
+
+
+class MagPhaseComponents(StrEnum):
+    MAGNITUDE = auto()
+    PHASE = auto()
+    BOTH = auto()

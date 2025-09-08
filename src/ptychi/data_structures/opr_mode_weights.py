@@ -104,7 +104,17 @@ class OPRModeWeights(dsbase.ReconstructParameter):
         obj_patches: Tensor,
         current_epoch: int,
         probe_mode_index: Optional[int] = None,
+        apply_updates: bool = True,
     ):
+        """Update the OPR mode weights and eigenmodes of the probe.
+
+        Parameters
+        ----------
+        apply_updates : bool
+            If True, the data of the probe and OPR weights are modified with the
+            update vectors. Otherwise, the update vectors will be saved in the
+            ``grad`` attribute of the probe and OPR weight objects.
+        """
         # TODO: OPR updates are calculated using chi with uniquely shifted probes, 
         # probe without shift, and probe updates that are adjoint-shifted. This is
         # not accurate, but PtychoShelves does the same. We might need to revisit this.
@@ -118,7 +128,14 @@ class OPRModeWeights(dsbase.ReconstructParameter):
             or (self.eigenmode_weight_optimization_enabled(current_epoch))
         ):
             self.update_opr_probe_modes_and_weights(
-                probe, indices, chi, delta_p_i, delta_p_hat, obj_patches, current_epoch
+                probe, 
+                indices, 
+                chi, 
+                delta_p_i, 
+                delta_p_hat, 
+                obj_patches, 
+                current_epoch,
+                apply_updates=apply_updates,
             )
 
         if self.intensity_variation_optimization_enabled(current_epoch):
@@ -128,7 +145,10 @@ class OPRModeWeights(dsbase.ReconstructParameter):
                 chi,
                 obj_patches,
             )
-            self._apply_variable_intensity_updates(delta_weights_int)
+            if apply_updates:
+                self.set_data(self.data + 0.1 * delta_weights_int)
+            else:
+                self.set_grad(-0.1 * delta_weights_int, op="add")
 
     @timer()
     def update_opr_probe_modes_and_weights(
@@ -140,12 +160,20 @@ class OPRModeWeights(dsbase.ReconstructParameter):
         delta_p_hat: Tensor,
         obj_patches: Tensor,
         current_epoch: int,
+        apply_updates: bool = True,
     ):
         """
         Update the eigenmodes of the first incoherent mode of the probe, and update the OPR mode weights.
 
         This implementation is adapted from PtychoShelves code (update_variable_probe.m) and has some
         differences from Eq. 31 of Odstrcil (2018).
+        
+        Parameters
+        ----------
+        apply_updates : bool
+            If True, the data of the probe and OPR weights are modified with the
+            update vectors. Otherwise, the update vectors will be saved in the
+            ``grad`` attribute of the probe and OPR weight objects.
         """
         probe_data = probe.data
         weights_data = self.data
@@ -172,7 +200,7 @@ class OPRModeWeights(dsbase.ReconstructParameter):
             # Just take the first incoherent mode.
             eigenmode_i = probe.get_mode_and_opr_mode(mode=0, opr_mode=i_opr_mode)
             weights_i = self.get_weights(indices)[:, i_opr_mode]
-            eigenmode_i, weights_i = self._update_first_eigenmode_and_weight(
+            eigenmode_i, weights_i = self._calculate_updated_first_eigenmode_and_weight(
                 residue_update,
                 eigenmode_i,
                 weights_i,
@@ -193,13 +221,18 @@ class OPRModeWeights(dsbase.ReconstructParameter):
             probe_data[i_opr_mode, 0, :, :] = eigenmode_i
             weights_data[indices, i_opr_mode] = weights_i
 
-        if probe.optimization_enabled(current_epoch):
-            probe.set_data(probe_data)
-        if self.eigenmode_weight_optimization_enabled(current_epoch):
-            self.set_data(weights_data)
+        if apply_updates:
+            if probe.optimization_enabled(current_epoch):
+                probe.set_data(probe_data)
+            if self.eigenmode_weight_optimization_enabled(current_epoch):
+                self.set_data(weights_data)
+        else:
+            # Gradient is the negative of the update vector.
+            probe.set_grad(probe.data - probe_data, op="add")
+            self.set_grad(self.data - weights_data, op="add")
 
     @timer()
-    def _update_first_eigenmode_and_weight(
+    def _calculate_updated_first_eigenmode_and_weight(
         self,
         residue_update: Tensor,
         eigenmode_i: Tensor,
@@ -208,7 +241,6 @@ class OPRModeWeights(dsbase.ReconstructParameter):
         relax_v: Tensor,
         obj_patches: Tensor,
         chi: Tensor,
-        eps=1e-5,
         update_eigenmode=True,
         update_weights=True,
     ):
@@ -275,10 +307,6 @@ class OPRModeWeights(dsbase.ReconstructParameter):
         delta_weights_int = torch.zeros_like(self.data)
         delta_weights_int[indices, 0] = delta_weights_int_i
         return delta_weights_int
-
-    @timer()
-    def _apply_variable_intensity_updates(self, delta_weights_int: Tensor):
-        self.set_data(self.data + 0.1 * delta_weights_int)
 
     @timer()
     def smooth_weights(self):

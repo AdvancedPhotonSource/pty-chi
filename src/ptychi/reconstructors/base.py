@@ -1,23 +1,25 @@
 # Copyright © 2025 UChicago Argonne, LLC All right reserved
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
-from typing import Optional, Tuple, Sequence, TYPE_CHECKING
+from typing import Optional, Tuple, Sequence, TYPE_CHECKING, Any
 import logging
 
 import pandas as pd
 import torch
 from torch import Tensor
+import torch.distributed as dist
 from torch.utils.data import DataLoader, Dataset
 import tqdm
+
 from ptychi.timing.timer_utils import timer
 import ptychi.movies as movies
-
 from ptychi.utils import to_numpy
 import ptychi.maps as maps
 import ptychi.forward_models as fm
 import ptychi.api.enums as enums
 import ptychi.io_handles as io
 import ptychi.image_proc as ip
+from ptychi.parallel import MultiprocessMixin
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
     import ptychi.api as api
@@ -25,7 +27,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class LossTracker:
+class LossTracker(MultiprocessMixin):
     def __init__(
         self,
         metric_function: Optional[torch.nn.Module] = None,
@@ -147,6 +149,67 @@ class LossTracker:
 
     def to_csv(self, path: str) -> None:
         self.table.to_csv(path, index=False)
+        
+    def synchronize_accumulated_losses(self) -> None:
+        self.sync_buffer(self.accumulated_num_batches, op=dist.ReduceOp.SUM)
+        self.sync_buffer(self.accumulated_num_reg_batches, op=dist.ReduceOp.SUM)
+        
+        
+class ReconstructorBufferManager(MultiprocessMixin):
+    ops = {}
+    
+    def register_buffer(self, name: str, buffer: Any, op: dist.ReduceOp) -> None:
+        """Register a buffer.
+
+        Parameters
+        ----------
+        name : str
+            The name of the buffer.
+        buffer : Any
+            The buffer to be registered.
+        op : dist.ReduceOp
+            The operation to take on the buffers when they are synchronized across 
+            ranks through all-reduce. If the manager is not intended to be used in
+            a multi-process environment, use anything for this argument.
+        """
+        self.__setattr__(name, buffer, bypass_check=True)
+        self.ops[name] = op
+        
+    def get_op(self, name: str) -> dist.ReduceOp:
+        return self.ops[name]
+    
+    def __setattr__(self, name: str, value: Any, bypass_check: bool = False) -> None:
+        if name not in self.ops and not bypass_check:
+            raise ValueError(
+                f"Setting an unregistered buffer is not allowed: {name}. Use `register_buffer` instead."
+            )
+        super().__setattr__(name, value)
+        
+    def get_all_names(self) -> list[str]:
+        return list(self.ops.keys())
+    
+    def synchronize(
+        self, 
+        names: Sequence[str] | None = None, 
+        indices: Sequence[int] | None = None
+    ) -> None:
+        """Synchronize the buffers across ranks.
+        
+        Parameters
+        ----------
+        names : Sequence[str] | None, optional
+            The names of the buffers to be synchronized. If None, all buffers
+            will be synchronized.
+        indices : Sequence[int] | None, optional
+            If given, only the elements of the buffers at the given indices
+            will be synchronized. The rest is kept unchanged.
+        """
+        if names is None:
+            names = self.get_all_names()
+        for name in names:
+            buffer = getattr(self, name)
+            buffer = self.sync_buffer(buffer, indices=indices, op=self.get_op(name))
+            self.__setattr__(name, buffer, bypass_check=True)
 
 
 class Reconstructor:
@@ -161,6 +224,8 @@ class Reconstructor:
         if options is None:
             options = self.get_option_class()()
         self.options = options
+        
+        self.reconstructor_buffers = ReconstructorBufferManager()
 
     def check_inputs(self, *args, **kwargs):
         pass

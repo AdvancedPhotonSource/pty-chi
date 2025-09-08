@@ -10,15 +10,15 @@ requires-python = ">=3.11"
 license = {file = "LICENSE.txt"}
 dependencies = [
     "h5py",
-    "matplotlib",
     "mypy",
-    "numpy",
+    "numpy>=2.1",
     "pandas",
+    "pytest>=8.4.1",
     "ruff",
     "scikit-image",
     "scikit-learn",
     "scipy",
-    "torch>=2.4.1",
+    "torch>=2.4",
     "torchvision",
     "tqdm",
 ]
@@ -45,10 +45,15 @@ plugins = "numpy.typing.mypy_plugin"
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.setuptools.package-data]
 "ptychi" = ["py.typed"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.10.6",
+]

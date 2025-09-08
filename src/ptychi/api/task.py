@@ -27,11 +27,12 @@ import ptychi.maths as pmath
 from ptychi.timing import timer_utils
 import ptychi.movies as movies
 from ptychi.device import AcceleratorModuleWrapper
+from ptychi.parallel import MultiprocessMixin
 
 logger = logging.getLogger(__name__)
 
 
-class Task:
+class Task(MultiprocessMixin):
     def __init__(self, options: api.options.base.TaskOptions, *args, **kwargs) -> None:
         pass
 
@@ -86,6 +87,7 @@ class PtychographyTask(Task):
         self.build_random_seed()
         self.build_default_device()
         self.build_default_dtype()
+        self.build_logger()
         self.build_data()
         self.build_object()
         self.build_probe()
@@ -103,7 +105,25 @@ class PtychographyTask(Task):
     def build_default_device(self):
         accelerator_module = AcceleratorModuleWrapper.get_module()
         
-        torch.set_default_device(maps.get_device_by_enum(self.reconstructor_options.default_device))
+        if self.detect_launcher() is None:
+            torch.set_default_device(maps.get_device_by_enum(self.reconstructor_options.default_device))
+        else:
+            self.init_process_group()
+            
+            if self.backend == "nccl" and self.n_ranks > accelerator_module.device_count():
+                raise ValueError(
+                    f"Number of ranks ({self.n_ranks}) is greater than the number of devices "
+                    f"({accelerator_module.device_count()}). This is not allowed with NCCL backend."
+                )
+            
+            if self.n_ranks == 1:
+                torch.set_default_device(maps.get_device_by_enum(self.reconstructor_options.default_device))
+            else:
+                logging.info(f"Multi-processing mode detected with {self.n_ranks} ranks.")
+                torch.set_default_device(
+                    f"{AcceleratorModuleWrapper.get_to_device_string()}:{self.rank % accelerator_module.device_count()}"
+                )
+            
         if accelerator_module.device_count() > 0:
             cuda_visible_devices_str = "(unset)"
             if "CUDA_VISIBLE_DEVICES" in os.environ.keys():
@@ -116,6 +136,10 @@ class PtychographyTask(Task):
             )
         else:
             logger.info("Using device: {}".format(torch.get_default_device()))
+
+    def build_logger(self):
+        if self.rank != 0:
+            logger.setLevel(level=logging.ERROR)
 
     def build_default_dtype(self):
         torch.set_default_dtype(maps.get_dtype_by_enum(self.reconstructor_options.default_dtype))
@@ -205,9 +229,14 @@ class PtychographyTask(Task):
             opr_mode_weights=self.opr_mode_weights,
         )
 
-        reconstructor_class = maps.get_reconstructor_by_enum(
-            self.reconstructor_options.get_reconstructor_type()
-        )
+        if self.n_ranks == 1:
+            reconstructor_class = maps.get_reconstructor_by_enum(
+                self.reconstructor_options.get_reconstructor_type()
+            )
+        else:
+            reconstructor_class = maps.get_multiprocess_reconstructor_by_enum(
+                self.reconstructor_options.get_reconstructor_type()
+            )
 
         reconstructor_kwargs = {
             "parameter_group": par_group,

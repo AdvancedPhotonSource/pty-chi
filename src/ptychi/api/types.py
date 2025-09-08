@@ -6,6 +6,8 @@ import numpy
 import torch
 
 
+Numeric: TypeAlias = int | float | complex
+
 BooleanArray: TypeAlias = numpy.typing.NDArray[numpy.bool_]
 IntegerArray: TypeAlias = numpy.typing.NDArray[numpy.integer[Any]]
 RealArray: TypeAlias = numpy.typing.NDArray[numpy.floating[Any]]

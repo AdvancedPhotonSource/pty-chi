@@ -7,6 +7,7 @@ import math
 
 import torch
 from torch.utils.data import Dataset
+import torch.distributed as dist
 
 from ptychi.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
@@ -17,6 +18,7 @@ import ptychi.maths as pmath
 import ptychi.api.enums as enums
 from ptychi.timing.timer_utils import timer
 import ptychi.image_proc as ip
+from ptychi.parallel import MultiprocessMixin
 
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
@@ -68,25 +70,29 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         self.alpha_psi_far = 0.5
         self.alpha_psi_far_all_pos = None
-        self.alpha_object_all_pos_all_slices = torch.ones(
-            [self.parameter_group.probe_positions.shape[0], self.parameter_group.object.n_slices],
-            device=torch.get_default_device(),
-        )
-        self.alpha_probe_all_pos = torch.ones(
-            self.parameter_group.probe_positions.shape[0], device=torch.get_default_device()
-        )
 
         self.indices = []
 
         self.object_momentum_params = {}
         self.probe_momentum_params = {}
 
-        self.accumulated_true_intensity = 0
-        self.accumulated_pred_intensity = 0
 
         # Fourier error for momentum acceleration.
         self.accumulated_fourier_error = 0.0
-        self.fourier_errors = []
+        
+        # Create buffers.
+        alpha_object_all_pos_all_slices = torch.ones(
+            [self.parameter_group.probe_positions.shape[0], self.parameter_group.object.n_slices],
+            device=torch.get_default_device(),
+        )
+        alpha_probe_all_pos = torch.ones(
+            self.parameter_group.probe_positions.shape[0], device=torch.get_default_device()
+        )
+        self.reconstructor_buffers.register_buffer("alpha_probe_all_pos", alpha_probe_all_pos, dist.ReduceOp.SUM)
+        self.reconstructor_buffers.register_buffer("alpha_object_all_pos_all_slices", alpha_object_all_pos_all_slices, dist.ReduceOp.SUM)
+        self.reconstructor_buffers.register_buffer("fourier_errors", [], dist.ReduceOp.AVG)
+        self.reconstructor_buffers.register_buffer("accumulated_true_intensity", 0, dist.ReduceOp.SUM)
+        self.reconstructor_buffers.register_buffer("accumulated_pred_intensity", 0, dist.ReduceOp.SUM)
 
     def check_inputs(self, *args, **kwargs):
         if self.parameter_group.opr_mode_weights.optimizer is not None:
@@ -145,6 +151,15 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             self.alpha_psi_far_all_pos[indices] = alpha
             logger.debug("poisson alpha_psi_far: mean = {}".format(torch.mean(alpha)))
         return alpha
+    
+    @timer()
+    def compute_reconstruction_parameter_updates(self, y_pred, y_true, indices):
+        """Calculate the update vectors for unknown parameters. These update
+        vectors are stored in the `grad` attribute of the corresponding
+        `ReconstructionParameter` objects. Actual updates are NOT performed here.
+        """
+        psi_opt = self.run_reciprocal_space_step(y_pred, y_true, indices)
+        self.run_real_space_step(psi_opt, indices)
 
     @timer()
     def run_reciprocal_space_step(self, y_pred, y_true, indices):
@@ -183,12 +198,15 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         chi = psi_opt - psi_0  # Eq, 19
         obj_patches = self.forward_model.intermediate_variables["obj_patches"]
 
-        self.update_reconstruction_parameters(indices, chi, obj_patches, positions)
+        self.calculate_update_vectors(indices, chi, obj_patches, positions)
 
     @timer()
-    def update_reconstruction_parameters(self, indices, chi, obj_patches, positions):
+    def calculate_update_vectors(self, indices, chi, obj_patches, positions):
         """
-        Update the object and probe.
+        Calculate the update vectors for the object, probe, and other reconstruction
+        parameters. These update vectors are stored in the `grad` attribute of the
+        corresponding `ReconstructionParameter` objects. Actual updates are NOT
+        performed here.
 
         Parameters
         ----------
@@ -207,6 +225,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         object_ = self.parameter_group.object
         self._initialize_object_gradient()
         self._initialize_probe_gradient()
+        self._initialize_probe_position_gradient()
+        self._initialize_opr_mode_weights_gradient()
         self._initialize_object_step_size_buffer()
         self._initialize_probe_step_size_buffer()
         self._initialize_momentum_buffers()
@@ -224,6 +244,16 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                     chi, probe_current_slice, positions, i_slice
                 )
             )
+            # Record object update directions.
+            # In compact batching mode, object is updated at the end of an epoch using gradients
+            # accumulated over all minibatches.
+            if self.options.batching_mode in [
+                enums.BatchingModes.RANDOM,
+                enums.BatchingModes.UNIFORM,
+            ]:
+                self._record_object_slice_gradient(i_slice, delta_o_precond, add_to_existing=False)
+            else:
+                self._record_object_slice_gradient(i_slice, delta_o_comb, add_to_existing=False)
 
             # Calculate probe update direction.
             delta_p_i_unshifted = self._calculate_probe_update_direction(
@@ -233,8 +263,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 indices, delta_p_i_unshifted, first_mode_only=True
             )
             delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
+            self._record_probe_gradient(delta_p_hat)
 
-            # Update OPR modes and weights.
+            # Calculate update vectors for OPR modes and weights.
             if i_slice == 0:
                 if self.parameter_group.opr_mode_weights.optimization_enabled(self.current_epoch):
                     self.parameter_group.opr_mode_weights.update_variable_probe(
@@ -246,6 +277,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                         obj_patches,
                         self.current_epoch,
                         probe_mode_index=0,
+                        apply_updates=False,
                     )
 
             # Update buffered data for momentum acceleration.
@@ -264,23 +296,13 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 slice_index=i_slice,
             )
 
-            # In compact batching mode, object is updated at the end of an epoch using gradients
-            # accumulated over all minibatches.
-            if self.options.batching_mode in [
-                enums.BatchingModes.RANDOM,
-                enums.BatchingModes.UNIFORM,
-            ]:
-                self._record_object_slice_gradient(i_slice, delta_o_precond, add_to_existing=False)
-            else:
-                self._record_object_slice_gradient(i_slice, delta_o_comb, add_to_existing=False)
-
             if self.parameter_group.probe_positions.optimization_enabled(
                 self.current_epoch
             ) and i_slice == self.parameter_group.probe_positions.get_slice_for_correction(
                 object_.n_slices
             ):
                 mean_alpha_o = pmath.trim_mean(
-                    self.alpha_object_all_pos_all_slices[indices, i_slice], 0.1, dim=0
+                    self.reconstructor_buffers.alpha_object_all_pos_all_slices[indices, i_slice], 0.1, dim=0
                 )
                 self.update_probe_positions(
                     chi,
@@ -288,13 +310,26 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                     obj_patches[:, i_slice : i_slice + 1],
                     mean_alpha_o * delta_o_i,
                     self.forward_model.intermediate_variables.shifted_unique_probes[i_slice],
+                    apply_updates=False,
                 )
 
             # Set chi to conjugate-modulated wavefield.
             chi = delta_p_i_unshifted
 
+    @timer()
+    def apply_reconstruction_parameter_updates(self, indices: torch.Tensor):
+        """Perform updates for reconstruction parameters using the
+        update vectors stored in the `grad` attribute of the corresponding
+        `ReconstructionParameter` objects.
+
+        Parameters
+        ----------
+        indices : torch.Tensor
+            The indices of the diffraction patterns processed in the current batch.
+        """
+        # Update object.
         mean_alpha_o_all_slices = pmath.trim_mean(
-            self.alpha_object_all_pos_all_slices[indices], 0.1, dim=0
+            self.reconstructor_buffers.alpha_object_all_pos_all_slices[indices], 0.1, dim=0
         )
         if self.parameter_group.object.optimization_enabled(
             self.current_epoch
@@ -303,6 +338,19 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             enums.BatchingModes.UNIFORM,
         ]:
             self._apply_object_update(mean_alpha_o_all_slices, None)
+            
+        # Update probe.
+        alpha_p_i = self.reconstructor_buffers.alpha_probe_all_pos[indices]
+        if self.parameter_group.probe.optimization_enabled(self.current_epoch):
+            self._apply_probe_update(alpha_p_i, -self.parameter_group.probe.get_grad()[0])
+            
+        # Update probe positions.
+        if self.parameter_group.probe_positions.optimization_enabled(self.current_epoch):
+            self.parameter_group.probe_positions.step_optimizer()
+            
+        # Update OPR modes and weights.
+        if self.parameter_group.opr_mode_weights.optimization_enabled(self.current_epoch):
+            self.parameter_group.opr_mode_weights.step_optimizer()
 
     @timer()
     def _get_incident_wavefields_for_slice(self, i_slice):
@@ -480,11 +528,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 ),
             )
 
-        if slice_index == 0 and self.parameter_group.probe.optimization_enabled(self.current_epoch):
-            self._apply_probe_update(alpha_p_i, delta_p_hat)
-
-        self.alpha_object_all_pos_all_slices[indices, slice_index] = alpha_o_i
-        self.alpha_probe_all_pos[indices] = alpha_p_i
+        self.reconstructor_buffers.alpha_object_all_pos_all_slices[indices, slice_index] = alpha_o_i
+        self.reconstructor_buffers.alpha_probe_all_pos[indices] = alpha_p_i
 
     @timer()
     def calculate_object_and_probe_update_step_sizes(
@@ -675,10 +720,18 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
     @timer()
     def _apply_probe_update(self, alpha_p_i, delta_p_hat, probe_mode_index=None):
         """
-        Eq. 27a of Odstrcil, 2018.
+        Apply update to the probe.
+        
+        Parameters
+        ----------
+        alpha_p_i : torch.Tensor
+            A (batch_size,) tensor giving the probe step size calculated for 
+            each diffraction pattern.
+        delta_p_hat : torch.Tensor
+            A (n_probe_modes, h, w) tensor giving the probe update direction.
+        probe_mode_index : int, optional
+            The index of the probe mode to update. If None, all probe modes are updated.
         """
-        # Shape of alpha_p_i:        (batch_size,)
-        # Shape of delta_p_hat:      (n_probe_modes, h, w)
         # PtychoShelves code simply multiplies delta_p_hat with averaged step size.
         # This is different from the paper which does the following:
         #     update_vec = delta_p_hat * obj_patches[:, None, :, :].abs() ** 2
@@ -927,16 +980,24 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
     @timer()
     def _initialize_probe_gradient(self):
         self.parameter_group.probe.initialize_grad()
+        
+    @timer()
+    def _initialize_probe_position_gradient(self):
+        self.parameter_group.probe_positions.initialize_grad()
+        
+    @timer()
+    def _initialize_opr_mode_weights_gradient(self):
+        self.parameter_group.opr_mode_weights.initialize_grad()
 
     @timer()
     def _initialize_object_step_size_buffer(self):
         if self.current_minibatch == 0:
-            self.alpha_object_all_pos_all_slices[...] = 1
+            self.reconstructor_buffers.alpha_object_all_pos_all_slices[...] = 1
 
     @timer()
     def _initialize_probe_step_size_buffer(self):
         if self.current_minibatch == 0:
-            self.alpha_probe_all_pos[...] = 1
+            self.reconstructor_buffers.alpha_probe_all_pos[...] = 1
 
     @timer()
     def _initialize_momentum_buffers(self):
@@ -976,6 +1037,26 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             self.parameter_group.object.set_grad(
                 self.parameter_group.object.get_grad()[i_slice] - delta_o_hat[0], slicer=i_slice
             )
+            
+    @timer()
+    def _record_probe_gradient(self, delta_p_hat):
+        """
+        Record the gradient of the probe.
+        
+        Parameters
+        ----------
+        delta_p_hat : Tensor
+            A (n_opr_modes, n_probe_modes, h, w) or (n_probe_modes, h, w) tensor 
+            giving the update direction for the probe. If the input tensor is 3D,
+            it is assumed to be the latter case and will be expanded with 0s for
+            the OPR modes.
+        """
+        if delta_p_hat.ndim == 3:
+            delta_p_hat_full = torch.zeros_like(self.parameter_group.probe.data)
+            delta_p_hat_full[0] = delta_p_hat
+        else:
+            delta_p_hat_full = delta_p_hat
+        self.parameter_group.probe.set_grad(-delta_p_hat_full)
 
     @timer()
     def _apply_object_update(self, alpha_o_mean_all_slices, delta_o_hat=None):
@@ -1081,12 +1162,24 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     @timer()
     def _fourier_error_ok(self):
-        if len(self.fourier_errors) < 3:
+        if len(self.reconstructor_buffers.fourier_errors) < 3:
             return True
-        return max(self.fourier_errors[-3:-1]) > min(self.fourier_errors[-2:])
+        return max(self.reconstructor_buffers.fourier_errors[-3:-1]) > min(self.reconstructor_buffers.fourier_errors[-2:])
 
     @timer()
-    def update_probe_positions(self, chi, indices, obj_patches, delta_o_patches, unique_probes):
+    def update_probe_positions(
+        self, chi, indices, obj_patches, delta_o_patches, unique_probes, apply_updates=True
+    ):
+        """
+        Update the probe positions.
+
+        Parameters
+        ----------
+        apply_updates : bool
+            If True, the data of the probe positions are modified with the
+            update vectors. Otherwise, the update vectors will be saved in the
+            ``grad`` attribute of the probe positions object.
+        """
         delta_pos = self.parameter_group.probe_positions.position_correction.get_update(
             chi,
             obj_patches,
@@ -1094,14 +1187,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             unique_probes,
             self.parameter_group.object.optimizer_params["lr"],
         )
-        self._apply_probe_position_update(delta_pos, indices)
-
-    @timer()
-    def _apply_probe_position_update(self, delta_pos, indices):
         delta_pos_full = torch.zeros_like(self.parameter_group.probe_positions.tensor)
         delta_pos_full[indices] = delta_pos
         self.parameter_group.probe_positions.set_grad(-delta_pos_full)
-        self.parameter_group.probe_positions.step_optimizer()
+        if apply_updates:
+            self.parameter_group.probe_positions.step_optimizer()
 
     @timer()
     def _calculate_final_object_update_step_size(self):
@@ -1123,7 +1213,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         alpha_object_all_minibatches = []
         for inds in self.indices:
             alpha_current_batch = pmath.trim_mean(
-                self.alpha_object_all_pos_all_slices[inds], 0.1, dim=0, keepdim=False
+                self.reconstructor_buffers.alpha_object_all_pos_all_slices[inds], 0.1, dim=0, keepdim=False
             )
             alpha_object_all_minibatches.append(alpha_current_batch)
         alpha_object_all_minibatches = torch.stack(alpha_object_all_minibatches, dim=0)
@@ -1133,13 +1223,13 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         return alpha_object_all_slices
 
     @timer()
-    def _update_accumulated_intensities(self, y_true, y_pred):
-        self.accumulated_true_intensity = self.accumulated_true_intensity + torch.sum(y_true)
-        self.accumulated_pred_intensity = self.accumulated_pred_intensity + torch.sum(y_pred)
+    def update_accumulated_intensities(self, y_true, y_pred):
+        self.reconstructor_buffers.accumulated_true_intensity = self.reconstructor_buffers.accumulated_true_intensity + torch.sum(y_true)
+        self.reconstructor_buffers.accumulated_pred_intensity = self.reconstructor_buffers.accumulated_pred_intensity + torch.sum(y_pred)
 
     @timer()
     def _apply_probe_intensity_scaling_correction(self):
-        corr = math.sqrt(self.accumulated_true_intensity / self.accumulated_pred_intensity)
+        corr = math.sqrt(self.reconstructor_buffers.accumulated_true_intensity / self.reconstructor_buffers.accumulated_pred_intensity)
         self.parameter_group.probe.set_data(self.parameter_group.probe.data * corr)
 
     @timer()
@@ -1149,7 +1239,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         ).sum()
         if self.current_minibatch == len(self.dataloader) - 1:
             e = self.accumulated_fourier_error / self.parameter_group.probe_positions.shape[0]
-            self.fourier_errors.append(e.item())
+            self.reconstructor_buffers.fourier_errors.append(e.item())
             self.accumulated_fourier_error = 0.0
 
     def run_pre_run_hooks(self) -> None:
@@ -1182,7 +1272,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 and self.options.momentum_acceleration_gain > 0
             ):
                 self._apply_probe_momentum(
-                    torch.mean(self.alpha_probe_all_pos),
+                    torch.mean(self.reconstructor_buffers.alpha_probe_all_pos),
                     self.probe_momentum_params["accumulated_update_direction"],
                 )
         else:
@@ -1197,9 +1287,53 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         y_pred = self.forward_model(*input_data)
         self.update_fourier_error(y_pred, y_true)
         if self.current_epoch == 0 and self.options.rescale_probe_intensity_in_first_epoch:
-            self._update_accumulated_intensities(y_true, y_pred)
+            self.update_accumulated_intensities(y_true, y_pred)
         else:
-            psi_opt = self.run_reciprocal_space_step(y_pred, y_true, indices)
-            self.run_real_space_step(psi_opt, indices)
+            self.compute_reconstruction_parameter_updates(y_pred, y_true, indices)
+            self.apply_reconstruction_parameter_updates(indices)
 
         self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
+
+
+class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
+    def run_minibatch(self, input_data, y_true, *args, **kwargs) -> None:
+        indices = input_data[0]
+        full_indices = indices.clone()
+        indices = self.get_chunk_of_current_rank(full_indices)
+        if len(indices) == 0:
+            raise ValueError(
+                "A rank didn't get any data in this minibatch. This happens when "
+                "the total number of samples in the last minibatch is smaller "
+                "than the number of ranks. Adjust your batch size or number of ranks "
+                "to avoid this error."
+            )
+        self.indices.append(indices)
+        input_data[0] = indices
+        
+        y_true = self.get_chunk_of_current_rank(y_true)
+        
+        y_pred = self.forward_model(*input_data)
+        
+        self.update_fourier_error(y_pred, y_true)
+        if self.current_minibatch == len(self.dataloader) - 1:
+            self.reconstructor_buffers.synchronize(["fourier_errors"])
+        
+        if self.current_epoch == 0 and self.options.rescale_probe_intensity_in_first_epoch:
+            self.update_accumulated_intensities(y_true, y_pred)
+            self.reconstructor_buffers.synchronize(["accumulated_true_intensity", "accumulated_pred_intensity"])
+        else:
+            self.compute_reconstruction_parameter_updates(y_pred, y_true, indices)
+            self.reconstructor_buffers.synchronize(
+                ["alpha_object_all_pos_all_slices", "alpha_probe_all_pos"], indices=full_indices
+            )
+            # Sync gradients.
+            self.parameter_group.synchronize_optimizable_parameter_gradients(op=dist.ReduceOp.AVG)
+            
+            self.apply_reconstruction_parameter_updates(indices)
+
+        self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
+        self.loss_tracker.synchronize_accumulated_losses()
+        
+    def run_post_epoch_hooks(self) -> None:
+        super().run_post_epoch_hooks()
+        self.parameter_group.synchronize_optimizable_parameter_data(source_rank=0)
