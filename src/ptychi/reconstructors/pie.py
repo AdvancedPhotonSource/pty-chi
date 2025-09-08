@@ -156,66 +156,6 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                         delta_p_i, chi_rm_subpx_shft, obj_patches[:, i_slice, ...]
                     )
                     
-   
-                    
-                    
-                    
-                    
-                    
-                    
-                    
-                    
-                    
-                    # # TODO: move this into SynthesisDictLearnProbe class
-                    # rc = delta_exwv_i.shape[-1] * delta_exwv_i.shape[-2]
-                    # n_scpm = delta_exwv_i.shape[-3]
-                    # n_spos = delta_exwv_i.shape[-4]
-            
-                    # obj_patches_vec = torch.reshape(obj_patches[:, i_slice, ...], (n_spos, 1, rc ))
-                    # abs2_obj_patches = torch.abs(obj_patches_vec) ** 2
-                    
-                    # z = torch.sum(abs2_obj_patches, dim = 0)
-                    # z_max = torch.max(z)
-                    # w = self.parameter_group.probe.options.alpha * (z_max - z)
-                    # z_plus_w = torch.swapaxes(z + w, 0, 1)
-                    
-                    # delta_exwv = self.adjoint_shift_probe_update_direction(indices, delta_exwv_i, first_mode_only=True)
-                    # delta_exwv = torch.sum(delta_exwv, 0)
-                    # delta_exwv = torch.reshape( delta_exwv, (n_scpm, rc)).T
-                    
-                    # denom = (self.parameter_group.probe.dictionary_matrix_H @ (z_plus_w * self.parameter_group.probe.dictionary_matrix))
-                    # numer = self.parameter_group.probe.dictionary_matrix_H @ delta_exwv
-                    
-                    # delta_sparse_code = torch.linalg.solve(denom, numer)
-                    
-                    # delta_p = self.parameter_group.probe.dictionary_matrix @ delta_sparse_code
-                    # delta_p = torch.reshape( delta_p.T, (  n_scpm, delta_exwv_i.shape[-1] , delta_exwv_i.shape[-2]))
-                    # delta_p_i = torch.tile(delta_p, (n_spos,1,1,1)) 
-                                        
-                    # # sparse code update 
-                    # sparse_code = self.parameter_group.probe.get_sparse_code_weights()
-                    # sparse_code = sparse_code + delta_sparse_code
-
-                    # # Enforce sparsity constraint on sparse code
-                    # abs_sparse_code = torch.abs(sparse_code)
-                    # sparse_code_sorted = torch.sort(abs_sparse_code, dim=0, descending=True)
-                    
-                    # sel = sparse_code_sorted[0][self.parameter_group.probe.probe_sparse_code_nnz, :]
-                    
-                    # # hard thresholding: 
-                    # sparse_code = sparse_code * (abs_sparse_code >= sel)
-                    
-                    # #(TODO: soft thresholding option)
-                    
-                    # # Update the new sparse code in the probe class
-                    # self.parameter_group.probe.set_sparse_code(sparse_code)
-                    
-                    
-                    
-                    
-                    
-                    
-                    
                 else:
                     step_weight = self.calculate_probe_step_weight((obj_patches[:, [i_slice], ...]))
                     delta_p_i = step_weight * delta_exwv_i # get delta p at each position
