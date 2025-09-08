@@ -656,10 +656,8 @@ class SynthesisDictLearnProbeOptions(Options):
 
     enabled: bool = False
     enabled_shared: bool = False
-    enabled_opr: bool = False
 
     thresholding_type_shared: str = 'hard'
-    thresholding_type_opr: str = 'hard'
     """Choose between 'hard' or 'soft' thresholding."""
 
     dictionary_matrix: Union[ndarray, Tensor] = None
