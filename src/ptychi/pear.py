@@ -264,7 +264,7 @@ def ptycho_recon(run_recon=True, **params):
             for i in range(params['number_of_iterations'] // params['save_freq_iterations']):
                 task.run(params['save_freq_iterations'])
                 save_reconstructions(task, recon_path, params['save_freq_iterations']*(i+1), params)
-                            
+
         return task, recon_path, params
     
     finally: # does seem to work

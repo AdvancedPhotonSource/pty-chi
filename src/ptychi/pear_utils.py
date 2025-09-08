@@ -584,3 +584,103 @@ class FileBasedTracker:
                 
             except Exception as e:
                 print(f"Error updating status for scan {scan_id}: {str(e)}")
+
+def crop_pad(img, outsize, fill=0):
+    """
+    Adjust the size by padding or cropping, centered.
+
+    For 2D arrays, operates on (rows, cols).
+    For 3D arrays, operates on the last two dimensions (leave the first dimension unchanged).
+    For N>3, operates on the first two dimensions (backward compatible).
+
+    Parameters
+    ----------
+    img : ndarray
+        Input array (real or complex)
+    outsize : tuple[int, int]
+        Target size (height, width) for the spatial dimensions
+    fill : scalar, optional
+        Fill value for padding (default 0)
+
+    Returns
+    -------
+    ndarray
+        Cropped/padded array with spatial dimensions equal to outsize
+    """
+    if outsize is None:
+        print('CROP_PAD: adjusts the size by zero padding or cropping')
+        print('crop_pad(img, outsize)')
+        return
+
+    Nin = img.shape
+    if len(outsize) < 2:
+        raise ValueError('outsize must be a tuple/list of two integers (height, width)')
+
+    # Determine which axes are spatial
+    if img.ndim >= 2:
+        # Default spatial axes are the last two
+        spatial_axis_row = img.ndim - 2
+        spatial_axis_col = img.ndim - 1
+        # For N>3, preserve previous behavior (operate on first two dims)
+        if img.ndim > 3:
+            spatial_axis_row = 0
+            spatial_axis_col = 1
+    else:
+        # Nothing to do for 0D/1D arrays
+        return img
+
+    in_rows = Nin[spatial_axis_row]
+    in_cols = Nin[spatial_axis_col]
+
+    # Early exit if already matching target spatial size
+    if outsize[0] == in_rows and outsize[1] == in_cols:
+        return img
+
+    Nout = (int(outsize[0]), int(outsize[1]))
+
+    # Build output shape by replacing spatial dims
+    output_shape = list(Nin)
+    output_shape[spatial_axis_row] = Nout[0]
+    output_shape[spatial_axis_col] = Nout[1]
+
+    imout = np.zeros(output_shape, dtype=img.dtype)
+    if fill != 0:
+        imout += fill
+
+    # Centers (1-based intent in MATLAB; integer math below matches that behavior)
+    center_in_row = in_rows // 2
+    center_in_col = in_cols // 2
+    center_out_row = Nout[0] // 2
+    center_out_col = Nout[1] // 2
+
+    delta_row = center_out_row - center_in_row
+    delta_col = center_out_col - center_in_col
+
+    # Compute source ranges
+    src_row_start = max(-delta_row, 0)
+    src_row_end   = min(-delta_row + Nout[0], in_rows)
+    src_col_start = max(-delta_col, 0)
+    src_col_end   = min(-delta_col + Nout[1], in_cols)
+
+    # Compute destination ranges
+    dst_row_start = max(delta_row, 0)
+    dst_row_end   = min(delta_row + in_rows, Nout[0])
+    dst_col_start = max(delta_col, 0)
+    dst_col_end   = min(delta_col + in_cols, Nout[1])
+
+    # Only proceed if there is an overlapping region
+    if (src_row_end > src_row_start and src_col_end > src_col_start and
+        dst_row_end > dst_row_start and dst_col_end > dst_col_start):
+        src_slices = [slice(None)] * img.ndim
+        dst_slices = [slice(None)] * img.ndim
+        src_slices[spatial_axis_row] = slice(src_row_start, src_row_end)
+        src_slices[spatial_axis_col] = slice(src_col_start, src_col_end)
+        dst_slices[spatial_axis_row] = slice(dst_row_start, dst_row_end)
+        dst_slices[spatial_axis_col] = slice(dst_col_start, dst_col_end)
+        imout[tuple(dst_slices)] = img[tuple(src_slices)]
+
+    # Preserve complex dtype if input is complex
+    if np.iscomplexobj(img) and not np.iscomplexobj(imout):
+        imout = imout.astype(complex)
+
+    return imout

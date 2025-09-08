@@ -18,7 +18,7 @@ from ptychi.maths import compose_2x2_affine_transform_matrix
 import matplotlib.pyplot as plt
 
 # from matplotlib.patches import Rectangle
-from ptychi.pear_utils import make_fzp_probe, resize_complex_array, find_matching_recon
+from ptychi.pear_utils import make_fzp_probe, resize_complex_array, find_matching_recon, crop_pad
 import sys
 import torch
 import json
@@ -788,6 +788,9 @@ def initialize_recon(params):
         raise e
 
     print("Shape of diffraction patterns:", dp.shape)
+    if dp.shape[1] < dp_Npix:
+        dp = crop_pad(dp, (dp_Npix, dp_Npix))
+        print("Pad diffraction patterns with zeros to:", dp.shape)
 
     # Process diffraction patterns with orientation transforms if specified
     dp = _process_diffraction_patterns(dp, params)
@@ -1981,13 +1984,21 @@ def _load_data_lynx(base_path, scan_num, det_Npixel, cen_x, cen_y):
         raise FileNotFoundError(f"Data file not found: {file_path}")
 
     # Calculate detector ROI indices
-    N_dp_x_input = min(942, det_Npixel)
-    N_dp_y_input = min(942, det_Npixel)
+    N_det_x = 1614
+    N_det_y = 1030
 
-    index_x_lb = int(cen_x - N_dp_x_input // 2)
-    index_x_ub = int(cen_x + (N_dp_x_input + 1) // 2)
-    index_y_lb = int(cen_y - N_dp_y_input // 2)
-    index_y_ub = int(cen_y + (N_dp_y_input + 1) // 2)
+    N_dp_x_max = min(cen_x, N_det_x-cen_x) * 2
+    N_dp_y_max = min(cen_y, N_det_y-cen_y) * 2
+
+    # crop square diffraction patterns to ensure isotropic resolution
+    N_dp_crop = min(N_dp_x_max, N_dp_y_max, det_Npixel)
+    if N_dp_crop < det_Npixel:
+        print(f"The maximum size can be cropped from raw diffraction patterns is {N_dp_crop}")
+
+    index_x_lb = int(cen_x - N_dp_crop // 2)
+    index_x_ub = int(cen_x + (N_dp_crop + 1) // 2)
+    index_y_lb = int(cen_y - N_dp_crop // 2)
+    index_y_ub = int(cen_y + (N_dp_crop + 1) // 2)
 
     # Load diffraction patterns
     with h5py.File(file_path, "r") as h5_data:
@@ -1996,17 +2007,17 @@ def _load_data_lynx(base_path, scan_num, det_Npixel, cen_x, cen_y):
         print(f"Number of diffraction patterns: {N_scan_dp}")
 
         # Initialize output array
-        dp = np.zeros((N_scan_dp, N_dp_y_input, N_dp_x_input))
+        dp = np.zeros((N_scan_dp, N_dp_crop, N_dp_crop))
 
         # Process each diffraction pattern
         for j in range(N_scan_dp):
-            roi = dp_temp[j, index_y_lb:index_y_ub, index_x_lb:index_x_ub]
-            scipy.ndimage.zoom(roi, [1, 1], output=dp[j], order=1)
+            dp[j] = dp_temp[j, index_y_lb:index_y_ub, index_x_lb:index_x_ub]
+            #scipy.ndimage.zoom(roi, [1, 1], output=dp[j], order=1)
 
     # Clean up data
     dp[dp < 0] = 0
     dp[dp > 1e7] = 0
-    # dp[dp > 4090] = 0
+
     return dp, positions
 
 
