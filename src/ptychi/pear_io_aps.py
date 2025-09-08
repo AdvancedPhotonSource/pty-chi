@@ -491,7 +491,8 @@ def create_reconstruction_path(params, options):
         recon_dir_base
         + f"/Ndp{options.data_options.data.shape[1]}_LSQML_{batching_mode_suffix}{options.reconstructor_options.batch_size}"
     )
-    if options.reconstructor_options.momentum_acceleration_gain > 0:
+
+    if batching_mode_suffix == "c" and options.reconstructor_options.momentum_acceleration_gain > 0:
         recon_path += f"_m{options.reconstructor_options.momentum_acceleration_gain}"
 
     if params.get("noise_model", "gaussian") == "poisson":
