@@ -286,20 +286,21 @@ def ptycho_recon(run_recon=True, **params):
 
 def ptycho_batch_recon(base_params):
     """
-    Process a range of ptychography scans with automatic error handling and status tracking.
+    Reconstruct a range of ptychography scans with automatic error handling and status tracking.
     
     Args:
         base_params: Dictionary of parameters to use as a template for all scans
-            start_scan: First scan number to process
-            end_scan: Last scan number to process (inclusive)
+            start_scan: First scan number to reconstruct
+            end_scan: Last scan number to reconstruct (inclusive)
+            scan_list: List of scan numbers to reconstruct. Will override start_scan, end_scan and scan_order.
             log_dir_suffix: Optional suffix for the log directory
-            scan_order: Order to process the scans ('ascending', 'descending', or 'random')
-            exclude_scans: List of scan numbers to exclude from processing
+            scan_order: Order to reconstruct the scans ('ascending', 'descending', or 'random')
+            exclude_scans: List of scan numbers to exclude from reconstruction
             overwrite_ongoing: Whether to overwrite scans marked as ongoing
-            reset_scan_list: Whether to reset the scan list and process all scans again
+            reset_scan_list: Whether to reset the scan list and reconstruct all scans again
             
     The function creates a tracker to monitor the status of each scan and processes
-    them according to the specified order, skipping completed scans unless forced to reprocess.
+    them according to the specified order, skipping completed scans unless forced to reconstruct again.
     """
     # Extract parameters from base_params
     start_scan = base_params.get('start_scan')
@@ -323,7 +324,11 @@ def ptycho_batch_recon(base_params):
     
     num_repeats = np.inf
     repeat_count = 0
-    scan_list = generate_scan_list(start_scan, end_scan, scan_order, exclude_scans)
+
+    if base_params.get('scan_list', []) != []:
+        scan_list = base_params.get('scan_list')
+    else:
+        scan_list = generate_scan_list(start_scan, end_scan, scan_order, exclude_scans)
 
     while repeat_count < num_repeats:
         successful_scans = []
