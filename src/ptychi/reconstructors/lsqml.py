@@ -254,20 +254,34 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 self._record_object_slice_gradient(i_slice, delta_o_precond, add_to_existing=False)
             else:
                 self._record_object_slice_gradient(i_slice, delta_o_comb, add_to_existing=False)
-
-            # Calculate probe update direction.
-            delta_p_i_unshifted = self._calculate_probe_update_direction(
-                chi, obj_patches=obj_patches, slice_index=i_slice, probe_mode_index=None
-            )  # Eq. 24a
-            delta_p_i = self.adjoint_shift_probe_update_direction(
-                indices, delta_p_i_unshifted, first_mode_only=True
-            )
+            
+            if self.use_sparse_probe_shared_update:
+                (
+                    delta_p_i_unshifted, delta_p_i
+                ) = self.calculate_probe_update_direction_sparse_code_probe_shared(
+                    indices, chi, obj_patches, i_slice
+                )   
+            else:
+                # Calculate probe update direction (dense representation)
+                delta_p_i_unshifted = self._calculate_probe_update_direction(
+                    chi, obj_patches=obj_patches, slice_index=i_slice, probe_mode_index=None
+                )  # Eq. 24a
+                delta_p_i = self.adjoint_shift_probe_update_direction(
+                    indices, delta_p_i_unshifted, first_mode_only=True
+                )
+                
             delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
             self._record_probe_gradient(delta_p_hat)
 
             # Calculate update vectors for OPR modes and weights.
             if i_slice == 0:
                 if self.parameter_group.opr_mode_weights.optimization_enabled(self.current_epoch):
+                    
+                    if self.use_sparse_probe_shared_update:
+                        apply_updates = True
+                    else:
+                        apply_updates = False 
+                    
                     self.parameter_group.opr_mode_weights.update_variable_probe(
                         self.parameter_group.probe,
                         indices,
@@ -277,7 +291,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                         obj_patches,
                         self.current_epoch,
                         probe_mode_index=0,
-                        apply_updates=False,
+                        apply_updates=apply_updates,
                     )
 
             # Update buffered data for momentum acceleration.
@@ -315,6 +329,26 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
             # Set chi to conjugate-modulated wavefield.
             chi = delta_p_i_unshifted
+            
+    def calculate_probe_update_direction_sparse_code_probe_shared(
+        self, indices, chi, obj_patches, i_slice=None
+    ):
+        """Calculate probe update direction using the sparse code representation.
+        """
+        delta_p_i_unshifted = self._calculate_probe_update_direction(           
+            chi, obj_patches = obj_patches, slice_index=i_slice, probe_mode_index=None
+        )  
+        delta_p_i = self.adjoint_shift_probe_update_direction(
+            indices, delta_p_i_unshifted, first_mode_only=True
+        )
+        chi_rm_subpx_shft = self.adjoint_shift_probe_update_direction(
+            indices, chi, first_mode_only=True
+        )
+        delta_p_i = self.parameter_group.probe.get_probe_update_direction_sparse_code_probe_shared(
+            delta_p_i, chi_rm_subpx_shft, obj_patches[:, i_slice, ...]
+        )
+        delta_p_i_unshifted = self.forward_model.shift_unique_probes(indices, delta_p_i, first_mode_only=True)
+        return delta_p_i_unshifted, delta_p_i
 
     @timer()
     def apply_reconstruction_parameter_updates(self, indices: torch.Tensor):
