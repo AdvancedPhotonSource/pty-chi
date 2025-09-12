@@ -199,6 +199,13 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         obj_patches = self.forward_model.intermediate_variables["obj_patches"]
 
         self.calculate_update_vectors(indices, chi, obj_patches, positions)
+        
+    @property
+    def use_sparse_probe_shared_update(self):
+        return (
+            self.parameter_group.probe.representation == "sparse_code" 
+            and self.parameter_group.probe.options.experimental.sdl_probe_options.enabled_shared
+        )
 
     @timer()
     def calculate_update_vectors(self, indices, chi, obj_patches, positions):
@@ -254,34 +261,14 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 self._record_object_slice_gradient(i_slice, delta_o_precond, add_to_existing=False)
             else:
                 self._record_object_slice_gradient(i_slice, delta_o_comb, add_to_existing=False)
-
-            use_sparse_probe_shared_update = (self.parameter_group.probe.representation == "sparse_code" 
-                                    and self.parameter_group.probe.options.experimental.sdl_probe_options.enabled_shared)
             
-            if use_sparse_probe_shared_update:
-
-                    # Calculate probe update direction using the sparse code representation
-
-                    delta_p_i_unshifted = self._calculate_probe_update_direction(           
-                        chi, obj_patches = obj_patches, slice_index=i_slice, probe_mode_index=None
-                    )  
-                    
-                    delta_p_i = self.adjoint_shift_probe_update_direction(
-                        indices, delta_p_i_unshifted, first_mode_only=True
-                    )
-                    
-                    chi_rm_subpx_shft = self.adjoint_shift_probe_update_direction(
-                        indices, chi, first_mode_only=True
-                    )
-                    
-                    delta_p_i = self.parameter_group.probe.get_probe_update_direction_sparse_code_probe_shared(
-                        delta_p_i, chi_rm_subpx_shft, obj_patches[:, i_slice, ...]
-                    )
-                    
-                    delta_p_i_unshifted = self.forward_model.shift_unique_probes(indices, delta_p_i, first_mode_only=True)
-                    
+            if self.use_sparse_probe_shared_update:
+                (
+                    delta_p_i_unshifted, delta_p_i
+                ) = self.calculate_probe_update_direction_sparse_code_probe_shared(
+                    indices, chi, obj_patches, i_slice
+                )   
             else:
-
                 # Calculate probe update direction (dense representation)
                 delta_p_i_unshifted = self._calculate_probe_update_direction(
                     chi, obj_patches=obj_patches, slice_index=i_slice, probe_mode_index=None
@@ -297,7 +284,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             if i_slice == 0:
                 if self.parameter_group.opr_mode_weights.optimization_enabled(self.current_epoch):
                     
-                    if use_sparse_probe_shared_update:
+                    if self.use_sparse_probe_shared_update:
                         apply_updates = True
                     else:
                         apply_updates = False 
@@ -349,6 +336,26 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
             # Set chi to conjugate-modulated wavefield.
             chi = delta_p_i_unshifted
+            
+    def calculate_probe_update_direction_sparse_code_probe_shared(
+        self, indices, chi, obj_patches, i_slice=None
+    ):
+        """Calculate probe update direction using the sparse code representation.
+        """
+        delta_p_i_unshifted = self._calculate_probe_update_direction(           
+            chi, obj_patches = obj_patches, slice_index=i_slice, probe_mode_index=None
+        )  
+        delta_p_i = self.adjoint_shift_probe_update_direction(
+            indices, delta_p_i_unshifted, first_mode_only=True
+        )
+        chi_rm_subpx_shft = self.adjoint_shift_probe_update_direction(
+            indices, chi, first_mode_only=True
+        )
+        delta_p_i = self.parameter_group.probe.get_probe_update_direction_sparse_code_probe_shared(
+            delta_p_i, chi_rm_subpx_shft, obj_patches[:, i_slice, ...]
+        )
+        delta_p_i_unshifted = self.forward_model.shift_unique_probes(indices, delta_p_i, first_mode_only=True)
+        return delta_p_i_unshifted, delta_p_i
 
     @timer()
     def apply_reconstruction_parameter_updates(self, indices: torch.Tensor):

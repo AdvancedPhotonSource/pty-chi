@@ -492,7 +492,18 @@ class SynthesisDictLearnProbe( Probe ):
         return dictionary_matrix, dictionary_matrix_pinv
 
     def get_sparse_code_weights_vs_scanpositions(self, probe_vs_scanpositions):
+        """Get the sparse code weights for a given probe vs scan positions.
 
+        Parameters
+        ----------
+        probe_vs_scanpositions : Tensor
+            A (n_pos, 1, h, w) tensor giving the probe vs scan positions.
+
+        Returns
+        -------
+        Tensor
+            A tensor giving the sparse code weights for the given probe vs scan positions.
+        """
         sz = probe_vs_scanpositions.shape
         probe_vec = torch.reshape(probe_vs_scanpositions, (sz[0], sz[1], sz[2]*sz[3]))
         sparse_code_vs_scanpositions = torch.einsum('ij,klj->ikl', self.dictionary_matrix_pinv, probe_vec)
@@ -501,7 +512,7 @@ class SynthesisDictLearnProbe( Probe ):
 
     def get_sparse_code_probe_shared_weights(self):
 
-        probe_shared = self.data[0,...]
+        probe_shared = self.data[0, ...]
         sz = probe_shared.shape
         probe_vec = torch.reshape(probe_shared, (sz[0], sz[1]*sz[2]))
         sparse_code_probe_shared = self.dictionary_matrix_pinv @ probe_vec.T
@@ -543,7 +554,36 @@ class SynthesisDictLearnProbe( Probe ):
             self.optimizer = self.optimizer_class([self.sparse_code_probe_shared], **self.optimizer_params)
 
     def set_sparse_code_probe_shared(self, data):
+        """
+        Set the sparse code weights for the shared probe.
+        
+        Parameters
+        ----------
+        data : Tensor
+            A (n_dict_bases, n_modes) tensor giving the sparse code weights for the shared probe.
+        """
         self.sparse_code_probe_shared.data = data
+        
+    def set_sparse_code_weights_vs_scanpositions(
+        self, 
+        sparse_code_vs_scanpositions: Tensor, 
+        indices: tuple | Tensor = None
+    ):
+        """
+        Set the sparse code weights for a given probe vs scan positions.
+        
+        Parameters
+        ----------
+        sparse_code_vs_scanpositions : Tensor
+            A (n_pos, n_opr_modes, n_scpm) tensor giving the sparse code weights for the 
+            given probe vs scan positions.
+        indices : tuple | Tensor
+            The indices to apply to the sparse code weights.
+        """
+        raise NotImplementedError("This method is not implemented yet.")
+        if indices is None:
+            indices = slice(None)
+        self.sparse_code_weights_vs_scanpositions[indices] = sparse_code_vs_scanpositions
 
     def get_probe_update_direction_sparse_code_probe_shared(self, delta_p_i, chi, obj_patches):
         
@@ -593,24 +633,21 @@ class SynthesisDictLearnProbe( Probe ):
 
         # hard or soft thresholding
         if self.options.experimental.sdl_probe_options.thresholding_type_shared == 'hard':
-            
             optimal_delta_sparse_code=optimal_delta_sparse_code * sparse_code_mask
-            
         elif self.options.experimental.sdl_probe_options.thresholding_type_shared == 'soft':
-            
             optimal_delta_sparse_code=((abs_sparse_code - sel[None,...]) * sparse_code_mask 
                                          * torch.exp(1j*torch.angle(optimal_delta_sparse_code))
             )
 
         # update the shared probe sparse codes using the average over scan positions
         sparse_code_probe_shared = self.get_sparse_code_probe_shared_weights()
-        
         sparse_code_probe_shared = sparse_code_probe_shared + optimal_delta_sparse_code.mean(1).T
-        
         self.set_sparse_code_probe_shared(sparse_code_probe_shared)
         
-        delta_p_i = torch.einsum('ij,jlk->ilk', self.dictionary_matrix, 
-                                                optimal_delta_sparse_code
+        delta_p_i = torch.einsum(
+            "ij,jlk->ilk", 
+            self.dictionary_matrix, 
+            optimal_delta_sparse_code
         ).permute(1,2,0)
         
         delta_p_i = torch.reshape(delta_p_i, (n_spos, n_scpm, nr, nc))
