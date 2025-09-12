@@ -199,13 +199,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         obj_patches = self.forward_model.intermediate_variables["obj_patches"]
 
         self.calculate_update_vectors(indices, chi, obj_patches, positions)
-        
-    @property
-    def use_sparse_probe_shared_update(self):
-        return (
-            self.parameter_group.probe.representation == "sparse_code" 
-            and self.parameter_group.probe.options.experimental.sdl_probe_options.enabled_shared
-        )
 
     @timer()
     def calculate_update_vectors(self, indices, chi, obj_patches, positions):
