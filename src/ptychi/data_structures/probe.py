@@ -584,6 +584,28 @@ class SynthesisDictLearnProbe(Probe):
         """
         self.sparse_code_probe_shared.data = data
 
+    def initialize_grad_sparse_code_probe_shared(self):
+        """
+        Initialize the gradient of the sparse code weights update for the shared probe.
+
+        Parameters
+        ----------
+        data : Tensor
+            A (n_dict_bases, n_modes) tensor giving the sparse code weights for the shared probe.
+        """
+        self.sparse_code_probe_shared.grad = torch.zeros_like(self.sparse_code_probe_shared.data)
+
+    def set_gradient_sparse_code_probe_shared(self, grad):
+        """
+        Set the gradient of the sparse code weights update for the shared probe.
+
+        Parameters
+        ----------
+        data : Tensor
+            A (n_dict_bases, n_modes) tensor giving the sparse code weights for the shared probe.
+        """
+        self.sparse_code_probe_shared.grad = grad
+        
     def set_sparse_code_weights_vs_scanpositions(
         self, sparse_code_vs_scanpositions: Tensor, indices: tuple | Tensor = None
     ):
@@ -653,18 +675,22 @@ class SynthesisDictLearnProbe(Probe):
                 * torch.exp(1j * torch.angle(optimal_delta_sparse_code))
             )
 
-        # update the shared probe sparse codes using the average over scan positions
-        sparse_code_probe_shared = self.get_sparse_code_probe_shared_weights()
-        sparse_code_probe_shared = sparse_code_probe_shared + optimal_delta_sparse_code.mean(1).T
-        self.set_sparse_code_probe_shared(sparse_code_probe_shared)
+        # OLD WAY:
+        # # update the shared probe sparse codes using the average over scan positions
+        # sparse_code_probe_shared = self.get_sparse_code_probe_shared_weights()
+        # sparse_code_probe_shared = sparse_code_probe_shared + optimal_delta_sparse_code.mean(1).T
+        # self.set_sparse_code_probe_shared(sparse_code_probe_shared)
 
+        # DON'T KNOW HOW TO USE set_grad() METHOD FROM PROBE CLASS
+        self.set_gradient_sparse_code_probe_shared(optimal_delta_sparse_code.mean(1).T)
+        
         delta_p_i = torch.einsum(
             "ij,jlk->ilk", self.dictionary_matrix, optimal_delta_sparse_code
         ).permute(1, 2, 0)
 
         delta_p_i = torch.reshape(delta_p_i, (n_spos, n_scpm, nr, nc))
 
-        return delta_p_i
+        return delta_p_i, optimal_delta_sparse_code
 
 
 class DIPProbe(Probe):

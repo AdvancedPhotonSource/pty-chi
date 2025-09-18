@@ -135,10 +135,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
 
             delta_p_i = None
             if (i_slice == 0) and (probe.optimization_enabled(self.current_epoch)):
-                if (self.parameter_group.probe.representation == "sparse_code" 
-                    and 
-                    self.parameter_group.probe.options.experimental.sdl_probe_options.enabled_shared
-                ):
+                if self.use_sparse_probe_shared_update:
   
                     # Calculate probe update direction using the sparse code representation
 
