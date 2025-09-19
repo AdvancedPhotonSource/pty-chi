@@ -674,15 +674,6 @@ class SynthesisDictLearnProbe(Probe):
                 * sparse_code_mask
                 * torch.exp(1j * torch.angle(optimal_delta_sparse_code))
             )
-
-        # OLD WAY:
-        # # update the shared probe sparse codes using the average over scan positions
-        # sparse_code_probe_shared = self.get_sparse_code_probe_shared_weights()
-        # sparse_code_probe_shared = sparse_code_probe_shared + optimal_delta_sparse_code.mean(1).T
-        # self.set_sparse_code_probe_shared(sparse_code_probe_shared)
-
-        # DON'T KNOW HOW TO USE set_grad() METHOD FROM PROBE CLASS
-        self.set_gradient_sparse_code_probe_shared(optimal_delta_sparse_code.mean(1).T)
         
         delta_p_i = torch.einsum(
             "ij,jlk->ilk", self.dictionary_matrix, optimal_delta_sparse_code
@@ -691,6 +682,25 @@ class SynthesisDictLearnProbe(Probe):
         delta_p_i = torch.reshape(delta_p_i, (n_spos, n_scpm, nr, nc))
 
         return delta_p_i, optimal_delta_sparse_code
+    
+    def get_grad(self) -> torch.Tensor:
+        """Get the gradient of the sparse code weights for the shared probe.
+        This method overrides the method in the base class, which returns
+        the `.grad` attribute of the tensor.
+
+        Returns
+        -------
+        Tensor
+            The gradient of the sparse code weights for the shared probe.
+        """
+        return self.sparse_code_probe_shared.grad
+    
+    def set_grad(self, grad: torch.Tensor):
+        """Set the gradient of the sparse code weights for the shared probe.
+        This method overrides the method in the base class, which sets the `.grad`
+        attribute of the tensor.
+        """
+        self.set_gradient_sparse_code_probe_shared(grad)
 
 
 class DIPProbe(Probe):
