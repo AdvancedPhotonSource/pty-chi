@@ -347,6 +347,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_p_i, optimal_delta_sparse_code_vs_spos = self.parameter_group.probe.get_probe_update_direction_sparse_code_probe_shared(
             delta_p_i, chi_rm_subpx_shft, obj_patches[:, i_slice, ...]
         )
+        self.parameter_group.probe.set_grad(optimal_delta_sparse_code_vs_spos.mean(1).T)
         delta_p_i_unshifted = self.forward_model.shift_unique_probes(indices, delta_p_i, first_mode_only=True)
         return delta_p_i_unshifted, delta_p_i, optimal_delta_sparse_code_vs_spos
 
@@ -379,9 +380,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             self._apply_probe_update(alpha_p_i, -self.parameter_group.probe.get_grad()[0])
             # update the shared probe sparse code if enabled
             if self.use_sparse_probe_shared_update:
-                sparse_code_probe_shared = self.parameter_group.probe.get_sparse_code_probe_shared_weights()
-                sparse_code_probe_shared = sparse_code_probe_shared + self.parameter_group.probe.sparse_code_probe_shared.grad
-                self.parameter_group.probe.set_sparse_code_probe_shared(sparse_code_probe_shared) 
+                self._apply_probe_sparse_code_shared_updates()
         
         # Update probe positions.
         if self.parameter_group.probe_positions.optimization_enabled(self.current_epoch):
@@ -788,6 +787,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         alpha_p_mean = torch.mean(alpha_p_i)
         self.parameter_group.probe.set_grad(-delta_p_hat * alpha_p_mean, slicer=(0, mode_slicer))
         self.parameter_group.probe.optimizer.step()
+        
+    def _apply_probe_sparse_code_shared_updates(self):
+        sparse_code_probe_shared = self.parameter_group.probe.get_sparse_code_probe_shared_weights()
+        sparse_code_probe_shared = sparse_code_probe_shared + self.parameter_group.probe.sparse_code_probe_shared.grad
+        self.parameter_group.probe.set_sparse_code_probe_shared(sparse_code_probe_shared) 
 
     @timer()
     def _apply_probe_momentum(self, alpha_p_mean, delta_p_hat):
@@ -1021,6 +1025,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.parameter_group.probe.initialize_grad()
         if self.use_sparse_probe_shared_update:
             self.parameter_group.probe.initialize_grad_sparse_code_probe_shared()
+
     @timer()
     def _initialize_probe_position_gradient(self):
         self.parameter_group.probe_positions.initialize_grad()
