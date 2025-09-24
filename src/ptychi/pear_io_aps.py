@@ -500,6 +500,9 @@ def create_reconstruction_path(params, options):
     else:
         recon_path += f"_gaussian"
 
+    if params.get("near_field_ptycho", False):
+        recon_path += f"_nf"
+        
     recon_path += f"_p{options.probe_options.initial_guess.shape[1]}"
 
     # Append optional parameters to the path

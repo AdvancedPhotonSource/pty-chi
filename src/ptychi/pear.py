@@ -180,6 +180,11 @@ def ptycho_recon(run_recon=True, **params):
     else: 
         options.reconstructor_options.noise_model = api.NoiseModels.GAUSSIAN
     
+    if params.get("near_field_ptycho", False):
+        options.data_options.free_space_propagation_distance_m = params['det_sample_dist_m']
+        options.data_options.fft_shift = False
+        options.reconstructor_options.forward_model_options.pad_for_shift = 50 # increase if fringe artifacts are present
+
     options.reconstructor_options.num_epochs = params['number_of_iterations']
     options.reconstructor_options.use_double_precision_for_fft = False
     options.reconstructor_options.default_dtype = api.Dtypes.FLOAT32
