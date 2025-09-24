@@ -1320,7 +1320,8 @@ class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
         
         if self.current_epoch == 0 and self.options.rescale_probe_intensity_in_first_epoch:
             self.update_accumulated_intensities(y_true, y_pred)
-            self.reconstructor_buffers.synchronize(["accumulated_true_intensity", "accumulated_pred_intensity"])
+            if self.current_minibatch == len(self.dataloader) - 1:
+                self.reconstructor_buffers.synchronize(["accumulated_true_intensity", "accumulated_pred_intensity"])
         else:
             self.compute_reconstruction_parameter_updates(y_pred, y_true, indices)
             self.reconstructor_buffers.synchronize(
