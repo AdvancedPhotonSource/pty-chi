@@ -6,7 +6,7 @@ The table below compares their merits and limitations.
 
 .. list-table::
    :stub-columns: 1
-   :widths: 40 40 40 40 40
+   :widths: 40 40 40 40 40 40
 
    * - Engine
      - **LSQML**
