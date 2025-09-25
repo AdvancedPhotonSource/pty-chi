@@ -10,16 +10,19 @@ The table below compares their merits and limitations.
 
    * - Engine
      - **LSQML**
-     - **PIE**
+     - **PIE (incl. ePIE, rPIE)**
      - **Difference map**
+     - **Bilinear Hessian**
      - **Autodiff**
    * - Minibatching allowed
      - Yes
      - Yes  
      - No
      - Yes
+     - Yes
    * - GPU support
-     - Multiple (multi-process)
+     - Multiple
+     - Single
      - Single
      - Single
      - Multiple
@@ -28,7 +31,9 @@ The table below compares their merits and limitations.
      - Moderate
      - High
      - Moderate
+     - Low
    * - Mixed-state probe support
+     - Yes
      - Yes
      - Yes
      - Yes
@@ -37,10 +42,12 @@ The table below compares their merits and limitations.
      - Yes
      - Yes
      - No
+     - No
      - Yes
    * - Multislice support
      - Yes
      - Yes
+     - No
      - No
      - Yes
 
