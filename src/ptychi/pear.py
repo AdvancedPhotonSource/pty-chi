@@ -481,11 +481,12 @@ ptycho_recon(run_recon=True, **params)
         
         # Print summary of processing
         #print(f"Successfully processed scans: {successful_scans}")
-        print(f"Number of completed scans:{len(successful_scans)}/{end_scan - start_scan + 1}.")
+        print(f"Number of completed scans:{len(successful_scans)}/{len(scan_list)}.")
         print(f"Number of failed scans:{len(failed_scans)}.")
         print(f"Number of ongoing scans:{len(ongoing_scans)}.")
+        print(f"Number of excluded scans:{len(exclude_scans)}.")
         
-        if len(successful_scans) == end_scan - start_scan + 1:
+        if len(successful_scans) == len(scan_list) - len(exclude_scans):
             print(f"All scans completed successfully")
             break
         else:
