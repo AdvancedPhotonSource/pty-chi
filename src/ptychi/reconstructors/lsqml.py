@@ -224,9 +224,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         object_ = self.parameter_group.object
         self._initialize_object_gradient()
-        self._initialize_probe_gradient()
-        self._initialize_probe_position_gradient()
-        self._initialize_opr_mode_weights_gradient()
+        self.parameter_group.probe.initialize_grad()
+        self.parameter_group.probe_positions.initialize_grad()
+        self.parameter_group.opr_mode_weights.initialize_grad()
         self._initialize_object_step_size_buffer()
         self._initialize_probe_step_size_buffer()
         self._initialize_momentum_buffers()
@@ -977,29 +977,14 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             if self.current_minibatch == 0:
                 self.parameter_group.object.initialize_grad()
 
-    @timer()
-    def _initialize_probe_gradient(self):
-        self.parameter_group.probe.initialize_grad()
-        
-    @timer()
-    def _initialize_probe_position_gradient(self):
-        self.parameter_group.probe_positions.initialize_grad()
-        
-    @timer()
-    def _initialize_opr_mode_weights_gradient(self):
-        self.parameter_group.opr_mode_weights.initialize_grad()
-
-    @timer()
     def _initialize_object_step_size_buffer(self):
         if self.current_minibatch == 0:
             self.reconstructor_buffers.alpha_object_all_pos_all_slices[...] = 1
 
-    @timer()
     def _initialize_probe_step_size_buffer(self):
         if self.current_minibatch == 0:
             self.reconstructor_buffers.alpha_probe_all_pos[...] = 1
 
-    @timer()
     def _initialize_momentum_buffers(self):
         """Initialize momentum buffers.
 
