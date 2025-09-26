@@ -501,7 +501,7 @@ def create_reconstruction_path(params, options):
         recon_path += f"_gaussian"
 
     if params.get("near_field_ptycho", False):
-        recon_path += f"_nf"
+        recon_path += f"_nf_fsd{params['focal_sample_dist_m'] / 1e-3:.2f}mm"
         
     recon_path += f"_p{options.probe_options.initial_guess.shape[1]}"
 
@@ -827,12 +827,17 @@ def initialize_recon(params):
     else:
         params["wavelength_m"] = 1.23984193e-9 / energy
         print("Wavelength (nm):", f"{params['wavelength_m'] * 1e9:.3f}")
-        params["obj_pixel_size_m"] = (
-            params["wavelength_m"]
-            * params["det_sample_dist_m"]
-            / params["det_pixel_size_m"]
-            / dp_Npix
-        )  # pixel size
+        if params.get("near_field_ptycho", False):
+            params["nearfield_magnification"] = (params["det_sample_dist_m"] - params["focal_sample_dist_m"]) / params["focal_sample_dist_m"]
+            params["obj_pixel_size_m"] = params["det_pixel_size_m"] / params["nearfield_magnification"]
+            params["det_sample_dist_m"] = params["det_sample_dist_m"] / params["nearfield_magnification"]
+        else:
+            params["obj_pixel_size_m"] = (
+                params["wavelength_m"]
+                * params["det_sample_dist_m"]
+                / params["det_pixel_size_m"]
+                / dp_Npix
+            )  # pixel size
         print("Pixel size of reconstructed object (nm):", f"{params['obj_pixel_size_m'] * 1e9:.3f}")
         obj_pad_size = params.get("obj_pad_size_m", 1e-6)
 
