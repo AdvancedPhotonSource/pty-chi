@@ -10,7 +10,6 @@ requires-python = ">=3.11"
 license = {file = "LICENSE.txt"}
 dependencies = [
     "h5py",
-    "matplotlib",
     "mypy",
     "numpy>=2.1",
     "pandas",
@@ -53,3 +52,8 @@ target-version = "py311"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.10.6",
+]
