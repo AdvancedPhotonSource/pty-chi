@@ -256,11 +256,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 self._record_object_slice_gradient(i_slice, delta_o_comb, add_to_existing=False)
 
             # Calculate probe update direction.
-            delta_p_i_unshifted = self._calculate_probe_update_direction(
+            delta_p_i_before_adj_shift = self._calculate_probe_update_direction(
                 chi, obj_patches=obj_patches, slice_index=i_slice, probe_mode_index=None
             )  # Eq. 24a
             delta_p_i = self.adjoint_shift_probe_update_direction(
-                indices, delta_p_i_unshifted, first_mode_only=True
+                indices, delta_p_i_before_adj_shift, first_mode_only=True
             )
             delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
             self._record_probe_gradient(delta_p_hat)
@@ -314,7 +314,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 )
 
             # Set chi to conjugate-modulated wavefield.
-            chi = delta_p_i_unshifted
+            chi = delta_p_i_before_adj_shift
 
     @timer()
     def apply_reconstruction_parameter_updates(self, indices: torch.Tensor):
