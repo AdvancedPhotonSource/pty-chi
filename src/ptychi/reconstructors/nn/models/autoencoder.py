@@ -14,7 +14,8 @@ class Autoencoder(nn.Module):
         use_batchnorm: bool = False, 
         zero_conv: bool = False,
         sigmoid_on_magnitude: bool = True,
-        scaled_tanh_on_phase: bool = True
+        scaled_tanh_on_phase: bool = True,
+        restore_shape: bool = True
     ):
         """
         Convolutional autoencoder model with adjustable number of levels.
@@ -38,6 +39,9 @@ class Autoencoder(nn.Module):
             between 0 and 1.
         scaled_tanh_on_phase: bool
             If True, apply a tanh function on the phase output and scale it by pi.
+        restore_shape: bool
+            If True and when the output shape does not match the input, it will be
+            scaled to match the input shape.
         """
         super(Autoencoder, self).__init__()
         self.num_levels = num_levels
@@ -47,6 +51,7 @@ class Autoencoder(nn.Module):
         self.zero_conv = zero_conv
         self.sigmoid_on_magnitude = sigmoid_on_magnitude
         self.scaled_tanh_on_phase = scaled_tanh_on_phase
+        self.restore_shape = restore_shape
 
         self.build_encoder()
         self.build_magnitude_decoder()
@@ -162,13 +167,23 @@ class Autoencoder(nn.Module):
         blocks.append(nn.ReLU())
         blocks.append(nn.Upsample(scale_factor=2, mode='bilinear'))
         return blocks
+    
+    def restore_shape_if_needed(self, x, target_shape):
+        """Restore the shape of the input tensor to the target shape.
+        """
+        if self.restore_shape and x.shape[-2:] != target_shape:
+            return torch.nn.functional.interpolate(x, size=target_shape, mode='bilinear')
+        return x
 
     def forward(self, x):
+        input_lateral_shape = x.shape[-2:]
         x1 = self.encoder(x)
         amp = self.decoder1(x1)
         ph = self.decoder2(x1)
+        
+        amp = self.restore_shape_if_needed(amp, input_lateral_shape)
+        ph = self.restore_shape_if_needed(ph, input_lateral_shape)
 
         if self.scaled_tanh_on_phase:
             ph = ph * torch.pi  # Using tanh activation (-1 to 1) for phase so multiply by pi
-
         return amp, ph
