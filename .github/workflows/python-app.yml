@@ -94,10 +94,18 @@ jobs:
             -e NVIDIA_VISIBLE_DEVICES=all \
             -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
             -w /workspace \
-            ghcr.io/astral-sh/uv:python3.11-bookworm \
+            nvcr.io/nvidia/cuda:12.4.1-runtime-ubuntu22.04 \
             bash -lc '
               set -euo pipefail
 
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends curl ca-certificates git build-essential
+
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              export PATH="${HOME}/.local/bin:${PATH}"
+
+              uv python install 3.11
               uv sync --locked --python 3.11
 
               uv run pytest -s --high-tol --save-timing tests
