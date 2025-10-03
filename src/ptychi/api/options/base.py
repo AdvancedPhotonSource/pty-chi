@@ -746,6 +746,13 @@ class PositionAffineTransformConstraintOptions(FeatureOptions):
     affine transformation constraint.
     """
     
+    override_update_flexibility: Optional[float] = None
+    """If set, the update flexibility will be set to this value instead of being
+    determined by the actual errors and max expected error. The value should be betweem
+    0 and 1. If affine constraint is causing instability, setting this to a smaller value
+    may help.
+    """
+    
     def is_position_weight_update_enabled_on_this_epoch(self, current_epoch: int):
         if not self.enabled:
             return False
@@ -753,6 +760,16 @@ class PositionAffineTransformConstraintOptions(FeatureOptions):
             return True
         else:
             return False
+        
+    def check(self, options: "task_options.PtychographyTaskOptions"):
+        super().check(options)
+        if self.override_update_flexibility is not None:
+            if self.override_update_flexibility < 0 or self.override_update_flexibility > 1:
+                raise ValueError("`override_update_flexibility` should be between 0 and 1.")
+            logging.warning(
+                f"`override_update_flexibility` is set to {self.override_update_flexibility}. "
+                f"`max_expected_error` will be ignored."
+            )
 
 
 @dataclasses.dataclass
@@ -804,6 +821,7 @@ class ProbePositionOptions(ParameterOptions):
                 "position correction, set `optimizable` to `False`. To disable update "
                 "magnitude limit, set `update_magnitude_limit` to None or inf."
             )
+        self.affine_transform_constraint.check(options)
 
 
 @dataclasses.dataclass
