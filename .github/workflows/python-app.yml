@@ -12,6 +12,7 @@ on:
 
 env:
   PTYCHO_CI_DATA_DIR: /local/ptycho_aux_data/ci_data
+  PODMAN_GPU_ARGS: "--hooks-dir=/usr/share/containers/oci/hooks.d/"
 
 permissions:
   contents: read
@@ -52,44 +53,38 @@ jobs:
     runs-on: self-hosted
 
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Update test data
-      id: update_test_data
-      run: |
-        PACKAGE_DIR=$(pwd)
-        cd $PTYCHO_CI_DATA_DIR
-        git pull origin main
-        cd $PACKAGE_DIR
+      - name: Update test data
+        id: update_test_data
+        run: |
+          PACKAGE_DIR=$(pwd)
+          cd $PTYCHO_CI_DATA_DIR
+          git pull origin main
+          cd $PACKAGE_DIR
 
-    - name: Create environment
-      id: create_env
-      run: |
-        uv venv --python 3.11 .venv_pytest
-        source .venv_pytest/bin/activate
+      - name: Run tests in container
+        env:
+          PTYCHO_CI_DATA_DIR: ${{ env.PTYCHO_CI_DATA_DIR }}
+        run: |
+          podman run --rm \
+            ${PODMAN_GPU_ARGS:-} \
+            -v "${PWD}:/workspace" \
+            -v "${PTYCHO_CI_DATA_DIR}:${PTYCHO_CI_DATA_DIR}" \
+            -e PTYCHO_CI_DATA_DIR="${PTYCHO_CI_DATA_DIR}" \
+            -e NVIDIA_VISIBLE_DEVICES=all \
+            -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+            -w /workspace \
+            ghcr.io/astral-sh/uv:python3.11-bookworm \
+            bash -lc '
+              set -euo pipefail
 
-    - name: Install dependencies
-      run: |
-        source .venv_pytest/bin/activate
-        uv pip install --upgrade pip
-        uv pip install pytest
-        uv pip install -r requirements.txt
-        uv pip install -e .
+              uv sync --locked --python 3.11
 
-    - name: List build environment
-      run: |
-        source .venv_pytest/bin/activate
-        uv pip list
+              uv run python --version
+              uv run python -m pip list
 
-    - name: Test with pytest
-      run: |
-        source .venv_pytest/bin/activate
-        echo $(which python)
-        cd tests
-        pytest -s --high-tol --save-timing
+              uv run pytest -s --high-tol --save-timing tests
 
-    - name: Remove environment
-      if: always()
-      run: |
-        source .venv_pytest/bin/deactivate
-        rm -rf .venv_pytest
+              rm -rf .venv
+            '
