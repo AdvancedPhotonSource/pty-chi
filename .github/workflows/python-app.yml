@@ -12,7 +12,6 @@ on:
 
 env:
   PTYCHO_CI_DATA_DIR: /local/ptycho_aux_data/ci_data
-  PODMAN_GPU_ARGS: "--hooks-dir=/usr/share/containers/oci/hooks.d/"
 
 permissions:
   contents: read
@@ -55,6 +54,25 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Configure Podman GPU access
+        run: |
+          set -euo pipefail
+
+          GPU_ARGS="--security-opt=label=disable"
+          for hook_dir in /usr/share/containers/oci/hooks.d/ /etc/containers/oci/hooks.d/; do
+            if [[ -d "${hook_dir}" ]]; then
+              GPU_ARGS+=" --hooks-dir=${hook_dir}"
+            fi
+          done
+
+          if compgen -G "/dev/nvidia*" > /dev/null 2>&1; then
+            for dev in /dev/nvidia*; do
+              GPU_ARGS+=" --device=${dev}"
+            done
+          fi
+
+          echo "PODMAN_GPU_ARGS=${GPU_ARGS}" >> "$GITHUB_ENV"
+
       - name: Update test data
         id: update_test_data
         run: |
@@ -66,6 +84,7 @@ jobs:
       - name: Run tests in container
         env:
           PTYCHO_CI_DATA_DIR: ${{ env.PTYCHO_CI_DATA_DIR }}
+          PODMAN_GPU_ARGS: ${{ env.PODMAN_GPU_ARGS }}
         run: |
           podman run --rm \
             ${PODMAN_GPU_ARGS:-} \
