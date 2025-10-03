@@ -2,6 +2,7 @@
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
 from typing import TYPE_CHECKING
+import logging
 
 import torch
 import numpy as np
@@ -17,6 +18,8 @@ if TYPE_CHECKING:
     import ptychi.api as api
     from ptychi.data_structures.probe import Probe
     from ptychi.data_structures.object import PlanarObject
+
+logger = logging.getLogger(__name__)
 
 
 class ProbePositions(dsbase.ReconstructParameter):
@@ -203,6 +206,7 @@ class ProbePositions(dsbase.ReconstructParameter):
         flexibility = torch.clip(flexibility + (errors - max_error).clip(min=0) ** 2 / max_error ** 2, max=10 * relax)
         
         pos_new = self.data * (1 - flexibility) + flexibility * estimated_positions
+        logger.debug(f"Max flexibility: {flexibility.max(0).values}")
         self.set_data(pos_new)
 
     def step_optimizer(self, *args, **kwargs):
