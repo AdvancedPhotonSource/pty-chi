@@ -81,9 +81,6 @@ jobs:
 
               uv sync --locked --python 3.11
 
-              uv run python --version
-              uv run python -m pip list
-
               uv run pytest -s --high-tol --save-timing tests
 
               rm -rf .venv
