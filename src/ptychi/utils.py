@@ -365,6 +365,7 @@ def chunked_processing(
     common_kwargs: dict,
     chunkable_kwargs: dict,
     iterated_kwargs: dict,
+    replicated_kwargs: dict = None,
     chunk_size: int = 96,
 ):
     """
@@ -380,6 +381,10 @@ def chunked_processing(
         A dictionary of arguments that should be returned by `func`, then passed to `func`
         for the next chunk. The order of arguments should be the same as the returns of
         `func`.
+    replicated_kwargs : dict, optional
+        A dictionary of arguments that should be replicated for each chunk along the
+        first dimension to match the chunk size. Tensors given here should have a first
+        dimension of size 1 intended as the batch dimension.
     chunk_size : int, optional
         The size of each chunk. Default is 96.
 
@@ -404,6 +409,13 @@ def chunked_processing(
         ind_st = ind_end
 
     for kwargs_chunk in chunks_of_chunkable_args:
+        current_chunk_size = kwargs_chunk[list(kwargs_chunk.keys())[0]].shape[0]
+        if replicated_kwargs is not None:
+            replicated_kwargs_chunk = {
+                key: torch.repeat_interleave(value, current_chunk_size, dim=0)
+                for key, value in replicated_kwargs.items()
+            }
+            kwargs_chunk.update(replicated_kwargs_chunk)
         ret = func(**common_kwargs, **kwargs_chunk, **iterated_kwargs)
         if isinstance(ret, tuple):
             for i, key in enumerate(iterated_kwargs.keys()):
