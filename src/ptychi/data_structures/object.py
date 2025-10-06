@@ -561,8 +561,6 @@ class PlanarObject(Object):
             probe_int = probe.get_all_mode_intensity(opr_mode=0)[None, :, :]
         else:
             probe_int = probe.get_mode_and_opr_mode(mode=0, opr_mode=0)[None, ...].abs() ** 2
-        # Shape of probe_int:    (n_scan_points, h, w)
-        probe_int = probe_int.repeat(len(positions_all), 1, 1)
 
         # Stitch probes of all positions on the object buffer
         # TODO: allow setting chunk size externally
@@ -571,10 +569,12 @@ class PlanarObject(Object):
             common_kwargs={"op": "add"},
             chunkable_kwargs={
                 "positions": positions_all.round().int() + self.pos_origin_coords,
-                "patches": probe_int,
             },
             iterated_kwargs={
                 "image": torch.zeros_like(object_.real).type(torch.get_default_dtype())
+            },
+            replicated_kwargs={
+                "patches": probe_int,
             },
             chunk_size=64,
         )
