@@ -412,7 +412,7 @@ def chunked_processing(
         current_chunk_size = kwargs_chunk[list(kwargs_chunk.keys())[0]].shape[0]
         if replicated_kwargs is not None:
             replicated_kwargs_chunk = {
-                key: torch.repeat_interleave(value, current_chunk_size, dim=0)
+                key: value.expand(current_chunk_size, *value.shape[1:])
                 for key, value in replicated_kwargs.items()
             }
             kwargs_chunk.update(replicated_kwargs_chunk)
