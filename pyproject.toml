@@ -21,6 +21,7 @@ dependencies = [
     "torch>=2.4",
     "torchvision",
     "tqdm",
+    "matplotlib>=3.10.6",
 ]
 dynamic = ["version"]
 
@@ -52,8 +53,3 @@ target-version = "py311"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[dependency-groups]
-dev = [
-    "matplotlib>=3.10.6",
-]
