@@ -192,11 +192,9 @@ class PtychographyTask(Task):
             self.probe_options.experimental.deep_image_prior_options.enabled
         ):
             self.probe = probe.DIPProbe(**kwargs)
-        elif ( 
-              isinstance(self.probe_options, api.options.PIEProbeOptions)
-              or
-              isinstance(self.probe_options, api.options.LSQMLProbeOptions)
-              ) and (
+        elif (
+            isinstance(self.probe_options, api.options.PIEProbeOptions)
+        ) and (
             self.probe_options.experimental.sdl_probe_options.enabled
         ):
             self.probe = probe.SynthesisDictLearnProbe(**kwargs)
@@ -281,6 +279,12 @@ class PtychographyTask(Task):
         Tensor
             The data of the given name.
         """
+        # Deep image prior objects and probes need to be generated 
+        # before fetching to avoid issues with multi-GPU.
+        if name == "object" and isinstance(self.object, object.DIPPlanarObject):
+            self.object.generate()
+        elif name == "probe" and isinstance(self.probe, probe.DIPProbe):
+            self.probe.generate()
         return getattr(self, name).data.detach()
 
     def get_data_to_cpu(

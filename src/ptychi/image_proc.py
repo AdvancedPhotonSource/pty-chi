@@ -1351,7 +1351,7 @@ def remove_grid_artifacts(
     # Frequencies of the artifacts.
     dk_s_y, dk_s_x = 1 / period_y_m, 1 / period_x_m
 
-    x_range, y_range = 0, 0
+    x_range, y_range = torch.zeros([1], dtype=torch.int32), torch.zeros([1], dtype=torch.int32)
     # Get the frequencies of all harmonic peaks.
     if "x" in direction:
         x_range = torch.arange(math.ceil(-k_max / dk_s_x), math.floor(k_max / dk_s_x))

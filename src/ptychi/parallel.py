@@ -126,6 +126,8 @@ class MultiprocessMixin:
         return buffer
 
     def init_process_group(self, backend: str = "nccl") -> None:
+        if dist.is_initialized():
+            return
         dist.init_process_group(backend=backend, init_method="env://")
 
     def detect_launcher(self) -> str | None:

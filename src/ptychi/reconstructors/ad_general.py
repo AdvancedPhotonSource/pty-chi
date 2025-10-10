@@ -2,10 +2,11 @@
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
 from typing import Optional, TYPE_CHECKING
+import logging
 
 import torch
+import torch.distributed as dist
 from torch.utils.data import Dataset
-
 
 import ptychi.forward_models as fm
 from ptychi.reconstructors.base import IterativeReconstructor, LossTracker
@@ -13,6 +14,8 @@ import ptychi.maps as maps
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
     import ptychi.api as api
+
+logger = logging.getLogger(__name__)
 
 
 class AutodiffReconstructor(IterativeReconstructor):
@@ -55,9 +58,20 @@ class AutodiffReconstructor(IterativeReconstructor):
         self.forward_model = self.forward_model_class(
             self.parameter_group, **self.forward_model_params
         )
-        if not torch.get_default_device().type == "cpu":
-            self.forward_model = torch.nn.DataParallel(self.forward_model)
+        if dist.is_initialized():
+            self.forward_model = torch.nn.parallel.DistributedDataParallel(self.forward_model)
             self.forward_model.to(torch.get_default_device())
+        else:
+            logger.warning(
+                "The default parallelization behavior of AutodiffReconstructor has been changed. "
+                "Now, multi-GPU support must be enabled by launching the script with `torchrun`. "
+                "If you are not the PtychographyTask wrapper, you also have to initialize "
+                "the process group with `torch.distributed.init_process_group`. Directly "
+                "launching the script that uses AutodiffReconstructor with `python` will "
+                "only use a single GPU. For more information, see "
+                "https://pty-chi.readthedocs.io/en/latest/using_pty_chi/devices.html#multi-gpu-and-multi-processing"
+            )
+            
 
     def run_post_differentiation_hooks(self, input_data, y_true):
         self.get_forward_model().post_differentiation_hook(*input_data, y_true)
@@ -92,7 +106,7 @@ class AutodiffReconstructor(IterativeReconstructor):
                         sub_module.step_optimizer()
 
     def get_forward_model(self) -> "fm.ForwardModel":
-        if isinstance(self.forward_model, torch.nn.DataParallel):
+        if isinstance(self.forward_model, torch.nn.parallel.DistributedDataParallel):
             return self.forward_model.module
         else:
             return self.forward_model

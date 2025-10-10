@@ -224,9 +224,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         object_ = self.parameter_group.object
         self._initialize_object_gradient()
-        self._initialize_probe_gradient()
-        self._initialize_probe_position_gradient()
-        self._initialize_opr_mode_weights_gradient()
+        self.parameter_group.probe.initialize_grad()
+        self.parameter_group.probe_positions.initialize_grad()
+        self.parameter_group.opr_mode_weights.initialize_grad()
         self._initialize_object_step_size_buffer()
         self._initialize_probe_step_size_buffer()
         self._initialize_momentum_buffers()
@@ -257,17 +257,17 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             
             if self.use_sparse_probe_shared_update and self.parameter_group.probe.optimization_enabled(self.current_epoch):
                 (
-                    delta_p_i_unshifted, delta_p_i, _
+                    delta_p_i_before_adj_shift, delta_p_i, _
                 ) = self.calculate_probe_update_direction_sparse_code_probe_shared(
                     indices, chi, obj_patches, i_slice
                 )
             else:
                 # Calculate probe update direction (dense representation)
-                delta_p_i_unshifted = self._calculate_probe_update_direction(
+                delta_p_i_before_adj_shift = self._calculate_probe_update_direction(
                     chi, obj_patches=obj_patches, slice_index=i_slice, probe_mode_index=None
                 )  # Eq. 24a
                 delta_p_i = self.adjoint_shift_probe_update_direction(
-                    indices, delta_p_i_unshifted, first_mode_only=True
+                    indices, delta_p_i_before_adj_shift, first_mode_only=True
                 )
                 
             delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
@@ -328,7 +328,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 )
 
             # Set chi to conjugate-modulated wavefield.
-            chi = delta_p_i_unshifted
+            chi = delta_p_i_before_adj_shift
             
     def calculate_probe_update_direction_sparse_code_probe_shared(
         self, indices, chi, obj_patches, i_slice=None
@@ -1360,7 +1360,8 @@ class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
         
         if self.current_epoch == 0 and self.options.rescale_probe_intensity_in_first_epoch:
             self.update_accumulated_intensities(y_true, y_pred)
-            self.reconstructor_buffers.synchronize(["accumulated_true_intensity", "accumulated_pred_intensity"])
+            if self.current_minibatch == len(self.dataloader) - 1:
+                self.reconstructor_buffers.synchronize(["accumulated_true_intensity", "accumulated_pred_intensity"])
         else:
             self.compute_reconstruction_parameter_updates(y_pred, y_true, indices)
             self.reconstructor_buffers.synchronize(

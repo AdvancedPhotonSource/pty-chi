@@ -65,6 +65,7 @@ def get_reconstructor_by_enum(key: enums.Reconstructors) -> Type["Reconstructor"
 def get_multiprocess_reconstructor_by_enum(key: enums.Reconstructors) -> Type["Reconstructor"]:
     d = {
         enums.Reconstructors.LSQML: reconstructors.MultiprocessLSQMLReconstructor,
+        enums.Reconstructors.AD_PTYCHO: reconstructors.AutodiffPtychographyReconstructor,
     }
     reconstructor_class = d.get(key, None)
     if reconstructor_class is None:
