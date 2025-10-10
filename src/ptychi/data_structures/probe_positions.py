@@ -2,6 +2,7 @@
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
 from typing import TYPE_CHECKING
+import logging
 
 import torch
 import numpy as np
@@ -17,6 +18,8 @@ if TYPE_CHECKING:
     import ptychi.api as api
     from ptychi.data_structures.probe import Probe
     from ptychi.data_structures.object import PlanarObject
+
+logger = logging.getLogger(__name__)
 
 
 class ProbePositions(dsbase.ReconstructParameter):
@@ -198,9 +201,16 @@ class ProbePositions(dsbase.ReconstructParameter):
         errors = residuals.abs()
         max_error = self.options.affine_transform_constraint.max_expected_error
         
-        relax = 0.1
-        flexibility = relax / (1 + self.position_weights)
-        flexibility = torch.clip(flexibility + (errors - max_error).clip(min=0) ** 2 / max_error ** 2, max=10 * relax)
+        if self.options.affine_transform_constraint.override_update_flexibility is not None:
+            flexibility = self.options.affine_transform_constraint.override_update_flexibility
+            if flexibility < 0 or flexibility > 1:
+                raise ValueError("`override_update_flexibility` should be between 0 and 1.")
+            logger.debug(f"Using override flexibility: {flexibility}")
+        else:
+            relax = 0.1
+            flexibility = relax / (1 + self.position_weights)
+            flexibility = torch.clip(flexibility + (errors - max_error).clip(min=0) ** 2 / max_error ** 2, max=10 * relax)
+            logger.debug(f"Max flexibility: {flexibility.max(0).values}")
         
         pos_new = self.data * (1 - flexibility) + flexibility * estimated_positions
         self.set_data(pos_new)

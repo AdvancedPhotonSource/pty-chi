@@ -127,8 +127,5 @@ You can then view the docs by opening ``docs/build/html/index.html`` in your bro
 Developer's Guide
 =================
 
-Please refer to the developer's guide for more information on how to contribute
-to the project. The developer's guide is hosted on the
-`Wiki <https://git.aps.anl.gov/ptycho_software/pty-chi/-/wikis/Developer's-guide/home>`_ page of Pty-Chi's 
-APS GitLab repository.
-To gain access to the APS GitLab repository, please contact the developers.
+Please refer to the developer's guide in the `Wiki page <https://github.com/AdvancedPhotonSource/pty-chi/wiki>`_
+for more information on how to contribute to the project.

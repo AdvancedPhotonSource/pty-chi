@@ -149,7 +149,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             # Add perturbation.
             alpha = alpha + torch.randn(alpha.shape, device=alpha.device) * 1e-2
             self.alpha_psi_far_all_pos[indices] = alpha
-            logger.debug("poisson alpha_psi_far: mean = {}".format(torch.mean(alpha)))
         return alpha
     
     @timer()
@@ -634,9 +633,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         if self.parameter_group.object.options.multimodal_update:
             alpha_o_i = alpha_o_i / self.parameter_group.probe.n_modes
 
-        logger.debug("alpha_p_i: min={}, max={}".format(alpha_p_i.min(), alpha_p_i.max()))
-        logger.debug("alpha_o_i: min={}, max={}".format(alpha_o_i.min(), alpha_o_i.max()))
-
         return alpha_o_i, alpha_p_i
 
     @timer()
@@ -669,11 +665,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         alpha_o_i = alpha_o_i.clamp(0, None)
 
-        logger.debug(
-            "alpha_o_i: min={}, max={}, trim_mean={}".format(
-                alpha_o_i.min(), alpha_o_i.max(), pmath.trim_mean(alpha_o_i)
-            )
-        )
         return alpha_o_i
 
     @timer()
@@ -703,7 +694,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         alpha_p_i = alpha_p_i.clamp(0, None)
 
-        logger.debug("alpha_p_i: min={}, max={}".format(alpha_p_i.min(), alpha_p_i.max()))
         return alpha_p_i
 
     @timer()
