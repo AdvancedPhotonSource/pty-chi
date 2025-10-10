@@ -31,28 +31,22 @@ and `ptychi`::
 Multi-GPU and multi-processing
 ------------------------------
 
-Some reconstruction engines support multi-GPU and/or multi-processing. The biggest benefit
-of using multi-GPU or multi-processing is to split the computation of update vectors across
-different devices, reducing the VRAM usage on each device. Note that multi-processing does
+Some reconstruction engines support multi-processing. This allows you to use multiple GPUs
+(one in each process) to split the computation of update vectors across different devices.
+The multi-processing capability is realized using PyTorch's ``torch.distributed`` module
+(for analytical engines) and ``torch.nn.parallel.DistributedDataParallel`` (for autodiff).
+
+The biggest benefit of using multi-GPU/multi-processing is reducing the per-device VRAM 
+usage because fewer data are processed on each device. Note that multi-processing does
 not always make the computation faster unless the data size is very large because it incurs
 communication overhead.
 
-Multi-GPU engines
-+++++++++++++++++
+Currently, the engines that support multi-processing are:
 
-The automatic differentiation (Autodiff) engine supports multi-GPU through PyTorch's
-``DataParallel`` wrapper. The reconstructor uses all available GPUs by default without
-additional settings. To limit it to a single GPU, set ``CUDA_VISIBLE_DEVICES`` before
-launching the reconstruction job::
+- Autodiff
+- LSQML
 
-    export CUDA_VISIBLE_DEVICES=0
-
-Multi-processing engines
-++++++++++++++++++++++++
-
-Multi-GPU support is enabled for some analytical engine(s) (currently only LSQML)
-through the multi-processing feature of PyTorch in ``torch.distributed``. To 
-enable multi-processing, you must launch the reconstruction script using ``torchrun``::
+To enable multi-processing, you must launch the reconstruction script using ``torchrun``::
 
     torchrun --nnodes=1 --nproc_per_node=2 reconstruction_script.py
 
