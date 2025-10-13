@@ -315,6 +315,8 @@ def ptycho_batch_recon(base_params):
     exclude_scans = base_params.get('exclude_scans', [])
     overwrite_ongoing = base_params.get('overwrite_ongoing', False)
     reset_scan_list = base_params.get('reset_scan_list', False)
+    wait_time_seconds = base_params.get('wait_time_seconds', 5)
+    num_repeats = base_params.get('num_repeats', np.inf)
 
     log_dir = os.path.join(base_params['data_directory'], 'ptychi_recons', 
                           base_params['recon_parent_dir'], 
@@ -327,7 +329,6 @@ def ptycho_batch_recon(base_params):
     # Generate a unique worker ID
     worker_id = f"worker_{os.getpid()}_{uuid.uuid4().hex[:8]}"
     
-    num_repeats = np.inf
     repeat_count = 0
 
     if base_params.get('scan_list', []) != []:
@@ -463,8 +464,8 @@ ptycho_recon(run_recon=True, **params)
                         os.unlink(script_path)
                     
                     # Give system time to fully clean up resources
-                    print(f"Waiting for 5 seconds before next scan...")
-                    time.sleep(5)
+                    print(f"Waiting for {wait_time_seconds} seconds before next scan...")
+                    time.sleep(wait_time_seconds)
 
                 if reset_scan_list:
                     # Break the for loop after processing the current scan
@@ -491,8 +492,8 @@ ptycho_recon(run_recon=True, **params)
             break
         else:
             repeat_count += 1
-            print(f"Waiting for 5 seconds...")
-            time.sleep(5)
+            print(f"Waiting for {wait_time_seconds} seconds...")
+            time.sleep(wait_time_seconds)
    
     print(f"Batch processing complete.")
 
