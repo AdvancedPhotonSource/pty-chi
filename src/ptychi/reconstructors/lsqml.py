@@ -149,7 +149,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             # Add perturbation.
             alpha = alpha + torch.randn(alpha.shape, device=alpha.device) * 1e-2
             self.alpha_psi_far_all_pos[indices] = alpha
-            logger.debug("poisson alpha_psi_far: mean = {}".format(torch.mean(alpha)))
         return alpha
     
     @timer()
@@ -224,9 +223,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         object_ = self.parameter_group.object
         self._initialize_object_gradient()
-        self._initialize_probe_gradient()
-        self._initialize_probe_position_gradient()
-        self._initialize_opr_mode_weights_gradient()
+        self.parameter_group.probe.initialize_grad()
+        self.parameter_group.probe_positions.initialize_grad()
+        self.parameter_group.opr_mode_weights.initialize_grad()
         self._initialize_object_step_size_buffer()
         self._initialize_probe_step_size_buffer()
         self._initialize_momentum_buffers()
@@ -256,11 +255,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 self._record_object_slice_gradient(i_slice, delta_o_comb, add_to_existing=False)
 
             # Calculate probe update direction.
-            delta_p_i_unshifted = self._calculate_probe_update_direction(
+            delta_p_i_before_adj_shift = self._calculate_probe_update_direction(
                 chi, obj_patches=obj_patches, slice_index=i_slice, probe_mode_index=None
             )  # Eq. 24a
             delta_p_i = self.adjoint_shift_probe_update_direction(
-                indices, delta_p_i_unshifted, first_mode_only=True
+                indices, delta_p_i_before_adj_shift, first_mode_only=True
             )
             delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
             self._record_probe_gradient(delta_p_hat)
@@ -314,7 +313,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 )
 
             # Set chi to conjugate-modulated wavefield.
-            chi = delta_p_i_unshifted
+            chi = delta_p_i_before_adj_shift
 
     @timer()
     def apply_reconstruction_parameter_updates(self, indices: torch.Tensor):
@@ -596,9 +595,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         if self.parameter_group.object.options.multimodal_update:
             alpha_o_i = alpha_o_i / self.parameter_group.probe.n_modes
 
-        logger.debug("alpha_p_i: min={}, max={}".format(alpha_p_i.min(), alpha_p_i.max()))
-        logger.debug("alpha_o_i: min={}, max={}".format(alpha_o_i.min(), alpha_o_i.max()))
-
         return alpha_o_i, alpha_p_i
 
     @timer()
@@ -631,11 +627,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         alpha_o_i = alpha_o_i.clamp(0, None)
 
-        logger.debug(
-            "alpha_o_i: min={}, max={}, trim_mean={}".format(
-                alpha_o_i.min(), alpha_o_i.max(), pmath.trim_mean(alpha_o_i)
-            )
-        )
         return alpha_o_i
 
     @timer()
@@ -665,7 +656,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         alpha_p_i = alpha_p_i.clamp(0, None)
 
-        logger.debug("alpha_p_i: min={}, max={}".format(alpha_p_i.min(), alpha_p_i.max()))
         return alpha_p_i
 
     @timer()
@@ -977,29 +967,14 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             if self.current_minibatch == 0:
                 self.parameter_group.object.initialize_grad()
 
-    @timer()
-    def _initialize_probe_gradient(self):
-        self.parameter_group.probe.initialize_grad()
-        
-    @timer()
-    def _initialize_probe_position_gradient(self):
-        self.parameter_group.probe_positions.initialize_grad()
-        
-    @timer()
-    def _initialize_opr_mode_weights_gradient(self):
-        self.parameter_group.opr_mode_weights.initialize_grad()
-
-    @timer()
     def _initialize_object_step_size_buffer(self):
         if self.current_minibatch == 0:
             self.reconstructor_buffers.alpha_object_all_pos_all_slices[...] = 1
 
-    @timer()
     def _initialize_probe_step_size_buffer(self):
         if self.current_minibatch == 0:
             self.reconstructor_buffers.alpha_probe_all_pos[...] = 1
 
-    @timer()
     def _initialize_momentum_buffers(self):
         """Initialize momentum buffers.
 

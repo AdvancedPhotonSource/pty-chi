@@ -318,7 +318,7 @@ class IterativeReconstructor(Reconstructor):
     def build_counter(self):
         self.pbar = tqdm.tqdm(
             total=self.options.num_epochs, 
-            disable=logger.level > logging.INFO, 
+            disable=logger.getEffectiveLevel() > logging.INFO, 
             leave=False
         )
         self.current_epoch = 0
