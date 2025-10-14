@@ -10,7 +10,8 @@ from .pear_plot import plot_affine_evolution, plot_affine_summary
 import numpy as np
 
 import logging
-
+#logging.basicConfig(level=logging.ERROR)
+#logging.basicConfig(level=logging.INFO)
 import time
 from datetime import datetime  # Correct import for datetime.now()
 import uuid
@@ -33,7 +34,7 @@ def ptycho_recon(run_recon=True, **params):
     if print_mode == 'prod':
         logging.basicConfig(level=logging.WARNING)
     else:
-        logging.basicConfig(level=logging.ERROR)
+        logging.basicConfig(level=logging.INFO)
 
     if params['gpu_id'] is None:
         params['gpu_id'] = select_gpu(params)
