@@ -22,7 +22,7 @@ def select_gpu(gpu_list=None):
         if gpu_list is not None:
             gpu_stats = [gpu for gpu in gpu_stats if gpu['index'] in gpu_list]
             if not gpu_stats:
-                print(f"No GPUs from the provided list {gpu_list} are available. Defaulting to GPU 0.")
+                print(f"No GPUs from the provided list are available. Defaulting to GPU 0.")
                 return 0
         
         # Find GPU with 0% utilization and lowest memory usage

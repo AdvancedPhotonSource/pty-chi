@@ -1,3 +1,6 @@
+import logging
+logging.basicConfig(level=logging.WARNING)
+
 import ptychi.api as api
 from ptychi.api.task import PtychographyTask
 from ptychi.utils import (set_default_complex_dtype,
@@ -9,8 +12,9 @@ from .pear_utils import select_gpu, generate_scan_list, FileBasedTracker, check_
 from .pear_plot import plot_affine_evolution, plot_affine_summary
 import numpy as np
 
-import logging
-logging.basicConfig(level=logging.ERROR)
+#import logging
+#logging.basicConfig(level=logging.WARNING)
+
 import time
 from datetime import datetime  # Correct import for datetime.now()
 import uuid
@@ -24,13 +28,23 @@ from .pear_io_aps import (initialize_recon,
                         create_reconstruction_path,
                         save_initial_conditions)
 
+# Global variable for print mode
+print_mode = 'debug'
+
 def ptycho_recon(run_recon=True, **params):
+    global print_mode
+    print_mode = params.get('print_mode', 'debug')
+    # if print_mode == 'prod':
+    #     print("Logging level set")
+    #     logging.basicConfig(level=logging.WARNING)
+    # else:
+    #     logging.basicConfig(level=logging.ERROR)
 
     if params['gpu_id'] is None:
         params['gpu_id'] = select_gpu(params)
-        print(f"Auto-selected GPU: {params['gpu_id']}")
+        print(f"Auto-selected GPU: {params['gpu_id']} for scan {params['scan_num']}")
     else:
-        print(f"Using GPU: {params['gpu_id']}")
+        print(f"Using GPU: {params['gpu_id']} for scan {params['scan_num']}")
 
     # Set up computing device
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, [params['gpu_id'] ]))
@@ -139,14 +153,16 @@ def ptycho_recon(run_recon=True, **params):
         params['auto_batch_size_estimation'] = False
         options.reconstructor_options.batch_size = params['update_batch_size']
         params['number_of_batches'] = dp.shape[0] // options.reconstructor_options.batch_size
-        print(f"User-specified batch size: {options.reconstructor_options.batch_size} " 
+        if print_mode == 'debug':
+            print(f"User-specified batch size: {options.reconstructor_options.batch_size} " 
               f"({params['number_of_batches']} batches for {dp.shape[0]} data points)")
     elif params['number_of_batches'] is not None:
         params['auto_batch_size_estimation'] = False
         # Calculate batch size from number of batches
         total_data_points = dp.shape[0]
         options.reconstructor_options.batch_size = max(1, total_data_points // params['number_of_batches'])
-        print(f"User-specified batch size: {options.reconstructor_options.batch_size} " 
+        if print_mode == 'debug':
+            print(f"User-specified batch size: {options.reconstructor_options.batch_size} " 
               f"({params['number_of_batches']} batches for {dp.shape[0]} data points)")
     else:
         params['auto_batch_size_estimation'] = True
@@ -157,7 +173,8 @@ def ptycho_recon(run_recon=True, **params):
         options.reconstructor_options.batch_size = max(1, total_data_points // params['number_of_batches'])
         
         # Log the auto-configuration for transparency
-        print(f"Auto-configured batch size: {options.reconstructor_options.batch_size} " 
+        if print_mode == 'debug':
+            print(f"Auto-configured batch size: {options.reconstructor_options.batch_size} " 
               f"({params['number_of_batches']} batches for {total_data_points} data points)")
 
     #options.reconstructor_options.forward_model_options.pad_for_shift = 16
@@ -429,7 +446,10 @@ ptycho_recon(run_recon=True, **params)
                     # Stream and print the output in real-time
                     for line in iter(process.stdout.readline, ''):
                         #print(line, end='')  # Already has newline
-                        print(f"[S{scan_num:04d}-GPU{scan_params['gpu_id']}]{line}", end='')
+                        if scan_params['gpu_id'] is not None:
+                            print(f"[S{scan_num:04d}-GPU{scan_params['gpu_id']}]{line}", end='')
+                        else:
+                            print(f"[S{scan_num:04d}-GPU:Auto]{line}", end='')
 
                     # Wait for process to complete and get return code
                     return_code = process.wait()
