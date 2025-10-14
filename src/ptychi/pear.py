@@ -1,6 +1,3 @@
-import logging
-logging.basicConfig(level=logging.WARNING)
-
 import ptychi.api as api
 from ptychi.api.task import PtychographyTask
 from ptychi.utils import (set_default_complex_dtype,
@@ -12,8 +9,7 @@ from .pear_utils import select_gpu, generate_scan_list, FileBasedTracker, check_
 from .pear_plot import plot_affine_evolution, plot_affine_summary
 import numpy as np
 
-#import logging
-#logging.basicConfig(level=logging.WARNING)
+import logging
 
 import time
 from datetime import datetime  # Correct import for datetime.now()
@@ -34,11 +30,10 @@ print_mode = 'debug'
 def ptycho_recon(run_recon=True, **params):
     global print_mode
     print_mode = params.get('print_mode', 'debug')
-    # if print_mode == 'prod':
-    #     print("Logging level set")
-    #     logging.basicConfig(level=logging.WARNING)
-    # else:
-    #     logging.basicConfig(level=logging.ERROR)
+    if print_mode == 'prod':
+        logging.basicConfig(level=logging.WARNING)
+    else:
+        logging.basicConfig(level=logging.ERROR)
 
     if params['gpu_id'] is None:
         params['gpu_id'] = select_gpu(params)
