@@ -346,7 +346,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_p_i, optimal_delta_sparse_code_vs_spos = self.parameter_group.probe.get_probe_update_direction_sparse_code_probe_shared(
             delta_p_i, chi_rm_subpx_shft, obj_patches[:, i_slice, ...]
         )
-        self.parameter_group.probe.set_grad(optimal_delta_sparse_code_vs_spos.mean(1).T)
+        self.parameter_group.probe.set_gradient_sparse_code_probe_shared(optimal_delta_sparse_code_vs_spos.mean(1).T)
         delta_p_i_before_adj_shift = self.forward_model.shift_unique_probes(indices, delta_p_i, first_mode_only=True)
         return delta_p_i_before_adj_shift, delta_p_i, optimal_delta_sparse_code_vs_spos
 

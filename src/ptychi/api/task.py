@@ -193,7 +193,9 @@ class PtychographyTask(Task):
         ):
             self.probe = probe.DIPProbe(**kwargs)
         elif (
-            isinstance(self.probe_options, api.options.PIEProbeOptions)
+            isinstance(self.probe_options, api.options.PIEProbeOptions) 
+            or 
+            isinstance(self.probe_options, api.options.LSQMLProbeOptions) 
         ) and (
             self.probe_options.experimental.sdl_probe_options.enabled
         ):

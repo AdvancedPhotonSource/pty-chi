@@ -78,11 +78,31 @@ class Object(dsbase.ReconstructParameter):
 
     @timer()
     def constrain_l1_norm(self):
+        
+        
+        
         if self.options.l1_norm_constraint.weight <= 0:
             return
+        
+        
         data = self.data
-        l1_grad = torch.sgn(data) / data.numel()
-        data = data - self.options.l1_norm_constraint.weight * l1_grad
+        
+        
+        # from torchvision.transforms.functional import gaussian_blur
+        # Xre = gaussian_blur( torch.real(data), kernel_size=(5, 5), sigma=(4.0, 4.0)) 
+        # Xim = gaussian_blur( torch.imag(data), kernel_size=(5, 5), sigma=(4.0, 4.0))
+        # data = Xre + 1j * Xim
+        
+        from torchvision.transforms.functional import gaussian_blur
+        Xabs = gaussian_blur( torch.abs(data), kernel_size=(7, 7), sigma=(6.0, 6.0)) 
+        data = Xabs * torch.exp(1j * torch.angle(data))
+        
+        
+        
+        # l1_grad = torch.sgn(data) / data.numel()
+        # data = data - self.options.l1_norm_constraint.weight * l1_grad
+        
+        
         self.set_data(data)
         logger.debug("L1 norm constraint applied to object.")
         
@@ -361,35 +381,134 @@ class PlanarObject(Object):
         bbox = self.roi_bbox.get_bbox_with_top_left_origin()
         return self.data[:, int(bbox.sy):int(bbox.ey), int(bbox.sx):int(bbox.ex)]
 
+    # @timer()
+    # def constrain_smoothness(self) -> None:
+    #     """
+    #     Smooth the magnitude of the object.
+    #     """
+    #     if self.options.smoothness_constraint.alpha <= 0:
+    #         return
+    #     alpha = self.options.smoothness_constraint.alpha
+    #     if alpha > 1.0 / 8:
+    #         logger.warning(f"Alpha = {alpha} in smoothness constraint should be less than 1/8.")
+    #     psf = torch.ones(3, 3, device=self.tensor.data.device) * alpha
+    #     psf[2, 2] = 1 - 8 * alpha
+
+    #     data = self.data
+    #     for i_slice in range(self.n_slices):
+    #         slc0 = data[i_slice]
+    #         slc = ip.convolve2d(slc0, psf, "same")
+    #         data[i_slice] = slc
+    #     self.set_data(data)
+
     @timer()
     def constrain_smoothness(self) -> None:
         """
         Smooth the magnitude of the object.
         """
-        if self.options.smoothness_constraint.alpha <= 0:
-            return
-        alpha = self.options.smoothness_constraint.alpha
-        if alpha > 1.0 / 8:
-            logger.warning(f"Alpha = {alpha} in smoothness constraint should be less than 1/8.")
-        psf = torch.ones(3, 3, device=self.tensor.data.device) * alpha
-        psf[2, 2] = 1 - 8 * alpha
-
+        
         data = self.data
-        for i_slice in range(self.n_slices):
-            slc0 = data[i_slice]
-            slc = ip.convolve2d(slc0, psf, "same")
-            data[i_slice] = slc
+        
+
+         
+         
+         
+         
+         
+         
+        # from torchvision.transforms.functional import gaussian_blur
+        # Xabs = gaussian_blur( torch.abs(data), kernel_size=(3, 3), sigma=(2.0, 2.0)) 
+        # data = Xabs * torch.exp(1j * torch.angle(data))
+         
+        # from torchvision.transforms.functional import gaussian_blur
+        # Xre = gaussian_blur( torch.real(data), kernel_size=(3, 3), sigma=(2.0, 2.0)) 
+        # Xim = gaussian_blur( torch.imag(data), kernel_size=(3, 3), sigma=(2.0, 2.0))
+        # data = Xre + 1j * Xim
+         
+         
+         
+         
+         
+        exp_phs_data = torch.exp( 1j * torch.angle( data )) 
+        abs_data = torch.abs(data)
+        limHI = 2.00
+        limLO = 1e-2
+        maskHI = ( abs_data > limHI ) 
+        maskLO = ( abs_data < limLO ) 
+        maskOK = torch.logical_not( maskHI ) * torch.logical_not( maskLO )
+        data = ( limLO * maskLO + limHI * maskHI + maskOK * abs_data ) * exp_phs_data
+        
+        
+        # if self.options.smoothness_constraint.alpha <= 0:
+        #     return
+        # alpha = self.options.smoothness_constraint.alpha
+        # if alpha > 1.0 / 8:
+        #     logger.warning(f"Alpha = {alpha} in smoothness constraint should be less than 1/8.")
+        # psf = torch.ones(3, 3, device=self.tensor.data.device) * alpha
+        # psf[2, 2] = 1 - 8 * alpha
+
+        # data = self.data
+        # for i_slice in range(self.n_slices):
+        #     slc0 = data[i_slice]
+        #     slc = ip.convolve2d(slc0, psf, "same")
+        #     data[i_slice] = slc
+            
+            
+            
         self.set_data(data)
 
+
+
+
+
+
+
+
+
+
+
+    # @timer()
+    # def constrain_total_variation(self) -> None:
+    #     if self.options.total_variation.weight <= 0:
+    #         return
+    #     data = self.data
+    #     for i_slice in range(self.n_slices):
+    #         data[i_slice] = ip.total_variation_2d_chambolle(
+    #             data[i_slice], lmbda=self.options.total_variation.weight, niter=2
+    #         )
+    #     self.set_data(data)
+    
     @timer()
     def constrain_total_variation(self) -> None:
-        if self.options.total_variation.weight <= 0:
-            return
+        
+        # if self.options.total_variation.weight < 0:            # if self.options.total_variation.weight <= 0:
+        #     return
+        
+    
         data = self.data
-        for i_slice in range(self.n_slices):
-            data[i_slice] = ip.total_variation_2d_chambolle(
-                data[i_slice], lmbda=self.options.total_variation.weight, niter=2
-            )
+        
+         
+        # from torchvision.transforms.functional import gaussian_blur
+        # Xre = gaussian_blur( torch.real(data), kernel_size=(3, 3), sigma=(2.0, 2.0)) 
+        # Xim = gaussian_blur( torch.imag(data), kernel_size=(3, 3), sigma=(2.0, 2.0))
+        # data = Xre + 1j * Xim
+        
+        '''
+        import numpy as np
+        import matplotlib.pyplot as plt
+        plt.figure(); plt.imshow(np.abs( data[0,...].cpu().numpy())); 
+        plt.savefig('/home/beams/ATRIPATH/Desktop/beamtime_092025_9id/object_fixed_support.png')
+
+        '''
+        
+
+        if self.options.total_variation.weight > 0:
+            for i_slice in range(self.n_slices):
+                data[i_slice] = ip.total_variation_2d_chambolle(
+                    data[i_slice], lmbda=self.options.total_variation.weight, niter=2
+                )
+            
+
         self.set_data(data)
 
     @timer()

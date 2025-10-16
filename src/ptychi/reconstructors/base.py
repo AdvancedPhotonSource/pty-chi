@@ -380,6 +380,10 @@ class IterativeReconstructor(Reconstructor):
             self.current_minibatch = 0
             for batch_data in self.dataloader:
                 input_data, y_true = self.prepare_batch_data(batch_data)
+                
+                # import os
+                # print('rank =', int(os.environ['RANK']), 'world size =', int(os.environ['WORLD_SIZE']), '\n' )
+                
                 self.run_pre_update_hooks()
                 self.run_minibatch(input_data, y_true)
                 self.run_post_update_hooks()
@@ -390,7 +394,10 @@ class IterativeReconstructor(Reconstructor):
 
             if movies.MOVIES_INSTALLED:
                 movies.api.update_movie_builders(self)
-
+                
+            # import os
+            # print('BASE.PY, rank =', int(os.environ['RANK']), 'world size =', int(os.environ['WORLD_SIZE']), '\n' )
+            
             self.current_epoch += 1
             self.pbar.update(1)
 

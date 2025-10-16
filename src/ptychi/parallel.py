@@ -85,6 +85,15 @@ class MultiprocessMixin:
         Any
             The synchronized buffer.
         """
+        
+        '''
+        if int(os.environ['RANK']) == 0:
+            A = 5
+            
+        if int(os.environ['RANK']) == 1:
+            A = 5  
+        '''    
+        
         orig_type = type(buffer)
         
         if isinstance(buffer, Numeric) and indices is not None:
@@ -112,19 +121,61 @@ class MultiprocessMixin:
         
         if unsqueezed:
             buffer = buffer.squeeze(0)
-        
+            
+        # import os
+        # print('PARALLEL.PY, rank =', int(os.environ['RANK']), 'world size =', int(os.environ['WORLD_SIZE']) )
+        # dist.barrier()
+                
         if orig_type is list:
+            
+            # import os
+            # print('PARALLEL_A.PY, rank =', int(os.environ['RANK']), 'world size =', int(os.environ['WORLD_SIZE']) )
+            # dist.barrier()
+            
             buffer = buffer.tolist()
+
         elif orig_type is tuple:
+            
+            # import os
+            # print('PARALLEL_B.PY, rank =', int(os.environ['RANK']), 'world size =', int(os.environ['WORLD_SIZE']) )
+            # dist.barrier()
+            
             buffer = tuple(buffer.tolist())
+
         elif orig_type is int:
+            
+            # import os
+            # print('PARALLEL_C.PY, rank =', int(os.environ['RANK']), 'world size =', int(os.environ['WORLD_SIZE']) )
+            # dist.barrier()
+            
             buffer = int(buffer.item())
+            
         elif orig_type is float:
+            
+            # import os
+            # print('PARALLEL_D.PY, rank =', int(os.environ['RANK']), 'world size =', int(os.environ['WORLD_SIZE']) )
+            # dist.barrier()
+            
             buffer = float(buffer.item())
         elif orig_type is np.ndarray:
+            
+            
+            # import os
+            # print('PARALLEL_E.PY, rank =', int(os.environ['RANK']), 'world size =', int(os.environ['WORLD_SIZE']) )
+            # dist.barrier()
+            
             buffer = buffer.cpu().numpy()
+            
+            # if int(os.environ['RANK']) == 0:
+            #     print('A =', int(os.environ['RANK']))
+                
+                
         return buffer
 
+
+
+        
+        
     def init_process_group(self, backend: str = "nccl") -> None:
         if dist.is_initialized():
             return

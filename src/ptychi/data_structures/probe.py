@@ -77,21 +77,40 @@ class Probe(dsbase.ReconstructParameter):
         shifted_probe : Tensor
             Shifted probe.
         """
-        if shifts.ndim == 1:
-            probe_straightened = self.tensor.complex().view(-1, *self.shape[-2:])
-            shifted_probe = ip.fourier_shift(
-                probe_straightened, shifts[None, :].repeat([probe_straightened.shape[0], 1])
-            )
-            shifted_probe = shifted_probe.view(*self.shape)
-        else:
-            n_shifts = shifts.shape[0]
-            n_images_each_probe = self.shape[0] * self.shape[1]
-            probe_straightened = self.tensor.complex().view(n_images_each_probe, *self.shape[-2:])
-            probe_straightened = probe_straightened.repeat(n_shifts, 1, 1)
-            shifts = shifts.repeat_interleave(n_images_each_probe, dim=0)
-            shifted_probe = ip.fourier_shift(probe_straightened, shifts)
-            shifted_probe = shifted_probe.reshape(n_shifts, *self.shape)
-        return shifted_probe
+        # if shifts.ndim == 1:
+        #     probe_straightened = self.tensor.complex().view(-1, *self.shape[-2:])
+        #     shifted_probe = ip.fourier_shift(
+        #         probe_straightened, shifts[None, :].repeat([probe_straightened.shape[0], 1])
+        #     )
+        #     shifted_probe = shifted_probe.view(*self.shape)
+        # else:
+        #     n_shifts = shifts.shape[0]
+        #     n_images_each_probe = self.shape[0] * self.shape[1]
+        #     probe_straightened = self.tensor.complex().view(n_images_each_probe, *self.shape[-2:])
+        #     probe_straightened = probe_straightened.repeat(n_shifts, 1, 1)
+        #     shifts = shifts.repeat_interleave(n_images_each_probe, dim=0)
+        #     shifted_probe = ip.fourier_shift(probe_straightened, shifts)
+        #     shifted_probe = shifted_probe.reshape(n_shifts, *self.shape)
+        # return shifted_probe
+        
+        probe_straightened = self.tensor.complex()[0,...]
+        
+        shifted_probe = ip.fourier_shift(
+            probe_straightened, shifts[None, :].repeat([probe_straightened.shape[0], 1])
+        )
+        
+        current_probe = self.tensor.complex()
+        
+        current_probe[0,...] = shifted_probe
+   
+        return current_probe
+        
+        
+        
+        
+        
+        
+        
 
     @property
     def n_modes(self):
@@ -355,39 +374,49 @@ class Probe(dsbase.ReconstructParameter):
         opr_mode_weights: Union[Tensor, "oprweights.OPRModeWeights"],
         propagator: Optional[WavefieldPropagator] = None,
     ) -> None:
+        
+        
+        
         if self.probe_power <= 0.0:
             return
 
-        if isinstance(opr_mode_weights, oprweights.OPRModeWeights):
-            opr_mode_weights = opr_mode_weights.data
+        # if isinstance(opr_mode_weights, oprweights.OPRModeWeights):
+        #     opr_mode_weights = opr_mode_weights.data
 
-        if propagator is None:
-            propagator = FourierPropagator()
+        # if propagator is None:
+        #     propagator = FourierPropagator()
 
-        # Shape of probe_composed:        (n_modes, h, w)
-        if self.has_multiple_opr_modes:
-            avg_weights = opr_mode_weights.mean(dim=0)
-            probe_composed = self.get_unique_probes(avg_weights, mode_to_apply=0)
-        else:
-            probe_composed = self.get_opr_mode(0)
+        # # Shape of probe_composed:        (n_modes, h, w)
+        # if self.has_multiple_opr_modes:
+        #     avg_weights = opr_mode_weights.mean(dim=0)
+        #     probe_composed = self.get_unique_probes(avg_weights, mode_to_apply=0)
+        # else:
+        #     probe_composed = self.get_opr_mode(0)
 
-        propagated_probe = propagator.propagate_forward(probe_composed)
-        if isinstance(propagator, FourierPropagator):
-            # Cancel the normalization factor so that the power is conserved.
-            if propagator.norm == "backward" or propagator.norm is None:
-                propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) / self.data.size().numel()
-            elif propagator.norm == "forward":
-                propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) * self.data.size().numel()
-            else:
-                propagated_probe_power = torch.sum(propagated_probe.abs() ** 2)
-        else:
-            propagated_probe_power = torch.sum(propagated_probe.abs() ** 2)
+        # propagated_probe = propagator.propagate_forward(probe_composed)
+        # if isinstance(propagator, FourierPropagator):
+        #     # Cancel the normalization factor so that the power is conserved.
+        #     if propagator.norm == "backward" or propagator.norm is None:
+        #         propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) / self.data.size().numel()
+        #     elif propagator.norm == "forward":
+        #         propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) * self.data.size().numel()
+        #     else:
+        #         propagated_probe_power = torch.sum(propagated_probe.abs() ** 2)
+        # else:
+        #     propagated_probe_power = torch.sum(propagated_probe.abs() ** 2)
+            
+        propagated_probe_power = torch.sum( torch.abs(self.data[0,...])**2 )
         power_correction = torch.sqrt(self.probe_power / propagated_probe_power)
 
         self.set_data(self.data * power_correction)
-        object_.set_data(object_.data / power_correction)
+        #object_.set_data(object_.data / power_correction)
 
-        logger.info("Probe and object scaled by {}.".format(power_correction))
+        logger.info("Probe scaled by {}.".format(power_correction))
+        #logger.info("Probe and object scaled by {}.".format(power_correction))
+
+
+
+
 
     def constrain_support(self):
         """
@@ -395,14 +424,57 @@ class Probe(dsbase.ReconstructParameter):
         blurred probe magnitude.
         """
         data = self.data
-        mask = ip.gaussian_filter(data, sigma=3, size=5).abs()
-        thresh = (
-            mask.max(-1, keepdim=True).values.max(-2, keepdim=True).values
-            * self.options.support_constraint.threshold
-        )
-        mask = torch.where(mask > thresh, 1.0, 0.0)
-        mask = ip.gaussian_filter(mask, sigma=2, size=3).abs()
-        data = data * mask
+        
+        
+        data_intensity = torch.sum( torch.abs( data[0,...] )**2, 0 )
+        
+        rows, cols = data_intensity.shape[-2:]
+        center_r, center_c = rows // 2, cols // 2
+        radius_r = ( rows * 0.80 / 2 )
+        radius_c = ( cols * 0.80 / 2 )
+        y, x = np.ogrid[:rows, :cols]
+        dist = ((y - center_r)**2 / radius_r**2) + ((x - center_c)**2 / radius_c**2)
+        fixed_support = torch.tensor( dist <= 1, dtype = torch.float32 )
+        fixed_support = ip.gaussian_filter(fixed_support, sigma=4, size=5).abs()
+        data = data * fixed_support
+            
+        '''
+        import matplotlib.pyplot as plt
+        plt.figure(); plt.imshow(fixed_support.cpu().numpy()); 
+        plt.savefig('/home/beams/ATRIPATH/Desktop/beamtime_092025_9id/fixed_support.png')
+        
+        '''
+        
+        # from torchvision.transforms.functional import gaussian_blur
+        # Xabs = gaussian_blur( torch.abs(data[0,...]), kernel_size=(5, 5), sigma=(4.0, 4.0)) 
+        # data[0,...] = Xabs * torch.exp(1j * torch.angle(data[0,...]))
+                
+        
+        # from torchvision.transforms.functional import gaussian_blur
+        # Xre = gaussian_blur( torch.real(data[0,...]), kernel_size=(5, 5), sigma=(4.0, 4.0)) 
+        # Xim = gaussian_blur( torch.imag(data[0,...]), kernel_size=(5, 5), sigma=(4.0, 4.0))
+        # data[0,...] = Xre + 1j * Xim
+        
+        
+        # mask = ip.gaussian_filter(data, sigma=3, size=5).abs()
+        # thresh = (
+        #     mask.max(-1, keepdim=True).values.max(-2, keepdim=True).values
+        #     * self.options.support_constraint.threshold
+        # )
+        # mask = torch.where(mask > thresh, 1.0, 0.0)
+        # mask = ip.gaussian_filter(mask, sigma=2, size=3).abs()
+        # data = data * mask
+        
+            
+        '''
+        import matplotlib.pyplot as plt
+        plt.figure(); plt.imshow(mask.cpu().numpy()); 
+        plt.savefig('/home/beams/ATRIPATH/Desktop/beamtime_092025_9id/mask_shrinkwrap.png')
+        
+        '''
+        
+        
+        
         self.set_data(data)
 
     def center_probe(self):
@@ -676,24 +748,24 @@ class SynthesisDictLearnProbe( Probe ):
 
         return delta_p_i, optimal_delta_sparse_code
     
-    def get_grad(self) -> torch.Tensor:
-        """Get the gradient of the sparse code weights for the shared probe.
-        This method overrides the method in the base class, which returns
-        the `.grad` attribute of the tensor.
+    # def get_sparse_code_grad(self) -> torch.Tensor:
+    #     """Get the gradient of the sparse code weights for the shared probe.
+    #     This method overrides the method in the base class, which returns
+    #     the `.grad` attribute of the tensor.
 
-        Returns
-        -------
-        Tensor
-            The gradient of the sparse code weights for the shared probe.
-        """
-        return self.sparse_code_probe_shared.grad
+    #     Returns
+    #     -------
+    #     Tensor
+    #         The gradient of the sparse code weights for the shared probe.
+    #     """
+    #     return self.sparse_code_probe_shared.grad
     
-    def set_grad(self, grad: torch.Tensor):
-        """Set the gradient of the sparse code weights for the shared probe.
-        This method overrides the method in the base class, which sets the `.grad`
-        attribute of the tensor.
-        """
-        self.set_gradient_sparse_code_probe_shared(grad)
+    # def set_sparse_code_grad(self, grad: torch.Tensor):
+    #     """Set the gradient of the sparse code weights for the shared probe.
+    #     This method overrides the method in the base class, which sets the `.grad`
+    #     attribute of the tensor.
+    #     """
+    #     self.set_gradient_sparse_code_probe_shared(grad)
 
 
 class DIPProbe(Probe):
