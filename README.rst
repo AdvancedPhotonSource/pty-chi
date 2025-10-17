@@ -129,3 +129,8 @@ Developer's Guide
 
 Please refer to the developer's guide in the `Wiki page <https://github.com/AdvancedPhotonSource/pty-chi/wiki>`_
 for more information on how to contribute to the project.
+
+🛑 **For major changes such as adding a new reconstructor or those involving extensive structural changes to the codebase, 
+please first discuss with the maintainers by creating an issue. Consider creating a new package inheriting Pty-Chi's reconstructors
+and data structures for experimental features and algorithms. See**
+`Developer’s guide: Extending Pty-Chi with external algorithm packages <https://github.com/AdvancedPhotonSource/pty-chi/wiki/Developer%27s-guide:-Extending-Pty%E2%80%90chi-with-external-algorithm-packages>`_.

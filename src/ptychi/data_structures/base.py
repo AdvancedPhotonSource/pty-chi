@@ -1,8 +1,9 @@
 # Copyright © 2025 UChicago Argonne, LLC All right reserved
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
-from typing import Optional, Union, Tuple, Sequence, Literal, TYPE_CHECKING
+from typing import Optional, Union, Tuple, Sequence, Literal, Callable, TYPE_CHECKING
 import logging
+import inspect
 
 import torch
 from torch import Tensor
@@ -332,7 +333,14 @@ class ReconstructParameter(Module):
         logger.debug(f"{self.name} optimization enabled at epoch {epoch}: {enabled}")
         return enabled
     
-    def step_optimizer(self, limit: float = None):
+    def step_optimizer(
+        self, 
+        limit: float = None,
+        forward_model: "api.forward_models.ForwardModel" = None,
+        forward_model_args: list[Tensor] = None,
+        target_data: Tensor = None,
+        loss_function: Callable = None,
+    ):
         """Step the optimizer with gradient filled in. This function
         can optionally impose a limit on the magnitude of the update.
 
@@ -340,14 +348,60 @@ class ReconstructParameter(Module):
         ----------
         limit : float, optional
             The maximum allowed magnitude of the update. Set to None to disable the limit.
+        forward_model : api.forward_models.ForwardModel, optional
+            The forward model used for re-evaluating the loss. Required if the optimizer
+            is a backtracking one that needs a closure function in its step method.
+        forward_model_args : list[Tensor], optional
+            The arguments to pass to the forward model's forward method. Required if 
+            the optimizer is a backtracking one that needs a closure function in its step method.
+        target_data : Tensor, optional
+            The target data to use for the update. Required if the optimizer is a backtracking
+            one that needs a closure function in its step method.
+        loss_function : Callable, optional
+            The loss function to use for the update. Required if the optimizer is a backtracking
+            one that needs a closure function in its step method.
         """
+        closure = None
+        
+        # Check if the optimizer's step method requires a closure function.
+        requires_closure = False
+        p = inspect.signature(self.optimizer.step).parameters.get("closure", None)
+        if p is not None and p.default is inspect._empty:
+            requires_closure = True
+        
+        if requires_closure:
+            if (
+                forward_model is not None 
+                and forward_model_args is not None 
+                and loss_function is not None
+                and target_data is not None
+            ):
+                def closure():
+                    self.optimizer.zero_grad()
+                    output_data = forward_model(*forward_model_args)
+                    loss = loss_function(output_data, target_data)
+                    loss.backward()
+                    return loss
+            else:
+                if isinstance(self.optimizer, torch.optim.LBFGS):
+                    raise ValueError(
+                        f"{self.optimizer.__class__.__name__} requires a closure function "
+                        f"in its step method, which needs the forward model and loss "
+                        f"function to be provided."
+                    )
+        
         if limit is not None and limit <= 0:
             raise ValueError("`limit` should either be None or a positive number.")
         if limit == torch.inf:
             limit = None
         if limit is not None:
             data0 = self.data
-        self.optimizer.step()
+        
+        if requires_closure:
+            self.optimizer.step(closure)
+        else:
+            self.optimizer.step()
+        
         if limit is not None:
             data = self.data
             dx = data - data0

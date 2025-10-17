@@ -514,7 +514,9 @@ class ObjectOptions(ParameterOptions):
                 raise ValueError(
                     f"smoothness_constraint.alpha = {self.smoothness_constraint.alpha} is out of range [0, 1/8]."
                 )
-
+                
+        if self.optimizer == enums.Optimizers.LBFGS and "Autodiff" not in options.__class__.__name__:
+            raise ValueError("LBFGS optimizer is currently only supported for Autodiff reconstructors.")
 
 @dataclasses.dataclass
 class ProbePowerConstraintOptions(FeatureOptions):
@@ -645,6 +647,8 @@ class ProbeOptions(ParameterOptions):
                 "`ObjectOptions.remove_object_probe_ambiguity` and `ProbeOptions.power_constraint` "
                 "are both enabled, which may lead to unexpected results."
             )
+        if self.optimizer == enums.Optimizers.LBFGS and "Autodiff" not in options.__class__.__name__:
+            raise ValueError("LBFGS optimizer is currently only supported for Autodiff reconstructors.")
 
     def get_non_data_fields(self) -> dict:
         d = super().get_non_data_fields()
@@ -825,6 +829,9 @@ class ProbePositionOptions(ParameterOptions):
                 "magnitude limit, set `update_magnitude_limit` to None or inf."
             )
         self.affine_transform_constraint.check(options)
+        
+        if self.optimizer == enums.Optimizers.LBFGS and "Autodiff" not in options.__class__.__name__:
+            raise ValueError("LBFGS optimizer is currently only supported for Autodiff reconstructors.")
 
 
 @dataclasses.dataclass
@@ -930,6 +937,8 @@ class OPRModeWeightsOptions(ParameterOptions):
                 "You have provided initial OPR weights, but optimizable is set to False. "
                 "Is this intended?"            
             )
+        if self.optimizer == enums.Optimizers.LBFGS and "Autodiff" not in options.__class__.__name__:
+            raise ValueError("LBFGS optimizer is currently only supported for Autodiff reconstructors.")
 
     def get_non_data_fields(self) -> dict:
         d = super().get_non_data_fields()
