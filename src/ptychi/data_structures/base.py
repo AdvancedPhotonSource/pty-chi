@@ -3,6 +3,7 @@
 
 from typing import Optional, Union, Tuple, Sequence, Literal, Callable, TYPE_CHECKING
 import logging
+import inspect
 
 import torch
 from torch import Tensor
@@ -361,24 +362,33 @@ class ReconstructParameter(Module):
             one that needs a closure function in its step method.
         """
         closure = None
-        if (
-            forward_model is not None 
-            and forward_model_args is not None 
-            and loss_function is not None
-            and target_data is not None
-        ):
-            def closure():
-                self.optimizer.zero_grad()
-                output_data = forward_model(*forward_model_args)
-                loss = loss_function(output_data, target_data)
-                loss.backward()
-                return loss
-        else:
-            if isinstance(self.optimizer, torch.optim.LBFGS):
-                raise ValueError(
-                    "LBFGS optimizer requires a closure function in its step method, which needs "
-                    "the forward model and loss function to be provided."
-                )
+        
+        # Check if the optimizer's step method requires a closure function.
+        requires_closure = False
+        p = inspect.signature(self.optimizer.step).parameters.get("closure", None)
+        if p is not None and p.default is inspect._empty:
+            requires_closure = True
+        
+        if requires_closure:
+            if (
+                forward_model is not None 
+                and forward_model_args is not None 
+                and loss_function is not None
+                and target_data is not None
+            ):
+                def closure():
+                    self.optimizer.zero_grad()
+                    output_data = forward_model(*forward_model_args)
+                    loss = loss_function(output_data, target_data)
+                    loss.backward()
+                    return loss
+            else:
+                if isinstance(self.optimizer, torch.optim.LBFGS):
+                    raise ValueError(
+                        f"{self.optimizer.__class__.__name__} requires a closure function "
+                        f"in its step method, which needs the forward model and loss "
+                        f"function to be provided."
+                    )
         
         if limit is not None and limit <= 0:
             raise ValueError("`limit` should either be None or a positive number.")
@@ -387,7 +397,10 @@ class ReconstructParameter(Module):
         if limit is not None:
             data0 = self.data
         
-        self.optimizer.step(closure)
+        if requires_closure:
+            self.optimizer.step(closure)
+        else:
+            self.optimizer.step()
         
         if limit is not None:
             data = self.data

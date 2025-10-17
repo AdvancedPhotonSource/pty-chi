@@ -208,8 +208,8 @@ if __name__ == '__main__':
 
     tester = Test2dPtychoAutodiff()
     tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=True)
-    # tester.test_2d_ptycho_autodiff()
-    # tester.test_2d_ptycho_autodiff_pos_corr()
-    # tester.test_2d_ptycho_autodiff_l1()
-    # tester.test_2d_ptycho_autodiff_opr()
+    tester.test_2d_ptycho_autodiff()
+    tester.test_2d_ptycho_autodiff_pos_corr()
+    tester.test_2d_ptycho_autodiff_l1()
+    tester.test_2d_ptycho_autodiff_opr()
     tester.test_2d_ptycho_autodiff_opr_lbfgs()
