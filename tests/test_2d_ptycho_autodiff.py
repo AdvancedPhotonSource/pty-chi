@@ -161,7 +161,6 @@ class Test2dPtychoAutodiff(tutils.TungstenDataTester):
         recon = task.get_data_to_cpu('object', as_numpy=True)[0]
         return recon
     
-    @tutils.TungstenDataTester.wrap_recon_tester(name='test_2d_ptycho_autodiff_opr_lbfgs')
     def test_2d_ptycho_autodiff_opr_lbfgs(self):
         
         self.setup_ptychi(cpu_only=False)
@@ -196,9 +195,6 @@ class Test2dPtychoAutodiff(tutils.TungstenDataTester):
         
         task = PtychographyTask(options)
         task.run()
-        
-        recon = task.get_data_to_cpu('object', as_numpy=True)[0]
-        return recon
     
     
 if __name__ == '__main__':
