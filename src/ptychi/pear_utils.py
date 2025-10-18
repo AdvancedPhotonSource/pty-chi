@@ -501,12 +501,16 @@ class FileBasedTracker:
             )
             
             # Prepare status data
+            import socket
+            import getpass
             status_data = {
                 'status': 'ongoing',
+                'host_name': socket.gethostname(),
+                'user_name': getpass.getuser(),
                 'scan_id': scan_id,
                 'worker_id': worker_id,
                 'start_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                # No params included as requested
+                
             }
             
             # Write to temporary file
