@@ -84,8 +84,8 @@ class PtychographyTask(Task):
         self.options.check()
 
     def build(self):
-        self.build_random_seed()
         self.build_default_device()
+        self.build_random_seed()
         self.build_default_dtype()
         self.build_logger()
         self.build_data()
@@ -96,10 +96,11 @@ class PtychographyTask(Task):
         self.build_reconstructor()
 
     def build_random_seed(self):
-        if self.reconstructor_options.random_seed is not None:
-            torch.manual_seed(self.reconstructor_options.random_seed)
-            np.random.seed(self.reconstructor_options.random_seed)
-            random.seed(self.reconstructor_options.random_seed)
+        if self.reconstructor_options.random_seed is not None or self.n_ranks > 1:
+            seed = self.reconstructor_options.random_seed or 42
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+            random.seed(seed)
         pmath.set_allow_nondeterministic_algorithms(self.reconstructor_options.allow_nondeterministic_algorithms)
 
     def build_default_device(self):
