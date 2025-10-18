@@ -1947,15 +1947,27 @@ def _load_data_bnp(base_path, scan_num, det_Npixel, cen_x, cen_y):
     index_y_lb, index_y_ub = int(cen_y - det_Npixel // 2), int(cen_y + (det_Npixel + 1) // 2)
 
     N_scan_y, N_scan_x = y_pos.size, x_pos.size
+    pattern = os.path.join(dp_dir, f"bnp_fly{scan_num:04d}_*.h5")
+    file_list = sorted(glob.glob(pattern))
+    if print_mode == 'debug':
+        print(f"Number of diffraction patterns files: {len(file_list)}")
+
+    if len(file_list) < N_scan_y:
+        if print_mode == 'debug':
+            print(f"Only {len(file_list)} diffraction files found, adjusting N_scan_y from {N_scan_y} to {len(file_list)}.")
+        N_scan_y = len(file_list)
+    
     if print_mode == 'debug':
         print(f"N_scan_y={N_scan_y}, N_scan_x={N_scan_x}, N_scan_dp={N_scan_x * N_scan_y}")
 
     dp, scan_posx, scan_posy = [], [], []
 
     for i in range(N_scan_y):
+        dp_file_name =  f"bnp_fly{scan_num:04d}_{i:06d}.h5"
+        fileName = os.path.join(dp_dir, dp_file_name)
         if print_mode == 'debug':
-            print(f"Loading scan line No.{i + 1}...")
-        fileName = os.path.join(dp_dir, f"bnp_fly{scan_num:04d}_{i:06d}.h5")
+            print(f"Loading scan line No.{i + 1} from {dp_file_name}")
+
         with h5py.File(fileName, "r") as h5_data:
             # h5_data = h5py.File(fileName,'r')
             dp_temp = h5_data[filePath][...]
