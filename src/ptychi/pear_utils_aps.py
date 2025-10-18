@@ -1,10 +1,14 @@
-from xdrlib import *
+import sys
 from tkinter import filedialog as tkFileDialog
 import tkinter as Tkinter
-import sys
 import os
 import string
 
+if sys.version_info < (3, 13):
+    from xdrlib import *
+else:
+    from xdrlib3 import *
+	
 class scanDim:
 	def __init__(self):
 		self.rank = 0
