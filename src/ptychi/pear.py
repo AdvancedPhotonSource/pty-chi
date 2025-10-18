@@ -431,27 +431,89 @@ ptycho_recon(run_recon=True, **params)
                         script_file.write(script_content)
                     
                     # Run the script as a subprocess with output streamed in real-time
+                    # Use unbuffered Python to ensure tqdm displays properly
                     process = subprocess.Popen(
-                        [sys.executable, script_path],
+                        [sys.executable, "-u", script_path],  # -u flag for unbuffered output
                         stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
+                        stderr=subprocess.PIPE,
                         text=True,
-                        bufsize=1,  # Line buffered
+                        bufsize=0,  # Unbuffered
                     )
                     
-                    # Stream and print the output in real-time
-                    for line in iter(process.stdout.readline, ''):
-                        #print(line, end='')  # Already has newline
-                        if scan_params['gpu_id'] is not None:
-                            print(f"[S{scan_num:04d}-GPU{scan_params['gpu_id']}]{line}", end='')
-                        else:
-                            print(f"[S{scan_num:04d}-GPU:Auto]{line}", end='')
-
+                    # Collect all output for error reporting
+                    stdout_lines = []
+                    stderr_lines = []
+                    
+                    # Use threading to read both stdout and stderr simultaneously
+                    import threading
+                    import queue
+                    
+                    stdout_queue = queue.Queue()
+                    stderr_queue = queue.Queue()
+                    
+                    def read_stdout():
+                        for line in iter(process.stdout.readline, ''):
+                            stdout_queue.put(line)
+                        stdout_queue.put(None)  # Signal end
+                    
+                    def read_stderr():
+                        for line in iter(process.stderr.readline, ''):
+                            stderr_queue.put(line)
+                        stderr_queue.put(None)  # Signal end
+                    
+                    # Start threads to read stdout and stderr
+                    stdout_thread = threading.Thread(target=read_stdout)
+                    stderr_thread = threading.Thread(target=read_stderr)
+                    stdout_thread.start()
+                    stderr_thread.start()
+                    
+                    # Process output in real-time
+                    stdout_done = False
+                    stderr_done = False
+                    
+                    while not (stdout_done and stderr_done):
+                        # Process stdout
+                        try:
+                            line = stdout_queue.get_nowait()
+                            if line is None:
+                                stdout_done = True
+                            else:
+                                stdout_lines.append(line)
+                                if scan_params['gpu_id'] is not None:
+                                    print(f"[S{scan_num:04d}-GPU{scan_params['gpu_id']}]{line}", end='')
+                                else:
+                                    print(f"[S{scan_num:04d}-GPU:Auto]{line}", end='')
+                        except queue.Empty:
+                            pass
+                        
+                        # Process stderr (tqdm output)
+                        try:
+                            line = stderr_queue.get_nowait()
+                            if line is None:
+                                stderr_done = True
+                            else:
+                                stderr_lines.append(line)
+                                # Print stderr directly to terminal for tqdm
+                                print(line, end='')
+                        except queue.Empty:
+                            pass
+                        
+                        # Small sleep to prevent busy waiting
+                        time.sleep(0.01)
+                    
+                    # Wait for threads to complete
+                    stdout_thread.join()
+                    stderr_thread.join()
+                    
                     # Wait for process to complete and get return code
                     return_code = process.wait()
                     
                     if return_code != 0:
-                        raise subprocess.CalledProcessError(return_code, f"{sys.executable} {script_path}")
+                        # Create a custom exception with full output
+                        full_stdout = ''.join(stdout_lines)
+                        full_stderr = ''.join(stderr_lines)
+                        error_output = f"STDOUT:\n{full_stdout}\nSTDERR:\n{full_stderr}"
+                        raise subprocess.CalledProcessError(return_code, f"{sys.executable} {script_path}", error_output)
                     
                     # If we reached here, reconstruction was successful
                     elapsed_time = time.time() - start_time
@@ -466,11 +528,18 @@ ptycho_recon(run_recon=True, **params)
                     elapsed_time = time.time() - start_time
                     error_message = f"Subprocess failed with exit code {e.returncode}"
                     
-                    print(f"Scan {scan_num} failed after {elapsed_time:.2f} seconds with error: {error_message}")
-                    failed_scans.append((scan_num, error_message))
+                    # Capture the full exception message, including output if any
+                    if hasattr(e, 'output') and e.output:
+                        error_detail = f"{error_message}\n\nFull script output:\n{e.output}"
+                    else:
+                        error_detail = f"{error_message}\nException details:\n{str(e)}"
+                    
+                    print(f"Scan {scan_num} failed after {elapsed_time:.2f} seconds")
+                    print(f"Error details:\n{error_detail}")
+                    failed_scans.append((scan_num, error_detail))
                     
                     # Update status
-                    tracker.complete_recon(scan_num, success=False, error=error_message)
+                    tracker.complete_recon(scan_num, success=False, error=error_detail)
                 finally:
                     # Optionally remove the temporary files when done
                     # Uncomment these lines if you want to clean up after successful runs
