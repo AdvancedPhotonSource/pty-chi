@@ -6,6 +6,7 @@ from types import TracebackType
 import random
 import logging
 import os
+import time
 
 import torch
 import numpy as np
@@ -97,7 +98,12 @@ class PtychographyTask(Task):
 
     def build_random_seed(self):
         if self.reconstructor_options.random_seed is not None or self.n_ranks > 1:
-            seed = self.reconstructor_options.random_seed or 42
+            if self.rank == 0:
+                np.random.seed(int(time.time()))
+                seed = np.random.randint(0, 1000)
+            else:
+                seed = 0
+            seed = self.sync_buffer(seed, source_rank=0)
             torch.manual_seed(seed)
             np.random.seed(seed)
             random.seed(seed)
