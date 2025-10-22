@@ -19,6 +19,7 @@ import json
 import tempfile
 import shutil
 import fcntl
+import gc
 
 from .pear_io_aps import (initialize_recon,
                         save_reconstructions,
@@ -145,33 +146,30 @@ def ptycho_recon(run_recon=True, **params):
 
     # convergence parameters
     # Set batch size based on parameters
+    N_dp = dp.shape[0]
     if params['update_batch_size'] is not None:
-        params['auto_batch_size_estimation'] = False
         options.reconstructor_options.batch_size = params['update_batch_size']
-        params['number_of_batches'] = dp.shape[0] // options.reconstructor_options.batch_size
+        params['number_of_batches'] = N_dp // options.reconstructor_options.batch_size
         if print_mode == 'debug':
             print(f"User-specified batch size: {options.reconstructor_options.batch_size} " 
               f"({params['number_of_batches']} batches for {dp.shape[0]} data points)")
     elif params['number_of_batches'] is not None:
-        params['auto_batch_size_estimation'] = False
         # Calculate batch size from number of batches
-        total_data_points = dp.shape[0]
-        options.reconstructor_options.batch_size = max(1, total_data_points // params['number_of_batches'])
+        options.reconstructor_options.batch_size = max(1, N_dp // params['number_of_batches'])
         if print_mode == 'debug':
             print(f"User-specified batch size: {options.reconstructor_options.batch_size} " 
               f"({params['number_of_batches']} batches for {dp.shape[0]} data points)")
     else:
-        params['auto_batch_size_estimation'] = True
+        #params['auto_batch_size_adjustment'] = True
         # Auto-configure based on batch selection scheme
-        total_data_points = dp.shape[0]
         # Use smaller number of batches for 'compact' scheme
         params['number_of_batches'] = 1 if params['batch_selection_scheme'] == 'compact' else 10
-        options.reconstructor_options.batch_size = max(1, total_data_points // params['number_of_batches'])
+        options.reconstructor_options.batch_size = max(1, N_dp // params['number_of_batches'])
         
         # Log the auto-configuration for transparency
         if print_mode == 'debug':
             print(f"Auto-configured batch size: {options.reconstructor_options.batch_size} " 
-              f"({params['number_of_batches']} batches for {total_data_points} data points)")
+              f"({params['number_of_batches']} batches for {N_dp} data points)")
 
     #options.reconstructor_options.forward_model_options.pad_for_shift = 16
     #options.reconstructor_options.use_low_memory_forward_model = True
@@ -212,95 +210,12 @@ def ptycho_recon(run_recon=True, **params):
     if not run_recon:
         return task, recon_path, params
     
-    try:
-        if params['auto_batch_size_estimation']:
-            # Set up a loop to handle potential out of memory errors
-            max_retries = 10  # Limit the number of retries to prevent infinite loops
-            retry_count = 0
-            
-            while retry_count <= max_retries:
-                try:
-                    # Try to run the reconstruction
-                    for i in range(params['number_of_iterations'] // params['save_freq_iterations']):
-                        task.run(params['save_freq_iterations'])
-                        save_reconstructions(task, recon_path, params['save_freq_iterations']*(i+1), params)
-                    break  # If successful, exit the retry loop
-                    
-                except RuntimeError as e:
-                    error_msg = str(e)
-                    # Check if this is an out of memory error
-                    if "CUDA out of memory" in error_msg or "cudaErrorOutOfMemory" in error_msg:
-                        retry_count += 1
-                        print(f"CUDA out of memory error. Increasing number of batches by 1")
-                        if retry_count > max_retries:
-                            print(f"Failed after {max_retries} attempts. Giving up.")
-                            raise  # Re-raise the exception if we've exceeded max retries
-                        
-                        # Update number of batches for logging
-                        params['number_of_batches'] = params['number_of_batches'] + 1
-                        options.reconstructor_options.batch_size = max(1, total_data_points // params['number_of_batches'])
-                        print(f"CUDA out of memory error. Attempt {retry_count}/{max_retries}: "
-                                f"Increasing to {params['number_of_batches']} batches")
-                        print(f"New batch size: {options.reconstructor_options.batch_size} "
-                                f"({params['number_of_batches']} batches for {dp.shape[0]} data points)")
-                        
-                        # Delete everything in the current recon_path folder
-                        if os.path.exists(recon_path):
-                            print(f"Deleting contents of {recon_path} before retrying...")
-                            try:
-                                # Walk through all files and directories in recon_path
-                                for root, dirs, files in os.walk(recon_path, topdown=False):
-                                    # First remove all files
-                                    for file in files:
-                                        file_path = os.path.join(root, file)
-                                        os.unlink(file_path)
-                                    # Then remove all directories
-                                    for dir in dirs:
-                                        dir_path = os.path.join(root, dir)
-                                        os.rmdir(dir_path)
-                                # Finally remove the main directory
-                                os.rmdir(recon_path)
-                                print(f"Successfully deleted {recon_path}")
-                            except Exception as e:
-                                print(f"Error while deleting {recon_path}: {str(e)}")
+    for i in range(params['number_of_iterations'] // params['save_freq_iterations']):
+        task.run(params['save_freq_iterations'])
+        save_reconstructions(task, recon_path, params['save_freq_iterations']*(i+1), params)
 
-                        # Reinitialize the reconstruction path and task
-                        recon_path = create_reconstruction_path(params, options)
-                        save_initial_conditions(recon_path, params, options)
-                        
-                        # Clear CUDA cache before retrying
-                        torch.cuda.empty_cache()
-                        time.sleep(5)  # Longer delay to ensure memory is freed
-                        
-                        # Create a fresh task with the new options
-                        task = PtychographyTask(options)
-                    else:
-                        # If it's not an out of memory error, re-raise the exception
-                        print(f"Encountered non-memory error: {error_msg}")
-                        raise
-        else: # try recon once with fixed batch size
-            for i in range(params['number_of_iterations'] // params['save_freq_iterations']):
-                task.run(params['save_freq_iterations'])
-                save_reconstructions(task, recon_path, params['save_freq_iterations']*(i+1), params)
-
-        return task, recon_path, params
+    return task, recon_path, params
     
-    finally: # does seem to work
-        # Ensure GPU memory is cleaned up even if an exception occurs
-        torch.cuda.empty_cache()
-        # Release all memory currently held
-        #gc.collect()
-
-        # Reset the CUDA device
-        torch.cuda.reset_peak_memory_stats()
-        torch.cuda.reset_accumulated_memory_stats()
-
-        # If you need a complete reset, you can also:
-        torch.cuda.empty_cache()
-        torch._C._cuda_clearCublasWorkspaces()
-
-        # Allow time for complete cleanup
-        #time.sleep(5)
 
 def ptycho_batch_recon(base_params):
     """
@@ -330,7 +245,9 @@ def ptycho_batch_recon(base_params):
     reset_scan_list = base_params.get('reset_scan_list', False)
     wait_time_seconds = base_params.get('wait_time_seconds', 5)
     num_repeats = base_params.get('num_repeats', np.inf)
-
+    auto_batch_size_adjustment = base_params.get('auto_batch_size_adjustment', False)
+    print(f"Auto batch size adjustment: {auto_batch_size_adjustment}")
+    
     log_dir = os.path.join(base_params['data_directory'], 'ptychi_recons', 
                           base_params['recon_parent_dir'], 
                           f'recon_logs_{log_dir_suffix}' if log_dir_suffix else 'recon_logs')
@@ -372,6 +289,15 @@ def ptycho_batch_recon(base_params):
                 print(f"Scan {scan_num} already ongoing, skipping reconstruction")
                 ongoing_scans.append(scan_num)
                 continue
+            
+            # Check if previous reconstruction failed due to OOM
+            prev_status = tracker.get_full_status(scan_num)
+            if auto_batch_size_adjustment and prev_status and prev_status.get('status') == 'failed' and prev_status.get('error_type') == 'out_of_memory':
+                # Previous attempt failed due to OOM, increase batch count
+                if 'number_of_batches' in prev_status and prev_status['number_of_batches'] is not None:
+                    scan_params['number_of_batches'] = prev_status['number_of_batches'] + 1
+                    print(f"\033[93mScan {scan_num} previously failed with CUDA OOM. "
+                          f"Increasing the number of batches from {prev_status['number_of_batches']} to {scan_params['number_of_batches']}\033[0m")
             
             # Try to start reconstruction
             if not tracker.start_recon(scan_num, worker_id, scan_params):
@@ -520,8 +446,12 @@ ptycho_recon(run_recon=True, **params)
                     print(f"Scan {scan_num} completed successfully in {elapsed_time:.2f} seconds")
                     successful_scans.append(scan_num)
                     
-                    # Update status
-                    tracker.complete_recon(scan_num, success=True)
+                    # Update status with batch information
+                    tracker.complete_recon(
+                        scan_num, 
+                        success=True,
+                        number_of_batches=scan_params.get('number_of_batches')
+                    )
                     
                 except subprocess.CalledProcessError as e:
                     # Handle subprocess failure
@@ -538,8 +468,13 @@ ptycho_recon(run_recon=True, **params)
                     print(f"Error details:\n{error_detail}")
                     failed_scans.append((scan_num, error_detail))
                     
-                    # Update status
-                    tracker.complete_recon(scan_num, success=False, error=error_detail)
+                    # Update status with batch information
+                    tracker.complete_recon(
+                        scan_num, 
+                        success=False, 
+                        error=error_detail,
+                        number_of_batches=scan_params.get('number_of_batches')
+                    )
                 finally:
                     # Optionally remove the temporary files when done
                     # Uncomment these lines if you want to clean up after successful runs
@@ -562,8 +497,13 @@ ptycho_recon(run_recon=True, **params)
                 print(f"Scan {scan_num} failed after {elapsed_time:.2f} seconds with error: {str(e)}")
                 failed_scans.append((scan_num, str(e)))
                 
-                # Update status
-                tracker.complete_recon(scan_num, success=False, error=str(e))
+                # Update status with batch information
+                tracker.complete_recon(
+                    scan_num, 
+                    success=False, 
+                    error=str(e),
+                    number_of_batches=scan_params.get('number_of_batches')
+                )
         
         # Print summary of processing
         #print(f"Successfully processed scans: {successful_scans}")

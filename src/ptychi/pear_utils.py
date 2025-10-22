@@ -462,6 +462,19 @@ class FileBasedTracker:
         except (json.JSONDecodeError, FileNotFoundError):
             return None
     
+    def get_full_status(self, scan_id):
+        """Get the full status data of a scan including batch info and error type."""
+        status_file = self._get_status_file(scan_id)
+
+        if not os.path.exists(status_file):
+            return None
+        
+        try:
+            with open(status_file, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
+            return None
+    
     def start_recon(self, scan_id, worker_id, params):
         """
         Try to start a reconstruction for a scan.
@@ -529,8 +542,8 @@ class FileBasedTracker:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             lock_fd.close()
     
-    def complete_recon(self, scan_id, success=True, error=None):
-        """Mark a reconstruction as completed or failed."""
+    def complete_recon(self, scan_id, success=True, error=None, number_of_batches=None):
+        """Mark a reconstruction as completed or failed, optionally storing batch information."""
         lock_file = self._get_lock_file(scan_id)
         status_file = self._get_status_file(scan_id)
         
@@ -555,6 +568,25 @@ class FileBasedTracker:
                 status_data['end_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 if error:
                     status_data['error'] = str(error)
+                    # Classify error type
+                    error_str = str(error).lower()
+                    if any(keyword in error_str for keyword in 
+                          ['cuda out of memory', 'outofmemory', 'cudaerroroutofmemory']):
+                        status_data['error_type'] = 'out_of_memory'
+                    elif any(keyword in error_str for keyword in 
+                            ['cuda error', 'cudnn', 'cublas', 'device']):
+                        status_data['error_type'] = 'gpu_error'
+                    elif any(keyword in error_str for keyword in 
+                            ['filenotfounderror', 'file not found', 'no such file']):
+                        status_data['error_type'] = 'file_not_found'
+                    elif 'timeout' in error_str:
+                        status_data['error_type'] = 'timeout'
+                    else:
+                        status_data['error_type'] = 'unknown'
+                
+                # Store batch information if provided
+                if number_of_batches is not None:
+                    status_data['number_of_batches'] = number_of_batches
                 
                 # Write to temporary file first
                 temp_file = tempfile.NamedTemporaryFile(
@@ -563,22 +595,8 @@ class FileBasedTracker:
                     delete=False
                 )
                 
-                # Write status data line by line
-                temp_file.write("{\n")
-                for i, (key, value) in enumerate(status_data.items()):
-                    if isinstance(value, str):
-                        temp_file.write(f'    "{key}": "{value}"')
-                    else:
-                        # Convert the value to JSON format
-                        json_value = json.dumps(value)
-                        # Write the key-value pair with proper formatting
-                        temp_file.write(f'    "{key}": {json_value}')
-                    
-                    if i < len(status_data) - 1:
-                        temp_file.write(",\n")
-                    else:
-                        temp_file.write("\n")
-                temp_file.write("}\n")
+                # Write status data using json.dump for proper formatting and escaping
+                json.dump(status_data, temp_file, indent=4)
                 temp_file.flush()
                 os.fsync(temp_file.fileno())
                 temp_file.close()
