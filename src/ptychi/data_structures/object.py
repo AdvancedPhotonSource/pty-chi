@@ -604,7 +604,7 @@ class PlanarObject(Object):
             Whether to use the sum of all probe modes' intensities for the illumination map.
         """
         if self.preconditioner is None:
-            self.initialize_preconditioner(probe, probe_positions, patterns)
+            self.initialize_preconditioner(probe, probe_positions, patterns, use_all_modes=use_all_modes)
         illum_map = self.calculate_illumination_map(probe, probe_positions, use_all_modes=use_all_modes)
         self.preconditioner = (self.preconditioner + illum_map) / 2
     
@@ -613,6 +613,7 @@ class PlanarObject(Object):
         probe: "ds.probe.Probe", 
         probe_positions: "ds.probe_positions.ProbePositions",
         patterns: Tensor,
+        use_all_modes: bool = False,
     ) -> None:
         """Initialize the preconditioner. This function reproduces the behavior
         of PtychoShelves in `init_solver` and `load_from_p`: the probe is first
@@ -627,12 +628,14 @@ class PlanarObject(Object):
             The positions of the probe.
         patterns : ds.patterns.Patterns
             A (n_scan_points, h, w) tensor giving the diffraction patterns.
+        use_all_modes : bool, optional
+            Whether to use the sum of all probe modes' intensities for the illumination map.
         """
         probe_data = probe.data
         probe_renormalization_factor = get_probe_renormalization_factor(patterns)
         probe_data = probe_data / (math.sqrt(probe.shape[-1] * probe.shape[-2]) * 2 * probe_renormalization_factor)
         probe_temp = ds.probe.Probe(data=probe_data, options=copy.deepcopy(probe.options))
-        self.preconditioner = self.calculate_illumination_map(probe_temp, probe_positions, use_all_modes=False)
+        self.preconditioner = self.calculate_illumination_map(probe_temp, probe_positions, use_all_modes=use_all_modes)
 
 
 class DIPObject(Object):
