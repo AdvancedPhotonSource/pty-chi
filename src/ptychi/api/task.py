@@ -97,13 +97,15 @@ class PtychographyTask(Task):
         self.build_reconstructor()
 
     def build_random_seed(self):
-        if self.reconstructor_options.random_seed is not None or self.n_ranks > 1:
+        seed = self.reconstructor_options.random_seed
+        if seed is None and self.n_ranks > 1:
             if self.rank == 0:
                 np.random.seed(int(time.time()))
                 seed = np.random.randint(0, 1000)
             else:
                 seed = 0
             seed = self.sync_buffer(seed, source_rank=0)
+        if seed is not None:
             torch.manual_seed(seed)
             np.random.seed(seed)
             random.seed(seed)
