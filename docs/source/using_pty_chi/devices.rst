@@ -2,8 +2,8 @@ Devices
 =======
 
 Pty-Chi supports GPU acceleration through PyTorch's native CUDA support. At this moment,
-multi-GPU support is only available for the ``AutodiffPtychography`` engine. Other engines
-support at most 1 GPU. 
+multi-GPU support is only available for the ``AutodiffPtychographyReconstructor`` 
+and ``LSQMLReconstructor`` engines . Other engines support only 1 GPU. 
 
 On a computer with multiple GPUs, you can set the device to use by setting the ``CUDA_VISIBLE_DEVICES``
 environment variable. For example, to use the first GPU, you can run::
