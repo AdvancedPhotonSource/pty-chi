@@ -134,3 +134,19 @@ for more information on how to contribute to the project.
 please first discuss with the maintainers by creating an issue. Consider creating a new package inheriting Pty-Chi's reconstructors
 and data structures for experimental features and algorithms. See**
 `Developer’s guide: Extending Pty-Chi with external algorithm packages <https://github.com/AdvancedPhotonSource/pty-chi/wiki/Developer%27s-guide:-Extending-Pty%E2%80%90chi-with-external-algorithm-packages>`_.
+
+=================
+Citation
+=================
+
+If Pty-Chi is useful for your research, please consider citing the following paper::
+
+    @misc{ptychi_2025_arxiv,
+        title = {Pty-Chi: A PyTorch-based modern ptychographic data analysis package}, 
+        author = {Ming Du and Hanna Ruth and Steven Henke and Yi Jiang and Viktor Nikitin and Ashish Tripathi and Junjing Deng and Jeffrey Klug and Peco Myint and Tao Zhou and Nicholas Schwarz and Mathew Cherukara and Alec Sandy and Stefan Vogt},
+        year = {2025},
+        eprint = {2510.20929},
+        archivePrefix = {arXiv},
+        primaryClass = {physics.optics},
+        url = {https://arxiv.org/abs/2510.20929}, 
+    }
