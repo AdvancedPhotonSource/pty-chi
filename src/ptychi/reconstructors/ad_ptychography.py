@@ -145,7 +145,7 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
         self.run_post_differentiation_hooks(input_data, y_true)
         reg_loss = self.apply_regularizers()
         
-        self.step_all_optimizers()
+        self.step_all_optimizers(forward_model_args=input_data, y_true=y_true)
         self.forward_model.zero_grad()
         self.run_post_update_hooks()
         

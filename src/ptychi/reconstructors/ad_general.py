@@ -6,6 +6,7 @@ import logging
 
 import torch
 import torch.distributed as dist
+from torch import Tensor
 from torch.utils.data import Dataset
 
 import ptychi.forward_models as fm
@@ -90,20 +91,30 @@ class AutodiffReconstructor(IterativeReconstructor):
         batch_loss.backward()
         self.run_post_differentiation_hooks(input_data, y_true)
         reg_loss = self.apply_regularizers()
-        self.step_all_optimizers()
+        self.step_all_optimizers(forward_model_args=input_data, y_true=y_true)
         self.forward_model.zero_grad()
         self.run_post_update_hooks()
 
         self.loss_tracker.update_batch_loss(y_pred=y_pred, y_true=y_true, loss=batch_loss.item())
         self.loss_tracker.update_batch_regularization_loss(reg_loss.item())
 
-    def step_all_optimizers(self):
+    def step_all_optimizers(self, forward_model_args: list[Tensor] = None, y_true: Tensor = None):
         for var in self.parameter_group.get_optimizable_parameters():
             if var.optimization_enabled(self.current_epoch):
-                var.step_optimizer()
+                var.step_optimizer(
+                    forward_model=self.forward_model,
+                    forward_model_args=forward_model_args,
+                    target_data=y_true,
+                    loss_function=self.loss_function,
+                )
                 for sub_module in var.optimizable_sub_modules:
                     if sub_module.optimization_enabled(self.current_epoch):
-                        sub_module.step_optimizer()
+                        sub_module.step_optimizer(
+                            forward_model=self.forward_model,
+                            forward_model_args=forward_model_args,
+                            target_data=y_true,
+                            loss_function=self.loss_function,
+                        )
 
     def get_forward_model(self) -> "fm.ForwardModel":
         if isinstance(self.forward_model, torch.nn.parallel.DistributedDataParallel):
