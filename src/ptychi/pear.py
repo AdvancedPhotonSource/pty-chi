@@ -147,28 +147,32 @@ def ptycho_recon(run_recon=True, **params):
     # convergence parameters
     # Set batch size based on parameters
     N_dp = dp.shape[0]
+    params['number_of_diffraction_patterns'] = N_dp
     if params['update_batch_size'] is not None:
         options.reconstructor_options.batch_size = params['update_batch_size']
         params['number_of_batches'] = N_dp // options.reconstructor_options.batch_size
         if print_mode == 'debug':
-            print(f"User-specified batch size: {options.reconstructor_options.batch_size} " 
-              f"({params['number_of_batches']} batches for {dp.shape[0]} data points)")
+            print(f"User-specified batch size: {params['update_batch_size']} " 
+              f"({params['number_of_batches']} batches for {N_dp} data points)")
     elif params['number_of_batches'] is not None:
         # Calculate batch size from number of batches
-        options.reconstructor_options.batch_size = max(1, N_dp // params['number_of_batches'])
+        params['update_batch_size'] = max(1, N_dp // params['number_of_batches'])
+        options.reconstructor_options.batch_size = params['update_batch_size']
+       
         if print_mode == 'debug':
-            print(f"User-specified batch size: {options.reconstructor_options.batch_size} " 
-              f"({params['number_of_batches']} batches for {dp.shape[0]} data points)")
+            print(f"User-specified batch size: {params['update_batch_size']} " 
+              f"({params['number_of_batches']} batches for {N_dp} data points)")
     else:
         #params['auto_batch_size_adjustment'] = True
         # Auto-configure based on batch selection scheme
         # Use smaller number of batches for 'compact' scheme
         params['number_of_batches'] = 1 if params['batch_selection_scheme'] == 'compact' else 10
-        options.reconstructor_options.batch_size = max(1, N_dp // params['number_of_batches'])
+        params['update_batch_size'] = max(1, N_dp // params['number_of_batches'])
+        options.reconstructor_options.batch_size = params['update_batch_size']
         
         # Log the auto-configuration for transparency
         if print_mode == 'debug':
-            print(f"Auto-configured batch size: {options.reconstructor_options.batch_size} " 
+            print(f"Auto-configured batch size: {params['update_batch_size']} " 
               f"({params['number_of_batches']} batches for {N_dp} data points)")
 
     #options.reconstructor_options.forward_model_options.pad_for_shift = 16
@@ -246,7 +250,6 @@ def ptycho_batch_recon(base_params):
     wait_time_seconds = base_params.get('wait_time_seconds', 5)
     num_repeats = base_params.get('num_repeats', np.inf)
     auto_batch_size_adjustment = base_params.get('auto_batch_size_adjustment', False)
-    print(f"Auto batch size adjustment: {auto_batch_size_adjustment}")
     
     log_dir = os.path.join(base_params['data_directory'], 'ptychi_recons', 
                           base_params['recon_parent_dir'], 
@@ -292,13 +295,32 @@ def ptycho_batch_recon(base_params):
             
             # Check if previous reconstruction failed due to OOM
             prev_status = tracker.get_full_status(scan_num)
-            if auto_batch_size_adjustment and prev_status and prev_status.get('status') == 'failed' and prev_status.get('error_type') == 'out_of_memory':
+
+            if (
+                auto_batch_size_adjustment
+                and prev_status
+                and prev_status.get('status') == 'failed'
+                and prev_status.get('error_type') == 'out_of_memory'
+            ):
                 # Previous attempt failed due to OOM, increase batch count
-                if 'number_of_batches' in prev_status and prev_status['number_of_batches'] is not None:
-                    scan_params['number_of_batches'] = prev_status['number_of_batches'] + 1
-                    print(f"\033[93mScan {scan_num} previously failed with CUDA OOM. "
-                          f"Increasing the number of batches from {prev_status['number_of_batches']} to {scan_params['number_of_batches']}\033[0m")
-            
+                prev_num_batches = prev_status.get('number_of_batches')
+                prev_batch_size = prev_status.get('number_of_batches')
+                curr_num_batches = scan_params.get('number_of_batches')
+                if (
+                    prev_num_batches is not None
+                    and curr_num_batches is not None
+                    and prev_num_batches >= curr_num_batches
+                ):
+                    new_batches = prev_num_batches + 1
+                    #TODO: find a good way to get number of diffraction patterns or batch size from previous reconstruction
+                    #while (Ndp // new_batches) >= (Ndp // prev_num_batches):
+                    #new_batches += 1
+                    scan_params['number_of_batches'] = new_batches
+                    print(
+                        f"\033[93mScan {scan_num} previously failed with CUDA OOM. "
+                        f"Increasing the number of batches from {prev_num_batches} to {scan_params['number_of_batches']}\033[0m"
+                    )
+
             # Try to start reconstruction
             if not tracker.start_recon(scan_num, worker_id, scan_params):
                 print(f"Could not acquire lock for scan {scan_num}, skipping")
@@ -911,384 +933,6 @@ ptycho_recon(run_recon=True, **params)
         with open(calibration_file, 'w') as f:
             json.dump(calibration_results, f, indent=4)
         print(f"Saved calibration results to: {calibration_file}")
-
-def ptycho_batch_recon2(base_params):
-    """
-    Process multiple ptychography scans in parallel with automatic error handling and status tracking.
-    Now includes GPU availability monitoring and automatic retry for GPU-related failures.
-    
-    Args:
-        base_params: Dictionary of parameters to use as a template for all scans
-            start_scan: First scan number to process
-            end_scan: Last scan number to process (inclusive)
-            log_dir_suffix: Optional suffix for the log directory
-            scan_order: Order to process the scans ('ascending', 'descending', or 'random')
-            exclude_scans: List of scan numbers to exclude from processing
-            overwrite_ongoing: Whether to overwrite scans marked as ongoing
-            max_workers: Maximum number of parallel processes (default: number of available GPUs)
-            gpu_ids: List of GPU IDs to use (default: [0])
-            print_interval: Interval to print the most recent line (default: 5 seconds)
-            max_gpu_retries: Maximum number of retries for GPU-related failures (default: 2)
-            reset_scan_list: Whether to restart from the beginning of the scan list after each reconstruction (default: False)
-    
-    Features:
-        - Dynamic GPU availability checking before starting new tasks
-        - Automatic retry for GPU-related failures (CUDA OOM, device errors, etc.)
-        - Intelligent GPU selection based on current utilization
-        - Proper error handling and cleanup
-    """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    import subprocess
-    import sys
-    import json
-    import time
-    import uuid
-    import torch
-    
-    # Extract parameters with defaults
-    start_scan = base_params.get('start_scan')
-    end_scan = base_params.get('end_scan')
-    log_dir_suffix = base_params.get('log_dir_suffix', '')
-    scan_order = base_params.get('scan_order', 'ascending')
-    exclude_scans = base_params.get('exclude_scans', [])
-    overwrite_ongoing = base_params.get('overwrite_ongoing', False)
-    gpu_ids = base_params.get('gpu_ids', [0])
-    max_workers = base_params.get('max_workers', len(gpu_ids))
-    print_interval = base_params.get('print_interval', 5)
-    max_gpu_retries = base_params.get('max_gpu_retries', 2)
-
-    # Setup log directory
-    log_dir = os.path.join(base_params['data_directory'], 'ptychi_recons', 
-                          base_params['recon_parent_dir'], 
-                          f'recon_logs_{log_dir_suffix}' if log_dir_suffix else 'recon_logs')
-    os.makedirs(log_dir, exist_ok=True)
-    
-    # Create tracker
-    tracker = FileBasedTracker(log_dir, overwrite_ongoing=overwrite_ongoing)
-    
-    # Setup temp directory
-    temp_dir = os.path.join(base_params['data_directory'], 'ptychi_recons', 'temp_files')
-    os.makedirs(temp_dir, exist_ok=True)
-    
-    def run_single_reconstruction(scan_num, gpu_id):
-        """Run a single reconstruction on specified GPU"""
-        worker_id = f"worker_{os.getpid()}_{uuid.uuid4().hex[:8]}"
-        
-        # Create scan-specific parameters
-        scan_params = base_params.copy()
-        scan_params['scan_num'] = scan_num
-        scan_params['gpu_id'] = gpu_id
-        
-        # Check status using tracker
-        status = tracker.get_status(scan_num)
-        if status == 'done':
-            print(f"Scan {scan_num} already completed, skipping reconstruction")
-            return 'success', scan_num, None
-        if status == 'ongoing' and not overwrite_ongoing:
-            print(f"Scan {scan_num} already ongoing, skipping reconstruction")
-            return 'ongoing', scan_num, None
-        
-        # Try to start reconstruction
-        if not tracker.start_recon(scan_num, worker_id, scan_params):
-            print(f"Could not acquire lock for scan {scan_num}, skipping")
-            return 'locked', scan_num, None
-        
-        print(f"\033[91mStarting reconstruction for scan {scan_num} on GPU {gpu_id}\033[0m")
-        start_time = time.time()
-        
-        # Create temp file paths
-        params_path = os.path.join(temp_dir, f"scan_{scan_num:04d}_gpu{gpu_id}_params.json")
-        script_path = os.path.join(temp_dir, f"scan_{scan_num:04d}_gpu{gpu_id}_script.py")
-        
-        try:
-            # Save parameters to JSON
-            with open(params_path, 'w') as params_file:
-                json_compatible_params = {
-                    key: value.tolist() if isinstance(value, np.ndarray) else value 
-                    for key, value in scan_params.items()
-                }
-                json.dump(json_compatible_params, params_file, indent=2)
-            
-            # Create reconstruction script
-            script_content = f"""
-import json
-import sys
-import os
-import numpy as np
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from ptychi.pear import ptycho_recon
-
-with open('{params_path}', 'r') as f:
-    params = json.load(f)
-
-# Convert lists back to NumPy arrays
-for key, value in params.items():
-    if isinstance(value, list) and key in ['scan_positions', 'positions']:
-        params[key] = np.array(value)
-
-ptycho_recon(run_recon=True, **params)
-"""
-            with open(script_path, 'w') as script_file:
-                script_file.write(script_content)
-            
-            # Run reconstruction subprocess
-            process = subprocess.Popen(
-                [sys.executable, script_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Merge stderr into stdout for easier handling
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
-
-            last_print_time = time.time()
-            output_lines = []
-            
-            # Stream output in real-time with GPU identifier using non-blocking approach
-            import select
-            import sys
-            
-            while True:
-                # Check if process is still running
-                if process.poll() is not None:
-                    # Process has finished, read any remaining output
-                    remaining_output = process.stdout.read()
-                    if remaining_output:
-                        output_lines.extend(remaining_output.strip().split('\n'))
-                    break
-                
-                # Use select to check if there's data available to read (Unix-like systems)
-                if hasattr(select, 'select'):
-                    ready, _, _ = select.select([process.stdout], [], [], 0.1)  # 0.1 second timeout
-                    if ready:
-                        line = process.stdout.readline()
-                        if line:
-                            output_lines.append(line.rstrip())
-                else:
-                    # Fallback for Windows or systems without select
-                    try:
-                        line = process.stdout.readline()
-                        if line:
-                            output_lines.append(line.rstrip())
-                    except:
-                        pass
-                
-                # Check if it's time to print output based on print_interval
-                current_time = time.time()
-                if current_time - last_print_time > print_interval:
-                    if output_lines:
-                        # Print the most recent line(s)
-                        recent_lines = output_lines[-3:]  # Show last 3 lines
-                        for line in recent_lines:
-                            if line.strip():  # Only print non-empty lines
-                                print(f"[S{scan_num:04d}-GPU{gpu_id}] {line}")
-                        sys.stdout.flush()
-                    last_print_time = current_time
-                
-                # Small sleep to prevent busy waiting
-                time.sleep(0.1)
-            
-            return_code = process.returncode
-            if return_code != 0:
-                # Print last few lines for debugging
-                if output_lines:
-                    print(f"[S{scan_num:04d}-GPU{gpu_id}] Error - Last output lines:")
-                    for line in output_lines[-5:]:
-                        if line.strip():
-                            print(f"[S{scan_num:04d}-GPU{gpu_id}] {line}")
-                raise subprocess.CalledProcessError(return_code, f"{sys.executable} {script_path}")
-            
-            elapsed_time = time.time() - start_time
-            print(f"Scan {scan_num} completed successfully in {elapsed_time:.2f} seconds")
-            tracker.complete_recon(scan_num, success=True)
-            return 'success', scan_num, None
-            
-        except subprocess.CalledProcessError as e:
-            elapsed_time = time.time() - start_time
-            error_message = e.stderr if hasattr(e, 'stderr') else str(e)
-            print(f"Scan {scan_num} failed after {elapsed_time:.2f} seconds with error: {error_message}")
-            tracker.complete_recon(scan_num, success=False, error=error_message)
-            return 'failed', scan_num, error_message
-        except Exception as e:
-            elapsed_time = time.time() - start_time
-            error_message = str(e)
-            print(f"Scan {scan_num} failed after {elapsed_time:.2f} seconds with error: {error_message}")
-            tracker.complete_recon(scan_num, success=False, error=error_message)
-            return 'failed', scan_num, error_message
-            
-        finally:
-            # Clean up temporary files
-            for path in [params_path, script_path]:
-                if os.path.exists(path):
-                    os.unlink(path)
-            
-            # Ensure GPU memory is cleaned up
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-    
-    # Generate scan list based on order
-    scan_list = generate_scan_list(start_scan, end_scan, scan_order, exclude_scans)
-    
-    # Filter out scans that are already done or ongoing (unless overwrite_ongoing is True)
-    pending_scans = []
-    successful_scans = []
-    ongoing_scans = []
-    
-    for scan_num in scan_list:
-        status = tracker.get_status(scan_num)
-        if status == 'done':
-            print(f"Scan {scan_num} already completed, skipping reconstruction")
-            successful_scans.append(scan_num)
-        elif status == 'ongoing' and not overwrite_ongoing:
-            print(f"Scan {scan_num} already ongoing, skipping reconstruction")
-            ongoing_scans.append(scan_num)
-        else:
-            pending_scans.append(scan_num)
-    
-    if not pending_scans:
-        print("No scans to process")
-        print_summary(successful_scans, [], ongoing_scans, start_scan, end_scan)
-        return successful_scans, [], ongoing_scans
-    
-    print(f"Processing {len(pending_scans)} scans using {max_workers} workers on GPUs: {gpu_ids}")
-    
-    # Process scans with dynamic task submission
-    failed_scans = []
-    retry_counts = {}  # Track retry attempts for each scan
-    max_retries = max_gpu_retries  # Maximum number of retries for GPU-related failures
-    
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit initial batch of tasks (up to max_workers)
-        future_to_info = {}  # Maps future to (scan_num, gpu_id)
-        assigned_gpus = set()  # Track which GPUs are currently assigned to running tasks
-        scan_iterator = iter(pending_scans)
-        
-        # Submit initial tasks
-        for _ in range(min(max_workers, len(pending_scans))):
-            try:
-                scan_num = next(scan_iterator)
-                # Check GPU availability and exclude already assigned ones
-                available_gpu_ids = check_gpu_availability(gpu_ids)
-                # Remove already assigned GPUs from the available list
-                free_gpu_ids = [gpu_id for gpu_id in available_gpu_ids if gpu_id not in assigned_gpus]
-                
-                # If no free GPUs available, use round-robin assignment from original list
-                if not free_gpu_ids:
-                    gpu_id = gpu_ids[len(future_to_info) % len(gpu_ids)]
-                    print(f"All GPUs busy, using round-robin assignment: GPU {gpu_id}")
-                else:
-                    gpu_id = select_gpu(gpu_list=free_gpu_ids)
-                
-                # Track this GPU as assigned
-                assigned_gpus.add(gpu_id)
-                
-                print(f"Starting scan {scan_num} on GPU {gpu_id} (assigned GPUs: {sorted(assigned_gpus)})")
-                future = executor.submit(run_single_reconstruction, scan_num, gpu_id)
-                future_to_info[future] = (scan_num, gpu_id)
-                time.sleep(1)  # Small delay between submissions
-            except StopIteration:
-                break
-        
-        # Process completed tasks and submit new ones
-        while future_to_info:
-            # Wait for at least one task to complete
-            for future in as_completed(future_to_info):
-                scan_num, gpu_id = future_to_info[future]
-                
-                try:
-                    status, completed_scan_num, error = future.result()
-                    if status == 'success':
-                        successful_scans.append(completed_scan_num)
-                    elif status == 'failed':
-                        # Check if this might be a GPU-related failure
-                        if error and any(gpu_error in str(error).lower() for gpu_error in 
-                                       ['cuda out of memory', 'gpu', 'device', 'cudnn', 'cublas']):
-                            retry_count = retry_counts.get(completed_scan_num, 0)
-                            if retry_count < max_retries:
-                                print(f"GPU-related error detected for scan {completed_scan_num} (retry {retry_count + 1}/{max_retries}). Will retry with different GPU if available.")
-                                retry_counts[completed_scan_num] = retry_count + 1
-                                # Put the scan back in the queue for retry
-                                pending_scans.append(completed_scan_num)
-                                scan_iterator = iter([completed_scan_num] + list(scan_iterator))
-                            else:
-                                print(f"Scan {completed_scan_num} failed after {max_retries} GPU-related retries. Marking as failed.")
-                                failed_scans.append((completed_scan_num, f"GPU error after {max_retries} retries: {error}"))
-                        else:
-                            failed_scans.append((completed_scan_num, error))
-                    elif status == 'ongoing':
-                        ongoing_scans.append(completed_scan_num)
-                    
-                    print(f"GPU {gpu_id} task completed")
-                    
-                except Exception as e:
-                    print(f"Error processing scan {scan_num} on GPU {gpu_id}: {str(e)}")
-                    # Check if this might be a GPU-related failure
-                    if any(gpu_error in str(e).lower() for gpu_error in 
-                          ['cuda out of memory', 'gpu', 'device', 'cudnn', 'cublas']):
-                        retry_count = retry_counts.get(scan_num, 0)
-                        if retry_count < max_retries:
-                            print(f"GPU-related error detected for scan {scan_num} (retry {retry_count + 1}/{max_retries}). Will retry with different GPU if available.")
-                            retry_counts[scan_num] = retry_count + 1
-                            # Put the scan back in the queue for retry
-                            pending_scans.append(scan_num)
-                            scan_iterator = iter([scan_num] + list(scan_iterator))
-                        else:
-                            print(f"Scan {scan_num} failed after {max_retries} GPU-related retries. Marking as failed.")
-                            failed_scans.append((scan_num, f"GPU error after {max_retries} retries: {str(e)}"))
-                    else:
-                        failed_scans.append((scan_num, str(e)))
-                
-                # Remove the completed future and free up the GPU
-                del future_to_info[future]
-                assigned_gpus.discard(gpu_id)  # Free up this GPU for new tasks
-                print(f"GPU {gpu_id} freed up (assigned GPUs: {sorted(assigned_gpus)})")
-                
-                # Submit next task if available
-                try:
-                    next_scan_num = next(scan_iterator)
-                    
-                    # Check GPU availability and exclude already assigned ones
-                    available_gpu_ids = check_gpu_availability(gpu_ids)
-                    # Remove already assigned GPUs from the available list
-                    free_gpu_ids = [gpu_id for gpu_id in available_gpu_ids if gpu_id not in assigned_gpus]
-                    
-                    if not free_gpu_ids:
-                        print("No GPUs currently available with sufficient resources. Waiting before retry...")
-                        time.sleep(10)  # Wait 10 seconds before trying again
-                        available_gpu_ids = check_gpu_availability(gpu_ids)
-                        free_gpu_ids = [gpu_id for gpu_id in available_gpu_ids if gpu_id not in assigned_gpus]
-                        if not free_gpu_ids:
-                            print(f"Still no GPUs available. Putting scan {next_scan_num} back in queue.")
-                            # Put the scan back at the beginning of the iterator
-                            scan_iterator = iter([next_scan_num] + list(scan_iterator))
-                            continue
-                    
-                    available_gpu = select_gpu(gpu_list=free_gpu_ids)
-                    assigned_gpus.add(available_gpu)  # Track this GPU as assigned
-                    
-                    print(f"Starting scan {next_scan_num} on GPU {available_gpu} (assigned GPUs: {sorted(assigned_gpus)})")
-                    new_future = executor.submit(run_single_reconstruction, next_scan_num, available_gpu)
-                    future_to_info[new_future] = (next_scan_num, available_gpu)
-                    time.sleep(1)  # Small delay between submissions
-                except StopIteration:
-                    # No more scans to process
-                    pass
-                
-                # Break out of the for loop since we modified the dictionary
-                break
-    
-    # Print summary
-    print_summary(successful_scans, failed_scans, ongoing_scans, start_scan, end_scan)
-    
-    # Print retry statistics if any retries occurred
-    if retry_counts:
-        print(f"\nGPU retry statistics:")
-        for scan_num, retries in retry_counts.items():
-            print(f"  Scan {scan_num}: {retries} retries")
-    
-    return successful_scans, failed_scans, ongoing_scans
 
 def print_summary(successful_scans, failed_scans, ongoing_scans, start_scan, end_scan):
     """Print a summary of the reconstruction results."""

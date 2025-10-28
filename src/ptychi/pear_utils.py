@@ -523,11 +523,13 @@ class FileBasedTracker:
                 'scan_id': scan_id,
                 'worker_id': worker_id,
                 'start_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                
+                'number_of_batches': params['number_of_batches'],
+                'batch_size': params['update_batch_size'],
             }
             
             # Write to temporary file
-            json.dump(status_data, temp_file)
+            json.dump(status_data, temp_file, indent=4)
+            #json.dump(status_data, temp_file)
             temp_file.flush()
             os.fsync(temp_file.fileno())
             temp_file.close()
