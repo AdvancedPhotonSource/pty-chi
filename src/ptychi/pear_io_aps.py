@@ -784,7 +784,7 @@ def initialize_recon(params):
             h5_pos_path = find_matching_recon(
                 params.get("path_to_processed_hdf5_pos"), params["scan_num"]
             )
-            dp, positions_m = _load_data_hdf5(h5_dp_path, h5_pos_path, dp_Npix)
+            dp, positions_m = _load_data_hdf5(h5_dp_path, h5_pos_path, dp_Npix, params.get("diff_pattern_center_x"), params.get("diff_pattern_center_y"))
         else:
             dp, positions_m = _load_data_raw(
                 instrument,
@@ -1467,7 +1467,7 @@ def normalize_by_bit_depth(arr, bit_depth):
     return norm_arr_in_bit_depth
 
 
-def _load_data_hdf5(h5_dp_path, h5_position_path, dp_Npix):
+def _load_data_hdf5(h5_dp_path, h5_position_path, dp_Npix, cen_x, cen_y):
     # if h5_dp_path == h5_position_path: # assume it's a ptychodus product
     #     print("Loading processed scan positions and diffraction patterns in ptychodus convention.")
     # positions = np.stack([f_meta['probe_position_y_m'][...], f_meta['probe_position_x_m'][...]], axis=1)
@@ -1483,8 +1483,8 @@ def _load_data_hdf5(h5_dp_path, h5_position_path, dp_Npix):
         print(h5_dp_path)
     dp = h5py.File(h5_dp_path, "r")["dp"][...]
     det_xwidth = int(dp_Npix / 2)
-    cen = int(dp.shape[1] / 2)
-    dp = dp[:, cen - det_xwidth : cen + det_xwidth, cen - det_xwidth : cen + det_xwidth]
+    
+    dp = dp[:, cen_y - det_xwidth : cen_y + det_xwidth, cen_x - det_xwidth : cen_x + det_xwidth]
     dp[dp < 0] = 0
 
     if print_mode == 'debug':
