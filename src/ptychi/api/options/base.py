@@ -952,6 +952,11 @@ class ForwardModelOptions(Options):
     
     pad_for_shift: Optional[int] = 0
     """If not None, the image is padded with border values by this amount before shifting."""
+    
+    diffraction_pattern_blur_sigma: Optional[float] = None
+    """If not None, simulated diffraction patterns are blurred with a Gaussian kernel of
+    this sigma. This is useful to mitigate the effect of the detector's point spread function.
+    """
 
 
 @dataclasses.dataclass
