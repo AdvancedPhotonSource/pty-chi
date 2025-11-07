@@ -128,6 +128,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         free_space_propagation_distance_m: Optional[float] = torch.inf,
         pad_for_shift: Optional[int] = 0,
         apply_subpixel_shifts_on_probe: bool = True,
+        diffraction_pattern_blur_sigma: Optional[float] = None,
         low_memory_mode: bool = False,
         *args,
         **kwargs,
@@ -163,6 +164,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
             `self.intermediate_variables["shifted_unique_probes"]`. If False, subpixel sihfts
             are applied on the object patches, and a common probe is used for all positions.
             The choice of the subpixel handling scheme must be consistent with the reconstructor.
+        diffraction_pattern_blur_sigma : float, optional
+            The sigma of the Gaussian blur applied to the simulated diffraction patterns.
         low_memory_mode : bool
             If True, incoherent probe modes are propagated sequentially rather than in parallel
             which reduces the memory usage.
@@ -198,6 +201,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
 
         # Intermediate variables. Only used if retain_intermediate is True.
         self.intermediate_variables = self.PlanarPtychographyIntermediateVariables()
+        
+        self.diffraction_pattern_blur_sigma = diffraction_pattern_blur_sigma
 
         self.check_inputs()
 
@@ -496,6 +501,19 @@ class PlanarPtychographyForwardModel(ForwardModel):
             self.probe.generate()
         elif isinstance(self.probe, ptychi.data_structures.probe.SynthesisDictLearnProbe):
             self.probe.generate()
+            
+    def blur_diffraction_patterns(self, y: Tensor) -> Tensor:
+        """
+        Blur the diffraction patterns.
+        """
+        if self.diffraction_pattern_blur_sigma is None:
+            return y
+        y = ip.gaussian_filter(
+            y, 
+            sigma=self.diffraction_pattern_blur_sigma,
+            size=round(self.diffraction_pattern_blur_sigma * 10) + 1
+        )
+        return y
 
     @timer()
     def forward(self, indices: Tensor, return_object_patches: bool = False) -> Tensor:
@@ -533,6 +551,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         y = y.sum(1)
         
         y = self.conform_to_detector_size(y)
+        y = self.blur_diffraction_patterns(y)
 
         returns = [y]
         if return_object_patches:
@@ -601,6 +620,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
             y = y + psi_far[..., 0, :, :].abs() ** 2
 
         y = self.conform_to_detector_size(y)
+        y = self.blur_diffraction_patterns(y)
 
         # `self.intermediate_variables.shifted_unique_probes` is now a list of `n_modes * n_slices`
         # tensors. We concatenate the modes for each slice so that it becomes a list of `n_slices`
