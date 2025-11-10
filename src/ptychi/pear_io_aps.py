@@ -1344,6 +1344,17 @@ def _prepare_initial_probe(dp, params):
         # probe_temp[probe.shape[0]:,:,:] = probe[0,:,:]
         # probe_temp[-1,:,:] = probe[0,:,:]
         probe = probe_temp
+    
+    probe_shifts = params.get("init_probe_shifts_pix", [0, 0])
+    # Apply initial probe shifts if specified
+    if any(s != 0 for s in probe_shifts):
+        if print_mode == 'debug':
+            print(f"Applying initial probe shifts: {probe_shifts}")
+        # probe_shifts: [shift_y, shift_x]
+        for i in range(probe.shape[0]):
+            probe[i] = scipy.ndimage.shift(
+                probe[i], shift=(probe_shifts[0], probe_shifts[1]), mode="nearest", order=1, prefilter=True
+            )
 
     # probe = probe.transpose(0, 2, 1)
     # TODO: determine zoom factor based on pixel size ratio
