@@ -559,6 +559,9 @@ def create_reconstruction_path(params, options):
     if options.object_options.smoothness_constraint.enabled:
         recon_path += f"_smooth{options.object_options.smoothness_constraint.alpha}"
 
+    if options.reconstructor_options.forward_model_options.diffraction_pattern_blur_sigma:
+        recon_path += f"_dpBlur{options.reconstructor_options.forward_model_options.diffraction_pattern_blur_sigma}"
+
     # Check if any diffraction pattern transformations are enabled
     dp_transforms = {
         "up_down": params.get("flip_diffraction_patterns_up_down", False),

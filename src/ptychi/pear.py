@@ -206,6 +206,8 @@ def ptycho_recon(run_recon=True, **params):
 
     options.reconstructor_options.allow_nondeterministic_algorithms = True # a bit faster
 
+    options.reconstructor_options.forward_model_options.diffraction_pattern_blur_sigma = params.get('diffraction_pattern_blur', None)
+
     recon_path = create_reconstruction_path(params, options)
     save_initial_conditions(recon_path, params, options)
 
