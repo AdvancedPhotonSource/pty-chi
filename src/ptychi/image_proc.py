@@ -1413,12 +1413,14 @@ def generate_vignette_mask(
     shape: tuple[int, int], 
     margin: int = 20, 
     sigma: float = 1.0, 
-    method: Literal["gaussian", "linear"] = "gaussian"
+    method: Literal["gaussian", "linear"] = "gaussian",
+    device: Optional[torch.device] = None,
 ):
     """
     Generate a vignette mask for an image of shape `shape`.
     """
-    mask = torch.ones(shape, device=torch.get_default_device())
+    device = device or torch.get_default_device()
+    mask = torch.ones(shape, device=device)
     mask = vignette(mask, margin, sigma, method=method)
     return mask
 
@@ -1469,7 +1471,7 @@ def vignette(
             mask = torch.zeros(mask_shape, device=img.device)
             mask_slicer = [slice(None)] * i_dim + [slice(margin, None)]
             mask[*mask_slicer] = 1.0
-            gauss_win = torch.signal.windows.gaussian(margin // 2, std=sigma)
+            gauss_win = torch.signal.windows.gaussian(margin // 2, std=sigma, device=img.device)
             gauss_win = gauss_win / torch.sum(gauss_win)
             mask = convolve1d(mask, gauss_win, dim=i_dim, padding="same")
             mask_final_slicer = [slice(None)] * i_dim + [slice(len(gauss_win), len(gauss_win) + margin)]
