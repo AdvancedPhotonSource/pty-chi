@@ -952,6 +952,8 @@ def integrate_image_2d_fourier(grad_y: Tensor, grad_x: Tensor) -> Tensor:
     shape = grad_y.shape
     f = pmath.fft2_precise(grad_x + 1j * grad_y)
     y, x = torch.fft.fftfreq(shape[0]), torch.fft.fftfreq(shape[1])
+    y = y.to(grad_y.device)
+    x = x.to(grad_y.device)
 
     # In PtychoShelves' get_img_int_2D.m, they set the numerator of r to be
     # exp(2j * pi * (x + y[:, None])) to shift it by 1 pixel. We should NOT
