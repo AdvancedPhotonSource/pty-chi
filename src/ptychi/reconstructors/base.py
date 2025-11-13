@@ -673,6 +673,10 @@ class AnalyticalIterativePtychographyReconstructor(
             if object_.options.total_variation.is_enabled_on_this_epoch(self.current_epoch):
                 object_.constrain_total_variation()
 
+            # Apply custom regularization proposed by LLM.
+            if object_.options.regularization_llm.is_enabled_on_this_epoch(self.current_epoch):
+                object_.regularize_llm()
+       
     def run_pre_run_hooks(self) -> None:
         self.prepare_data()
 

@@ -276,6 +276,18 @@ class ObjectTotalVariationOptions(FeatureOptions):
 
 
 @dataclasses.dataclass
+class ObjectRegularizationLLMOptions(FeatureOptions):
+    """Settings for custom regularization of the object."""
+
+    enabled: bool = False
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+
+    weight: float = 0
+    """The weight of the regularization constraint. Disabled if equal or less than 0."""
+
+
+@dataclasses.dataclass
 class RemoveGridArtifactsOptions(FeatureOptions):
     """Settings for grid artifact removal in the object's phase, applied at the end of an epoch"""
 
@@ -378,6 +390,10 @@ class ObjectOptions(ParameterOptions):
 
     total_variation: ObjectTotalVariationOptions = field(
         default_factory=ObjectTotalVariationOptions
+    )
+
+    regularization_llm: ObjectRegularizationLLMOptions = field(
+        default_factory=ObjectRegularizationLLMOptions
     )
 
     remove_grid_artifacts: RemoveGridArtifactsOptions = field(

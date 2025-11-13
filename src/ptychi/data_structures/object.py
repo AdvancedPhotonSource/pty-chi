@@ -637,6 +637,13 @@ class PlanarObject(Object):
         probe_temp = ds.probe.Probe(data=probe_data, options=copy.deepcopy(probe.options))
         self.preconditioner = self.calculate_illumination_map(probe_temp, probe_positions, use_all_modes=use_all_modes)
 
+    @timer()
+    def regularize_llm(self) -> None:
+        """
+        Regularize the object using methods proposed by LLM.
+        """
+        print("Regularizing object using LLM...")
+        return
 
 class DIPObject(Object):
     
