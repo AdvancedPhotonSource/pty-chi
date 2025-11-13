@@ -247,7 +247,7 @@ class PtychographyTask(Task):
         self.reconstructor = reconstructor_class(**reconstructor_kwargs)
         self.reconstructor.build()
 
-    def run(self, n_epochs: int = None):
+    def run(self, n_epochs: int = None, reset_timer_globals: bool = True):
         """
         Run reconstruction either for `n_epochs` (if given), or for the number of epochs given
         in the options. The internal states of the Task object persists when this function
@@ -258,10 +258,14 @@ class PtychographyTask(Task):
         n_epochs : int, optional
             The number of epochs to run. If None, use the number of epochs specified in the
             option object.
+        reset_timer_globals : bool, optional
+            When True (default) the global timing accumulators are cleared before the run. Set to
+            False to continue accumulating timing data across successive calls.
         """
         if movies.MOVIES_INSTALLED and self.reconstructor.current_epoch == 0:
             movies.api.reset_movie_builders()
-        timer_utils.clear_timer_globals()
+        if reset_timer_globals:
+            timer_utils.clear_timer_globals()
         self.reconstructor.run(n_epochs=n_epochs)
 
     def get_data(
