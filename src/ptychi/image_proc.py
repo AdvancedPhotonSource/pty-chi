@@ -803,6 +803,8 @@ def fourier_gradient(image: Tensor) -> Tuple[Tensor, Tensor]:
         The y and x gradients.
     """
     u, v = torch.fft.fftfreq(image.shape[-2]), torch.fft.fftfreq(image.shape[-1])
+    u = u.to(image.device)
+    v = v.to(image.device)
     u, v = torch.meshgrid(u, v, indexing="ij")
     grad_y = torch.fft.ifft(torch.fft.fft(image, dim=-2) * (2j * torch.pi) * u, dim=-2)
     grad_x = torch.fft.ifft(torch.fft.fft(image, dim=-1) * (2j * torch.pi) * v, dim=-1)
