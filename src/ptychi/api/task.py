@@ -156,12 +156,23 @@ class PtychographyTask(Task):
                 "It seems that you are reconstructing near-field data with FFT-shifted diffraction data. "
                 "Is this intended? If not, set `data_options.fft_shift=False`."
             )
+            
+        save_on_device = self.data_options.save_data_on_device
+        if self.n_ranks > 1:
+            if save_on_device:
+                logging.warning(
+                    "Data must be saved on CPU in multi-processing mode "
+                    "but `data_options.save_data_on_device` is set to `True`. "
+                    "The current setting will be ignored."
+                )
+            save_on_device = False
+
         self.dataset = PtychographyDataset(
             self.data_options.data, 
             wavelength_m=self.data_options.wavelength_m,
             free_space_propagation_distance_m=self.data_options.free_space_propagation_distance_m,
             fft_shift=self.data_options.fft_shift,
-            save_data_on_device=self.data_options.save_data_on_device,
+            save_data_on_device=save_on_device,
             valid_pixel_mask=self.data_options.valid_pixel_mask
         )
 
