@@ -1303,7 +1303,16 @@ class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
                 ["alpha_object_all_pos_all_slices", "alpha_probe_all_pos"], indices=full_indices
             )
             # Sync gradients.
-            self.parameter_group.synchronize_optimizable_parameter_gradients(op=dist.ReduceOp.AVG)
+            self.parameter_group.synchronize_optimizable_parameter_gradients(
+                op=dist.ReduceOp.AVG,
+                names_to_exclude=["object"]
+            )
+            if self.options.batching_mode != enums.BatchingModes.COMPACT:
+                # Object gradient should always be summed because it is not batch-averaged.
+                self.parameter_group.synchronize_optimizable_parameter_gradients(
+                    op=dist.ReduceOp.SUM,
+                    names_to_include=["object"]
+                )
             
             self.apply_reconstruction_parameter_updates(indices)
 
@@ -1311,5 +1320,17 @@ class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
         self.loss_tracker.synchronize_accumulated_losses()
         
     def run_post_epoch_hooks(self) -> None:
+        if self.current_epoch == 0 and self.options.rescale_probe_intensity_in_first_epoch:
+            super().run_post_epoch_hooks()
+            return
+        
+        # Sync accumulated object gradients if batching mode is compact.
+        if self.options.batching_mode == enums.BatchingModes.COMPACT:
+            self.parameter_group.synchronize_optimizable_parameter_gradients(
+                op=dist.ReduceOp.SUM,
+                names_to_include=["object"]
+            )
         super().run_post_epoch_hooks()
-        self.parameter_group.synchronize_optimizable_parameter_data(source_rank=0)
+        self.parameter_group.synchronize_optimizable_parameter_data(
+            source_rank=0, 
+        )
