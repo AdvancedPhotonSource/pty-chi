@@ -1,6 +1,7 @@
 # Copyright © 2025 UChicago Argonne, LLC All right reserved
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
+from typing import Optional
 import dataclasses
 
 import torch.distributed as dist
@@ -26,13 +27,26 @@ class ParameterGroup(MultiprocessMixin):
         return ovs
     
     def synchronize_optimizable_parameter_gradients(
-        self, op: dist.ReduceOp = dist.ReduceOp.SUM
+        self, 
+        op: dist.ReduceOp = dist.ReduceOp.SUM,
+        names_to_exclude: Optional[list[str]] = None,
+        names_to_include: Optional[list[str]] = None
     ) -> None:
         """Synchronize the gradients stored in the `grad` attribute
         of the optimizable parameters across ranks in a multi-process
         environment.
         """
+        if names_to_exclude is not None and names_to_include is not None:
+            raise ValueError("Cannot specify both `names_to_exclude` and `names_to_include`.")
+
+        if names_to_exclude is None:
+            names_to_exclude = []
+        if names_to_include is None:
+            names_to_include = [param.name for param in self.get_optimizable_parameters()]
+
         for param in self.get_optimizable_parameters():
+            if param.name in names_to_exclude or param.name not in names_to_include:
+                continue
             g = param.get_grad()
             if g is not None:
                 self.sync_buffer(g, op=op)
@@ -40,7 +54,7 @@ class ParameterGroup(MultiprocessMixin):
             
     def synchronize_optimizable_parameter_data(
         self, 
-        op: dist.ReduceOp = dist.ReduceOp.SUM,
+        op: dist.ReduceOp = dist.ReduceOp.AVG,
         source_rank: int | None = None
     ) -> None:
         """Synchronize the data stored in the `data` attribute
@@ -51,8 +65,8 @@ class ParameterGroup(MultiprocessMixin):
         ----------
         op : dist.ReduceOp, optional
             The operation to take on the data when they are synchronized across
-            ranks through all-reduce. If broadcasting from a designated rank
-            is intended, use anything for this argument.
+            ranks through all-reduce. If `source_rank` is given, this argument
+            will be ignored.
         source_rank : int | None, optional
             If given, data will be broadcasted from the given rank to all ranks.
             Otherwise, data will be synchronized across all ranks through all-reduce.
