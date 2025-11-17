@@ -49,6 +49,9 @@ def ptycho_recon(run_recon=True, **params):
     import torch
     num_gpus = torch.cuda.device_count()
     
+    if params['batch_selection_scheme'] != 'random' and num_gpus > 1:
+        raise ValueError("Only 'random' batch selection scheme is currently supported for multiple GPUs.")
+
     os.environ['OMP_NUM_THREADS'] = '1'
     torch.set_num_threads(1)
  
@@ -66,6 +69,7 @@ def ptycho_recon(run_recon=True, **params):
     options = api.LSQMLOptions()
     options.data_options.data = dp
     options.data_options.save_data_on_device = True if num_gpus == 1 else False
+    
     options.data_options.wavelength_m = params['wavelength_m']
     #options.data_options.detector_pixel_size_m = det_pixel_size_m # Only useful for near-field ptycho
     

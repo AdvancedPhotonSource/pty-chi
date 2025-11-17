@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 from ptychi.pear_utils import make_fzp_probe, resize_complex_array, find_matching_recon, crop_pad
 import sys
 import torch
+import torch.distributed as dist
 import json
 import shutil
 
@@ -28,6 +29,10 @@ import shutil
 print_mode = 'debug'
 
 def save_reconstructions(task, recon_path, iter, params):
+    # Only save from rank 0 to avoid file locking issues in distributed training
+    if task.rank != 0:
+        return
+    
     if params.get("beam_source", "xray") == "electron":
         pixel_size = task.object_options.pixel_size_m * 1e9
         pixel_unit = "nm"
@@ -583,32 +588,51 @@ def create_reconstruction_path(params, options):
     if params["recon_dir_suffix"]:
         recon_path += f"_{params['recon_dir_suffix']}"
 
-    # Ensure the directory structure exists
-    if options.object_options.slice_spacings_m:  # multislice recon
-        os.makedirs(os.path.join(recon_path, "object_ph_layers"), exist_ok=True)
-        os.makedirs(os.path.join(recon_path, "object_ph_total"), exist_ok=True)
-        os.makedirs(os.path.join(recon_path, "object_mag_layers"), exist_ok=True)
-        os.makedirs(os.path.join(recon_path, "object_mag_total"), exist_ok=True)
-        os.makedirs(os.path.join(recon_path, "probe_propagation_mag"), exist_ok=True)
-    else:
-        os.makedirs(os.path.join(recon_path, "object_ph"), exist_ok=True)
-        os.makedirs(os.path.join(recon_path, "object_mag"), exist_ok=True)
+    # Ensure the directory structure exists (only on rank 0 to avoid race conditions)
+    try:
+        rank = dist.get_rank()
+    except (RuntimeError, ValueError):
+        rank = 0
+    
+    if rank == 0:
+        if options.object_options.slice_spacings_m:  # multislice recon
+            os.makedirs(os.path.join(recon_path, "object_ph_layers"), exist_ok=True)
+            os.makedirs(os.path.join(recon_path, "object_ph_total"), exist_ok=True)
+            os.makedirs(os.path.join(recon_path, "object_mag_layers"), exist_ok=True)
+            os.makedirs(os.path.join(recon_path, "object_mag_total"), exist_ok=True)
+            os.makedirs(os.path.join(recon_path, "probe_propagation_mag"), exist_ok=True)
+        else:
+            os.makedirs(os.path.join(recon_path, "object_ph"), exist_ok=True)
+            os.makedirs(os.path.join(recon_path, "object_mag"), exist_ok=True)
 
-    os.makedirs(os.path.join(recon_path, "probe_mag"), exist_ok=True)
-    if options.opr_mode_weight_options.optimizable and params.get(
-        "save_probe_at_each_scan_position", False
-    ):
-        os.makedirs(os.path.join(recon_path, "probe_mag_opr"), exist_ok=True)
-    os.makedirs(os.path.join(recon_path, "loss"), exist_ok=True)
-    if params["position_correction"]:
-        os.makedirs(os.path.join(recon_path, "positions"), exist_ok=True)
-        os.makedirs(os.path.join(recon_path, "positions_affine"), exist_ok=True)
-    print(f"Reconstruction results will be saved in: {recon_path}")
+        os.makedirs(os.path.join(recon_path, "probe_mag"), exist_ok=True)
+        if options.opr_mode_weight_options.optimizable and params.get(
+            "save_probe_at_each_scan_position", False
+        ):
+            os.makedirs(os.path.join(recon_path, "probe_mag_opr"), exist_ok=True)
+        os.makedirs(os.path.join(recon_path, "loss"), exist_ok=True)
+        if params["position_correction"]:
+            os.makedirs(os.path.join(recon_path, "positions"), exist_ok=True)
+            os.makedirs(os.path.join(recon_path, "positions_affine"), exist_ok=True)
+        print(f"Reconstruction results will be saved in: {recon_path}")
+    
+    # Synchronize all ranks to ensure directories are created before proceeding
+    if dist.is_initialized():
+        dist.barrier()
 
     return recon_path
 
 
 def save_initial_conditions(recon_path, params, options):
+    # Only save from rank 0 to avoid file locking issues in distributed training
+    try:
+        rank = dist.get_rank()
+    except (RuntimeError, ValueError):
+        rank = 0
+    
+    if rank != 0:
+        return
+    
     det_pixel_size_m = params["det_pixel_size_m"]
     if params.get("beam_source", "xray") == "electron":
         pixel_size = options.object_options.pixel_size_m * 1e9
