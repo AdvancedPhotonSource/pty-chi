@@ -243,6 +243,7 @@ def ptycho_batch_recon(base_params):
             exclude_scans: List of scan numbers to exclude from reconstruction
             overwrite_ongoing: Whether to overwrite scans marked as ongoing
             reset_scan_list: Whether to reset the scan list and reconstruct all scans again
+            skip_error_types: List of error types to skip.
             
     The function creates a tracker to monitor the status of each scan and processes
     them according to the specified order, skipping completed scans unless forced to reconstruct again.
@@ -258,7 +259,8 @@ def ptycho_batch_recon(base_params):
     wait_time_seconds = base_params.get('wait_time_seconds', 5)
     num_repeats = base_params.get('num_repeats', np.inf)
     auto_batch_size_adjustment = base_params.get('auto_batch_size_adjustment', False)
-    
+    skip_error_types = base_params.get('skip_error_types', '')
+
     log_dir = os.path.join(base_params['data_directory'], 'ptychi_recons', 
                           base_params['recon_parent_dir'], 
                           f'recon_logs_{log_dir_suffix}' if log_dir_suffix else 'recon_logs')
@@ -300,9 +302,18 @@ def ptycho_batch_recon(base_params):
                 print(f"Scan {scan_num} already ongoing, skipping reconstruction")
                 ongoing_scans.append(scan_num)
                 continue
-            
+
             # Check if previous reconstruction failed due to OOM
             prev_status = tracker.get_full_status(scan_num)
+
+            if (
+                prev_status
+                and prev_status.get('error_type')
+                and prev_status.get('error_type') in skip_error_types
+            ):
+                print(f"Scan {scan_num} previously failed with error type {prev_status.get('error_type')}, skipping")
+                failed_scans.append((scan_num, prev_status.get('error')))
+                continue
 
             if (
                 auto_batch_size_adjustment
