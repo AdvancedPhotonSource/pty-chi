@@ -583,6 +583,8 @@ class FileBasedTracker:
                         status_data['error_type'] = 'file_not_found'
                     elif 'timeout' in error_str:
                         status_data['error_type'] = 'timeout'
+                    elif 'too few diffraction patterns' in error_str:
+                        status_data['error_type'] = 'too_few_diffraction_patterns'
                     else:
                         status_data['error_type'] = 'unknown'
                 

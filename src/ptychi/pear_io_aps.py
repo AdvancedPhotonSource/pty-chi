@@ -827,6 +827,10 @@ def initialize_recon(params):
 
     if print_mode == 'debug':
         print("Shape of diffraction patterns:", dp.shape)
+
+    if dp.shape[0] < params.get("minimal_num_of_diff_pattern", 1):
+        raise ValueError(f"Too few diffraction patterns: {dp.shape[0]} < {params.get('minimal_num_of_diff_pattern', 1)}")
+
     if dp.shape[1] < dp_Npix:
         dp = crop_pad(dp, (dp_Npix, dp_Npix))
         if print_mode == 'debug':
@@ -903,7 +907,6 @@ def initialize_recon(params):
         # Count points in each cluster
         unique_labels, counts = np.unique(cluster_labels, return_counts=True)
 
-        
         if print_mode == 'debug':
             print(f"Found {n_clusters} position clusters.")
         for i, label in enumerate(unique_labels):
