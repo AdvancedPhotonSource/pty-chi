@@ -242,6 +242,7 @@ def ptycho_batch_recon(base_params):
             scan_order: Order to reconstruct the scans ('ascending', 'descending', or 'random')
             exclude_scans: List of scan numbers to exclude from reconstruction
             overwrite_ongoing: Whether to overwrite scans marked as ongoing
+            overwrite_ongoing_min_age_hour: Minimum age of ongoing scans to overwrite (in hours)
             reset_scan_list: Whether to reset the scan list and reconstruct all scans again
             skip_error_types: List of error types to skip.
             
@@ -255,6 +256,7 @@ def ptycho_batch_recon(base_params):
     scan_order = base_params.get('scan_order', 'ascending')
     exclude_scans = base_params.get('exclude_scans', [])
     overwrite_ongoing = base_params.get('overwrite_ongoing', False)
+    overwrite_ongoing_min_age_hour = base_params.get('overwrite_ongoing_min_age_hour', 0)
     reset_scan_list = base_params.get('reset_scan_list', False)
     wait_time_seconds = base_params.get('wait_time_seconds', 5)
     num_repeats = base_params.get('num_repeats', np.inf)
@@ -267,7 +269,7 @@ def ptycho_batch_recon(base_params):
     os.makedirs(log_dir, exist_ok=True)
     
     # Create tracker
-    tracker = FileBasedTracker(log_dir, overwrite_ongoing=overwrite_ongoing)
+    tracker = FileBasedTracker(log_dir, overwrite_ongoing=overwrite_ongoing, overwrite_ongoing_min_age_hour=overwrite_ongoing_min_age_hour)
     
     # Generate a unique worker ID
     worker_id = f"worker_{os.getpid()}_{uuid.uuid4().hex[:8]}"
@@ -342,7 +344,7 @@ def ptycho_batch_recon(base_params):
 
             # Try to start reconstruction
             if not tracker.start_recon(scan_num, worker_id, scan_params):
-                print(f"Could not acquire lock for scan {scan_num}, skipping")
+                #print(f"Could not acquire lock for scan {scan_num}, skipping")
                 continue
                 
             print(f"\033[91mStarting reconstruction for scan {scan_num}\033[0m")

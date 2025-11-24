@@ -429,13 +429,14 @@ def generate_scan_list(start_scan, end_scan, scan_order='ascending', exclude_sca
     return [scan for scan in scan_list if scan not in exclude_scans]
 
 class FileBasedTracker:
-    def __init__(self, base_dir, overwrite_ongoing=False):
+    def __init__(self, base_dir, overwrite_ongoing=False, overwrite_ongoing_min_age_hour=0):
         """Initialize the tracker with a base directory for status files."""
         self.base_dir = base_dir
         self.status_dir = os.path.join(base_dir, 'status')
         self.lock_dir = os.path.join(base_dir, 'locks')
         self.overwrite_ongoing = overwrite_ongoing
-        
+        self.overwrite_ongoing_min_age_hour = overwrite_ongoing_min_age_hour
+
         # Create directories if they don't exist
         os.makedirs(self.status_dir, exist_ok=True)
         os.makedirs(self.lock_dir, exist_ok=True)
@@ -500,8 +501,16 @@ class FileBasedTracker:
                         data = json.load(f)
                         if data.get('status') =='done':
                             return False
-                        if data.get('status') == 'ongoing' and not self.overwrite_ongoing:
-                            return False
+                        if data.get('status') == 'ongoing':
+                            pre_recon_start_time = datetime.strptime(data.get('start_time'), '%Y-%m-%d %H:%M:%S')
+                            #print(f"Scan {scan_id}'s previous recon starting time: {pre_recon_start_time}")
+                            current_time = datetime.now()
+                            #print(f"Current time: {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                            delta_time = (current_time - pre_recon_start_time).total_seconds()
+                            #print(f"Time difference: {delta_time/3600:.3f} hours")
+                            if not (self.overwrite_ongoing and delta_time/3600 > self.overwrite_ongoing_min_age_hour):
+                                print(f"Scan {scan_id} is ongoing but not old enough to overwrite, skipping reconstruction")
+                                return False
                 except (json.JSONDecodeError, FileNotFoundError):
                     # Corrupted or missing status file, we can proceed
                     pass
