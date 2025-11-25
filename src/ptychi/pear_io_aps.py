@@ -18,7 +18,7 @@ from ptychi.maths import compose_2x2_affine_transform_matrix
 import matplotlib.pyplot as plt
 
 # from matplotlib.patches import Rectangle
-from ptychi.pear_utils import make_fzp_probe, resize_complex_array, find_matching_recon, crop_pad
+from ptychi.pear_utils import make_fzp_probe, resize_complex_array, find_matching_recon, crop_pad, verbose_print
 import sys
 import torch
 import torch.distributed as dist
@@ -452,10 +452,10 @@ def save_reconstructions(task, recon_path, iter, params):
                 "object_ph_collection",
             )
             os.makedirs(obj_ph_collection_dir, exist_ok=True)
-            if print_mode == 'debug':
-                print(
-                    f"\nSaving final object phase to {obj_ph_collection_dir}/S{params['scan_num']:04d}.tiff"
-                )
+            verbose_print(
+                f"\nSaving final object phase to {obj_ph_collection_dir}/S{params['scan_num']:04d}.tiff",
+                print_mode
+            )
             shutil.copyfile(
                 f"{recon_path}/object_ph/object_ph_Niter{iter}.tiff",
                 f"{obj_ph_collection_dir}/S{params['scan_num']:04d}.tiff"
@@ -469,10 +469,10 @@ def save_reconstructions(task, recon_path, iter, params):
                 "probe_mag_collection",
             )
             os.makedirs(probe_mag_collection_dir, exist_ok=True)
-            if print_mode == 'debug':
-                print(
-                    f"\nSaving final probe magnitude to {probe_mag_collection_dir}/S{params['scan_num']:04d}.tiff"
-                )
+            verbose_print(
+                f"\nSaving final probe magnitude to {probe_mag_collection_dir}/S{params['scan_num']:04d}.tiff",
+                print_mode
+            )
             shutil.copyfile(
                 f"{recon_path}/probe_mag/probe_mag_Niter{iter}.tiff",
                 f"{probe_mag_collection_dir}/S{params['scan_num']:04d}.tiff"
@@ -825,16 +825,14 @@ def initialize_recon(params):
         print(f"Error loading diffraction patterns and positions")
         raise e
 
-    if print_mode == 'debug':
-        print("Shape of diffraction patterns:", dp.shape)
+    verbose_print(f"Shape of diffraction patterns: {dp.shape}", print_mode)
 
     if dp.shape[0] < params.get("minimal_num_of_diff_pattern", 1):
         raise ValueError(f"Too few diffraction patterns: {dp.shape[0]} < {params.get('minimal_num_of_diff_pattern', 1)}")
 
     if dp.shape[1] < dp_Npix:
         dp = crop_pad(dp, (dp_Npix, dp_Npix))
-        if print_mode == 'debug':
-            print("Pad diffraction patterns with zeros to:", dp.shape)
+        verbose_print(f"Pad diffraction patterns with zeros to: {dp.shape}", print_mode)
 
     # Process diffraction patterns with orientation transforms if specified
     dp = _process_diffraction_patterns(dp, params)
@@ -854,22 +852,19 @@ def initialize_recon(params):
 
     if params.get("beam_source", "xray") == "electron":
         params["wavelength_m"] = 12.3986 / np.sqrt((2 * 511.0 + energy) * energy) / 1e10
-        if print_mode == 'debug':
-            print("Wavelength (angstrom):", f"{params['wavelength_m'] * 1e10:.3f}")
+        verbose_print(f"Wavelength (angstrom): {params['wavelength_m'] * 1e10:.3f}", print_mode)
 
         # p.dx_spec = 1./p.asize./(p.d_alpha/1e3/p.lambda); %angstrom
         params["obj_pixel_size_m"] = 1 / dp_Npix / params.get("dk", 1) / 1e10  # pixel size
-        if print_mode == 'debug':
-            print(
-            "Pixel size of reconstructed object (angstrom):",
-            f"{params['obj_pixel_size_m'] * 1e10:.3f}",
+        verbose_print(
+            f"Pixel size of reconstructed object (angstrom): {params['obj_pixel_size_m'] * 1e10:.3f}",
+            print_mode
         )
         obj_pad_size = params.get("obj_pad_size_m", 1e-9)
 
     else:
         params["wavelength_m"] = 1.23984193e-9 / energy
-        if print_mode == 'debug':
-            print("Wavelength (nm):", f"{params['wavelength_m'] * 1e9:.3f}")
+        verbose_print(f"Wavelength (nm): {params['wavelength_m'] * 1e9:.3f}", print_mode)
         if params.get("near_field_ptycho", False):
             params["nearfield_magnification"] = (params["det_sample_dist_m"] - params["focal_sample_dist_m"]) / params["focal_sample_dist_m"]
             params["obj_pixel_size_m"] = params["det_pixel_size_m"] / params["nearfield_magnification"]
@@ -881,15 +876,14 @@ def initialize_recon(params):
                 / params["det_pixel_size_m"]
                 / dp_Npix
             )  # pixel size
-        if print_mode == 'debug':
-            print("Pixel size of reconstructed object (nm):", f"{params['obj_pixel_size_m'] * 1e9:.3f}")
+        verbose_print(f"Pixel size of reconstructed object (nm): {params['obj_pixel_size_m'] * 1e9:.3f}", print_mode)
         obj_pad_size = params.get("obj_pad_size_m", 1e-6)
 
     # Find clusters of scan positions where distances between points are smaller than 20 nm
     if params.get("burst_ptycho", False):
-        if print_mode == 'debug':
-            print(
-            f"Performing burst ptycho clustering assuming threshold of {params['obj_pixel_size_m'] * 1e9:.3f} nm."
+        verbose_print(
+            f"Performing burst ptycho clustering assuming threshold of {params['obj_pixel_size_m'] * 1e9:.3f} nm.",
+            print_mode
         )
         from sklearn.cluster import DBSCAN
 
@@ -907,12 +901,10 @@ def initialize_recon(params):
         # Count points in each cluster
         unique_labels, counts = np.unique(cluster_labels, return_counts=True)
 
-        if print_mode == 'debug':
-            print(f"Found {n_clusters} position clusters.")
+        verbose_print(f"Found {n_clusters} position clusters.", print_mode)
         for i, label in enumerate(unique_labels):
             if label == -1:
-                if print_mode == 'debug':
-                    print(f"  Noise points: {counts[i]}")
+                verbose_print(f"  Noise points: {counts[i]}", print_mode)
             else:
                 # print(f"  Cluster {label}: {counts[i]} positions")
                 pass
@@ -935,19 +927,18 @@ def initialize_recon(params):
                 # Store the centroid in the new positions array
                 positions_m_clustered[label] = cluster_centroid
 
-        if print_mode == 'debug':
-            print(f"Created new positions array with {n_clusters} points (one per cluster)")
-            print(
-                f"Original positions shape: {positions_m.shape}, Clustered positions shape: {positions_m_clustered.shape}"
-            )
+        verbose_print(f"Created new positions array with {n_clusters} points (one per cluster)", print_mode)
+        verbose_print(
+            f"Original positions shape: {positions_m.shape}, Clustered positions shape: {positions_m_clustered.shape}",
+            print_mode
+        )
 
         # Optionally, replace the original positions with the clustered ones
         # Uncomment the next line to use the clustered positions instead of the original ones
         positions_m = positions_m_clustered
 
         # Average diffraction patterns for each cluster
-        if print_mode == 'debug':
-            print("Averaging diffraction patterns within each cluster...")
+        verbose_print("Averaging diffraction patterns within each cluster...", print_mode)
 
         # Create a new array to store the averaged diffraction patterns
         dp_shape = dp.shape[1:]  # Get the shape of a single diffraction pattern
@@ -970,8 +961,7 @@ def initialize_recon(params):
 
                 # print(f"  Cluster {label}: Averaged {len(cluster_indices)} diffraction patterns")
 
-        if print_mode == 'debug':
-            print(f"Original dp shape: {dp.shape}, Clustered dp shape: {dp_clustered.shape}")
+        verbose_print(f"Original dp shape: {dp.shape}, Clustered dp shape: {dp_clustered.shape}", print_mode)
 
         # Replace the original diffraction patterns with the clustered ones
         dp = dp_clustered
@@ -987,14 +977,13 @@ def initialize_recon(params):
 
     # Check if positions contain NaN values
     if np.isnan(init_positions_px).any():
-        if print_mode == 'debug':
-            print(
-            f"WARNING: Initial positions contain {np.sum(np.isnan(init_positions_px))} NaN values!"
+        verbose_print(
+            f"WARNING: Initial positions contain {np.sum(np.isnan(init_positions_px))} NaN values!",
+            print_mode
         )
-            print(f"Initial positions shape: {init_positions_px.shape}")
+        verbose_print(f"Initial positions shape: {init_positions_px.shape}", print_mode)
     else:
-        if print_mode == 'debug':
-            print(f"Initial positions shape: {init_positions_px.shape}, no NaN values detected")
+        verbose_print(f"Initial positions shape: {init_positions_px.shape}, no NaN values detected", print_mode)
 
     # Load initial probe
     init_probe = _prepare_initial_probe(dp, params)
@@ -1034,9 +1023,8 @@ def _prepare_initial_positions(params):
     params["path_to_init_positions"] = find_matching_recon(
         params["path_to_init_positions"], params["scan_num"]
     )
-    if print_mode == 'debug':
-        print("Loading initial positions from a ptychi reconstruction at:")
-        print(params["path_to_init_positions"])
+    verbose_print("Loading initial positions from a ptychi reconstruction at:", print_mode)
+    verbose_print(params["path_to_init_positions"], print_mode)
     positions_px = _load_ptychi_recon(params["path_to_init_positions"], "positions_px")
     input_obj_pixel_size = _load_ptychi_recon(params["path_to_init_positions"], "obj_pixel_size_m")
 
@@ -1045,8 +1033,7 @@ def _prepare_initial_positions(params):
 
 def _apply_affine_transform(positions_m, params):
     affine_matrix = np.array(params.get("init_position_affine_matrix", np.eye(2)))
-    if print_mode == 'debug':
-        print(f"Affine matrix for initial positions: {affine_matrix.flatten()}")
+    verbose_print(f"Affine matrix for initial positions: {affine_matrix.flatten()}", print_mode)
     transformed_positions_m = positions_m @ affine_matrix
 
     return transformed_positions_m
@@ -1058,12 +1045,10 @@ def _prepare_initial_object(params, positions_px, probe_size, extra_size):
             params["path_to_init_object"], params["scan_num"]
         )
 
-        if print_mode == 'debug':
-            print("Loading initial object from a ptychi reconstruction at:")
-            print(params["path_to_init_object"])
+        verbose_print("Loading initial object from a ptychi reconstruction at:", print_mode)
+        verbose_print(params["path_to_init_object"], print_mode)
         init_object = _load_ptychi_recon(params["path_to_init_object"], "object")
-        if print_mode == 'debug':
-            print(f"Initial object shape: {init_object.shape}")
+        verbose_print(f"Initial object shape: {init_object.shape}", print_mode)
         input_obj_pixel_size = _load_ptychi_recon(params["path_to_init_object"], "obj_pixel_size_m")
 
         # Handle multislice object initialization
@@ -1074,19 +1059,16 @@ def _prepare_initial_object(params, positions_px, probe_size, extra_size):
                 # Filter out invalid layer indices
                 layer_select = [i for i in layer_select if 0 <= i < init_object.shape[0]]
                 if layer_select:
-                    if print_mode == 'debug':
-                        print(f"Selecting specific layers: {layer_select}")
+                    verbose_print(f"Selecting specific layers: {layer_select}", print_mode)
                     init_object = init_object[layer_select]
                 else:
-                    if print_mode == 'debug':
-                        print("No valid layers specified in init_layer_select, using all layers")
+                    verbose_print("No valid layers specified in init_layer_select, using all layers", print_mode)
 
             # Step 2: Pre-process layers based on specified mode
             init_layer_preprocess = params.get("init_layer_preprocess", "")
             if init_layer_preprocess == "avg":
                 # Average all layers but keep the same number of layers
-                if print_mode == 'debug':
-                    print("Averaging initial layers")
+                verbose_print("Averaging initial layers", print_mode)
                 obj_avg = np.prod(init_object, axis=0)
                 # Unwrap phase and divide by number of layers
                 obj_avg_phase = (
@@ -1105,8 +1087,7 @@ def _prepare_initial_object(params, positions_px, probe_size, extra_size):
 
             elif init_layer_preprocess == "avg1":
                 # Average all layers and keep only one layer
-                if print_mode == 'debug':
-                    print("Averaging initial layers and keeping only one")
+                verbose_print("Averaging initial layers and keeping only one", print_mode)
                 obj_avg = np.prod(init_object, axis=0)
                 # Unwrap phase and divide by number of layers
                 obj_avg_phase = (
@@ -1125,10 +1106,10 @@ def _prepare_initial_object(params, positions_px, probe_size, extra_size):
             elif init_layer_preprocess == "interp" and "init_layer_interp" in params:
                 # Interpolate layers to new z positions
                 interp_positions = params["init_layer_interp"]
-                if print_mode == 'debug':
-                    print(
-                        f"Interpolating {init_object.shape[0]} initial layers to {len(interp_positions)} layers"
-                    )
+                verbose_print(
+                    f"Interpolating {init_object.shape[0]} initial layers to {len(interp_positions)} layers",
+                    print_mode
+                )
 
                 # Create interpolation function for real and imaginary parts separately
                 real_interp = interp1d(
@@ -1160,20 +1141,18 @@ def _prepare_initial_object(params, positions_px, probe_size, extra_size):
             target_layers = params["number_of_slices"]
 
             if init_object.shape[0] > target_layers:
-                if print_mode == 'debug':
-                    print(
-                    f"Initial object has more layers ({init_object.shape[0]}) than target ({target_layers})"
+                verbose_print(
+                    f"Initial object has more layers ({init_object.shape[0]}) than target ({target_layers})",
+                    print_mode
                 )
                 if target_layers == 1:
                     # If only one layer is needed, use the product of all layers
-                    if print_mode == 'debug':
-                        print("Using product of all layers for single-slice reconstruction")
+                    verbose_print("Using product of all layers for single-slice reconstruction", print_mode)
                     obj_prod = np.prod(init_object, axis=0)
                     init_object = obj_prod[np.newaxis, :, :]
                 else:
                     # Select middle layers
-                    if print_mode == 'debug':
-                        print(f"Selecting middle {target_layers} layers")
+                    verbose_print(f"Selecting middle {target_layers} layers", print_mode)
                     start_idx = (init_object.shape[0] - target_layers) // 2
                     end_idx = start_idx + target_layers
                     init_object = init_object[start_idx:end_idx]
@@ -1181,8 +1160,7 @@ def _prepare_initial_object(params, positions_px, probe_size, extra_size):
             elif init_object.shape[0] < target_layers:
                 # Need to add more layers
                 n_add = target_layers - init_object.shape[0]
-                if print_mode == 'debug':
-                    print(f"Adding {n_add} more layers to initial {init_object.shape[0]} layers")
+                verbose_print(f"Adding {n_add} more layers to initial {init_object.shape[0]} layers", print_mode)
 
                 append_mode = params.get("init_layer_append_mode", "edge")
 
@@ -1209,8 +1187,7 @@ def _prepare_initial_object(params, positions_px, probe_size, extra_size):
 
                 else:  # 'vac' or default
                     # Use vacuum (ones) for padding
-                    if print_mode == 'debug':
-                        print(f"Pad input object with vacuum (ones) layers")
+                    verbose_print(f"Pad input object with vacuum (ones) layers", print_mode)
                     obj_shape = init_object.shape[1:]
                     obj_pre = obj_post = np.ones(obj_shape, dtype=np.complex64)
                 # Add layers alternating between front and back
@@ -1228,8 +1205,7 @@ def _prepare_initial_object(params, positions_px, probe_size, extra_size):
             # Step 4: Apply scaling factor to phase if specified
             scaling_factor = params.get("init_layer_scaling_factor", 1.0)
             if scaling_factor != 1.0:
-                if print_mode == 'debug':
-                    print(f"Scaling layer phases by factor {scaling_factor}")
+                verbose_print(f"Scaling layer phases by factor {scaling_factor}", print_mode)
                 for i in range(init_object.shape[0]):
                     layer = init_object[i]
                     # Unwrap phase and scale
@@ -1248,11 +1224,11 @@ def _prepare_initial_object(params, positions_px, probe_size, extra_size):
 
         # Resize object if pixel size doesn't match
         if input_obj_pixel_size != params["obj_pixel_size_m"]:
-            if print_mode == 'debug':
-                print(
-                    f"Input object's pixel size ({input_obj_pixel_size * 1e9:.3f} nm) does not match the expected pixel size ({params['obj_pixel_size_m'] * 1e9:.3f} nm)."
-                )
-                print(f"Resizing input object to match the current reconstruction.")
+            verbose_print(
+                f"Input object's pixel size ({input_obj_pixel_size * 1e9:.3f} nm) does not match the expected pixel size ({params['obj_pixel_size_m'] * 1e9:.3f} nm).",
+                print_mode
+            )
+            verbose_print(f"Resizing input object to match the current reconstruction.", print_mode)
 
             # Calculate zoom factor based on pixel size ratio
             zoom_factor = input_obj_pixel_size / params["obj_pixel_size_m"]
@@ -1270,8 +1246,7 @@ def _prepare_initial_object(params, positions_px, probe_size, extra_size):
         init_object = to_tensor(init_object)
 
     else:
-        if print_mode == 'debug':
-            print("Generating a random initial object.")
+        verbose_print("Generating a random initial object.", print_mode)
         init_object = torch.ones(
             [
                 params["number_of_slices"],
@@ -1281,8 +1256,7 @@ def _prepare_initial_object(params, positions_px, probe_size, extra_size):
         )
         init_object = init_object + 1j * torch.rand(*init_object.shape) * 1e-3
 
-    if print_mode == 'debug':
-        print("Shape of initial object:", init_object.shape)
+    verbose_print(f"Shape of initial object: {init_object.shape}", print_mode)
     return init_object
 
 
@@ -1291,8 +1265,7 @@ def _prepare_initial_probe(dp, params):
     num_opr_modes = params.get("number_opr_modes")
 
     if params.get("use_model_FZP_probe", False):
-        if print_mode == 'debug':
-            print("Generating a model FZP probe.")
+        verbose_print("Generating a model FZP probe.", print_mode)
         if params["instrument"].lower() == "velo" or params["instrument"].lower() == "velociprobe":
             dRn = 50e-9
             Rn = 90e-6
@@ -1335,22 +1308,19 @@ def _prepare_initial_probe(dp, params):
         path_to_init_probe = params.get("path_to_init_probe")
         path_to_init_probe = find_matching_recon(path_to_init_probe, params["scan_num"])
         if path_to_init_probe.endswith(".mat"):
-            if print_mode == 'debug':
-                print("Loading initial probe from a foldslice reconstruction at:")
-                print(path_to_init_probe)
+            verbose_print("Loading initial probe from a foldslice reconstruction at:", print_mode)
+            verbose_print(path_to_init_probe, print_mode)
             probe = _load_probe_foldslice(path_to_init_probe)
         elif params.get("path_to_init_probe").endswith(".h5"):
-            if print_mode == 'debug':
-                print("Loading initial probe from a ptychi reconstruction at:")
-                print(path_to_init_probe)
+            verbose_print("Loading initial probe from a ptychi reconstruction at:", print_mode)
+            verbose_print(path_to_init_probe, print_mode)
             probe = _load_ptychi_recon(path_to_init_probe, "probe")
         else:
             raise ValueError(
                 "Unsupported file format for initial probe. Only .mat and .h5 files are supported."
             )
 
-    if print_mode == 'debug':
-        print("Shape of input probe:", probe.shape)
+    verbose_print(f"Shape of input probe: {probe.shape}", print_mode)
 
     # TODO: load opr weights too
     if probe.ndim == 4:
@@ -1378,8 +1348,7 @@ def _prepare_initial_probe(dp, params):
     probe_shifts = params.get("init_probe_shifts_pix", [0, 0])
     # Apply initial probe shifts if specified
     if any(s != 0 for s in probe_shifts):
-        if print_mode == 'debug':
-            print(f"Applying initial probe shifts: {probe_shifts}")
+        verbose_print(f"Applying initial probe shifts: {probe_shifts}", print_mode)
         # probe_shifts: [shift_y, shift_x]
         for i in range(probe.shape[0]):
             probe[i] = scipy.ndimage.shift(
@@ -1389,10 +1358,10 @@ def _prepare_initial_probe(dp, params):
     # probe = probe.transpose(0, 2, 1)
     # TODO: determine zoom factor based on pixel size ratio
     if probe.shape[-1:] != dp.shape[-1:]:
-        if print_mode == 'debug':
-            print(
-                f"Resizing probe ({probe.shape[-1]}) to match the diffraction pattern size ({dp.shape[-1]})."
-            )
+        verbose_print(
+            f"Resizing probe ({probe.shape[-1]}) to match the diffraction pattern size ({dp.shape[-1]}).",
+            print_mode
+        )
         probe = resize_complex_array(probe, new_shape=(dp.shape[-2], dp.shape[-1]))
 
     # Propagate probe if a propagation distance is specified
@@ -1405,8 +1374,7 @@ def _prepare_initial_probe(dp, params):
         propagation_distance_m = propagation_distance_mm * 1e-3
 
         # Log the propagation operation
-        if print_mode == 'debug':
-            print(f"Propagating initialprobe by {propagation_distance_mm} mm")
+        verbose_print(f"Propagating initialprobe by {propagation_distance_mm} mm", print_mode)
 
         # Propagate each probe mode
         for i in range(probe.shape[0]):
@@ -1417,15 +1385,13 @@ def _prepare_initial_probe(dp, params):
     # Add OPR mode dimension
     probe = probe[None, ...]
     if params.get("orthogonalize_initial_probe", True):
-        if print_mode == 'debug':
-            print("Orthogonalizing initial probe")
+        verbose_print("Orthogonalizing initial probe", print_mode)
         probe = orthogonalize_initial_probe(to_tensor(probe))
 
     # Add n_opr_modes - 1 eigenmodes which are randomly initialized
     probe = add_additional_opr_probe_modes_to_probe(to_tensor(probe), num_opr_modes)
 
-    if print_mode == 'debug':
-        print("Shape of probe after preprocessing:", probe.shape)
+    verbose_print(f"Shape of probe after preprocessing: {probe.shape}", print_mode)
 
     return probe
 
@@ -1442,23 +1408,19 @@ def _load_probe_foldslice(recon_file):
     except:
         import scipy.io
 
-        if print_mode == 'debug':
-            print(f"Attempting to load probe using scipy.io.loadmat")
+        verbose_print(f"Attempting to load probe using scipy.io.loadmat", print_mode)
         mat_contents = scipy.io.loadmat(recon_file)
         if "probe" in mat_contents:
             probes = mat_contents["probe"]
 
-        if print_mode == 'debug':
-            print("Shape of input probe:", probes.shape)
+        verbose_print(f"Shape of input probe: {probes.shape}", print_mode)
         if probes.ndim == 4:
             probes = probes[..., 0]
-            if print_mode == 'debug':
-                print("Taking the primary OPR mode:", probes.shape)
-                print("Transposing probe to (n_probe_modes, h, w)")
+            verbose_print(f"Taking the primary OPR mode: {probes.shape}", print_mode)
+            verbose_print("Transposing probe to (n_probe_modes, h, w)", print_mode)
             probes = probes.transpose(2, 0, 1)
         elif probes.ndim == 3:
-            if print_mode == 'debug':
-                print("Transposing probe to (n_probe_modes, h, w)")
+            verbose_print("Transposing probe to (n_probe_modes, h, w)", print_mode)
             probes = probes.transpose(2, 0, 1)
         else:
             probes = probes.transpose(1, 0)
@@ -1518,19 +1480,17 @@ def _load_data_hdf5(h5_dp_path, h5_position_path, dp_Npix, cen_x, cen_y):
     #         positions_px -= positions_px.mean(axis=0)
 
     # else: # assume foldslice convention
-    if print_mode == 'debug':
-        print("Loading processed scan positions and diffraction patterns in foldslice convention.")
-        print("Diffraction patterns file:")
-        print(h5_dp_path)
+    verbose_print("Loading processed scan positions and diffraction patterns in foldslice convention.", print_mode)
+    verbose_print("Diffraction patterns file:", print_mode)
+    verbose_print(h5_dp_path, print_mode)
     dp = h5py.File(h5_dp_path, "r")["dp"][...]
     det_xwidth = int(dp_Npix / 2)
     
     dp = dp[:, cen_y - det_xwidth : cen_y + det_xwidth, cen_x - det_xwidth : cen_x + det_xwidth]
     dp[dp < 0] = 0
 
-    if print_mode == 'debug':
-        print("Scan positions file:")
-        print(h5_position_path)
+    verbose_print("Scan positions file:", print_mode)
+    verbose_print(h5_position_path, print_mode)
     ppY = h5py.File(h5_position_path, "r")["ppY"][:].flatten()
     ppX = h5py.File(h5_position_path, "r")["ppX"][:].flatten()
     ppX = ppX - (np.max(ppX) + np.min(ppX)) / 2
@@ -1542,8 +1502,7 @@ def _load_data_hdf5(h5_dp_path, h5_position_path, dp_Npix, cen_x, cen_y):
 
 
 def _load_data_2xfm(base_path, scan_num, det_Npixel, cen_x, cen_y, x_exclude=-2):
-    if print_mode == 'debug':
-        print("Loading scan positions and diffraction patterns measured by the XFM instrument at 2IDE.")
+    verbose_print("Loading scan positions and diffraction patterns measured by the XFM instrument at 2IDE.", print_mode)
     from ptychi.pear_utils_aps import readMDA
 
     dp_dir = f"{base_path}/ptycho/"
@@ -1574,9 +1533,8 @@ def _load_data_2xfm(base_path, scan_num, det_Npixel, cen_x, cen_y, x_exclude=-2)
     N_scan_x = x_pos.shape[0]
     N_scan_y = y_pos.shape[0]
     
-    if print_mode == 'debug':
-        print(x_pos.shape)
-        print(f"N_scan_y={N_scan_y}, N_scan_x={N_scan_x}, N_scan_dp={N_scan_x * N_scan_y}")
+    verbose_print(f"{x_pos.shape}", print_mode)
+    verbose_print(f"N_scan_y={N_scan_y}, N_scan_x={N_scan_x}, N_scan_dp={N_scan_x * N_scan_y}", print_mode)
 
     # Load diffraction patterns
     index_x_lb, index_x_ub = int(cen_x - det_Npixel // 2), int(cen_x + (det_Npixel + 1) // 2)
@@ -1585,8 +1543,7 @@ def _load_data_2xfm(base_path, scan_num, det_Npixel, cen_x, cen_y, x_exclude=-2)
     dp, scan_posx, scan_posy = [], [], []
 
     for i in range(N_scan_y):
-        if print_mode == 'debug':
-            print(f"Loading scan line No.{i + 1}...")
+        verbose_print(f"Loading scan line No.{i + 1}...", print_mode)
         # fileName = data_dir+'fly{:03d}_data_{:03d}.h5'.format(scanNo,i+1+N_scan_y_lb)
 
         fileName = os.path.join(dp_dir, f"fly{scan_num:03d}_data_{i + 1:03d}.h5")
@@ -1598,8 +1555,7 @@ def _load_data_2xfm(base_path, scan_num, det_Npixel, cen_x, cen_y, x_exclude=-2)
             #print(fileName, dp_temp.shape)
 
             if dp_temp.shape[0] < 5:
-                if print_mode == 'debug':
-                    print(f"A lot of pixels are missed on this line: {dp_temp.shape[0]} pixels, Skip!")
+                verbose_print(f"A lot of pixels are missed on this line: {dp_temp.shape[0]} pixels, Skip!", print_mode)
                 continue
 
             dp_crop = dp_temp[-x_exclude:, index_y_lb:index_y_ub, index_x_lb:index_x_ub]
@@ -1636,10 +1592,10 @@ def _load_data_12idc(base_path, scan_num, det_Npixel, cen_x, cen_y):
     tuple
         (diffraction patterns, positions)
     """
-    if print_mode == 'debug':
-        print(
-            "Loading scan positions and diffraction patterns measured by the Ptycho-SAXS instrument at 12IDC."
-        )
+    verbose_print(
+        "Loading scan positions and diffraction patterns measured by the Ptycho-SAXS instrument at 12IDC.",
+        print_mode
+    )
     det_xwidth = int(det_Npixel / 2)
 
     # Check if TIFF files exist for this scan
@@ -1657,16 +1613,13 @@ def _load_data_12idc(base_path, scan_num, det_Npixel, cen_x, cen_y):
 
     # Determine which data format to use
     if tif_files:
-        if print_mode == 'debug':
-            print(f"Found TIFF files in {tif_dir}. Processing TIFF data.")
+        verbose_print(f"Found TIFF files in {tif_dir}. Processing TIFF data.", print_mode)
         return _load_data_12idc_tiff(base_path, scan_num, det_Npixel, cen_x, cen_y)
     elif master_file and h5_files:
-        if print_mode == 'debug':
-            print(f"Using pre-processed HDF5 files from {ptycho1_dir}")
+        verbose_print(f"Using pre-processed HDF5 files from {ptycho1_dir}", print_mode)
         return _load_data_12idc_processed_h5(base_path, scan_num, det_Npixel, cen_x, cen_y)
     elif original_h5_files:
-        if print_mode == 'debug':
-            print(f"Using original HDF5 files from {ptycho_dir}")
+        verbose_print(f"Using original HDF5 files from {ptycho_dir}", print_mode)
         return _load_data_12idc_original_h5(base_path, scan_num, det_Npixel, cen_x, cen_y)
     else:
         raise FileNotFoundError(f"No data files found for scan {scan_num} in any supported format.")
@@ -1688,8 +1641,7 @@ def _load_data_12idc_processed_h5(base_path, scan_num, det_Npixel, cen_x, cen_y)
         # Get beam center from master file if available
         if "beam_center_YX" in h5f.attrs:
             cen_y, cen_x = h5f.attrs["beam_center_YX"]
-            if print_mode == 'debug':
-                print(f"Using beam center from master file: ({cen_y}, {cen_x})")
+            verbose_print(f"Using beam center from master file: ({cen_y}, {cen_x})", print_mode)
 
         # Find all line datasets
         line_datasets = []
@@ -1704,8 +1656,7 @@ def _load_data_12idc_processed_h5(base_path, scan_num, det_Npixel, cen_x, cen_y)
             line_files = [f for f in line_files if not f.endswith("_master.h5")]
             if not line_files:
                 raise FileNotFoundError(f"No line files found for scan {scan_num}")
-            if print_mode == 'debug':
-                print(f"Found {len(line_files)} line files directly in directory")
+            verbose_print(f"Found {len(line_files)} line files directly in directory", print_mode)
             line_nums = [int(os.path.basename(f).split("_")[-1].split(".")[0]) for f in line_files]
         else:
             line_nums = [int(dataset_path.split("_")[-1]) for dataset_path in line_datasets]
@@ -1717,21 +1668,18 @@ def _load_data_12idc_processed_h5(base_path, scan_num, det_Npixel, cen_x, cen_y)
         # Process each line
         for line_num in line_nums:
             line_file = os.path.join(ptycho1_dir, f"{sample_name}_{scan_num:03d}_{line_num:05d}.h5")
-            if print_mode == 'debug':
-                print(f"Loading line {line_num} from {line_file}")
+            verbose_print(f"Loading line {line_num} from {line_file}", print_mode)
 
             if not os.path.exists(line_file):
-                if print_mode == 'debug':
-                    print(f"Warning: Line file not found: {line_file}")
+                verbose_print(f"Warning: Line file not found: {line_file}", print_mode)
                 continue
 
             try:
                 with h5py.File(line_file, "r") as line_h5f:
                     # Check if the file has the expected datasets
                     if "/dp" not in line_h5f or "/positions" not in line_h5f:
-                        if print_mode == 'debug':
-                            print(f"Warning: File {line_file} does not contain expected datasets")
-                            print(f"Available keys: {list(line_h5f.keys())}")
+                        verbose_print(f"Warning: File {line_file} does not contain expected datasets", print_mode)
+                        verbose_print(f"Available keys: {list(line_h5f.keys())}", print_mode)
                         continue
 
                     # Load diffraction patterns
@@ -1742,16 +1690,14 @@ def _load_data_12idc_processed_h5(base_path, scan_num, det_Npixel, cen_x, cen_y)
 
                     # Check if data is valid
                     if dp_data.size == 0 or positions_data.size == 0:
-                        if print_mode == 'debug':
-                            print(f"Warning: Empty data in file {line_file}")
+                        verbose_print(f"Warning: Empty data in file {line_file}", print_mode)
                         continue
 
                     # Append to lists
                     dp_list.append(dp_data)
                     positions_list.append(positions_data)
             except Exception as e:
-                if print_mode == 'debug':
-                    print(f"Error loading file {line_file}: {str(e)}")
+                verbose_print(f"Error loading file {line_file}: {str(e)}", print_mode)
                 continue
 
     # Check if we have any data
@@ -1771,8 +1717,7 @@ def _load_data_12idc_processed_h5(base_path, scan_num, det_Npixel, cen_x, cen_y)
         -positions[:, 2] * 1e-9
     )  # x positions
 
-    if print_mode == 'debug':
-        print(f"Loaded {dp.shape[0]} diffraction patterns and {positions_processed.shape[0]} positions")
+    verbose_print(f"Loaded {dp.shape[0]} diffraction patterns and {positions_processed.shape[0]} positions", print_mode)
 
     # Calculate crop indices
     crop_indices = {
@@ -1810,14 +1755,12 @@ def _load_data_12idc_original_h5(base_path, scan_num, det_Npixel, cen_x, cen_y):
     files = glob.glob(f"{base_path}/ptycho/{scan_num:03d}/*{scan_num:03d}_*.h5")
     N_lines = max(int(name.split("_")[-2]) for name in files)  # number of scan lines
     N_pts = max(int(name.split("_")[-1][:-3]) for name in files)  # number of scan points per line
-    if print_mode == 'debug':
-        print(f"Number of scan lines: {N_lines}, Number of scan points per line: {N_pts}")
+    verbose_print(f"Number of scan lines: {N_lines}, Number of scan points per line: {N_pts}", print_mode)
 
     pos = []
     dp = []
     for line in range(N_lines):
-        if print_mode == 'debug':
-            print(f"Loading scan line No.{line + 1}...")
+        verbose_print(f"Loading scan line No.{line + 1}...", print_mode)
 
         start_time = time.time()
         for point in range(N_pts):
@@ -1857,8 +1800,7 @@ def _load_data_12idc_tiff(base_path, scan_num, det_Npixel, cen_x, cen_y):
     """
     import tifffile
 
-    if print_mode == 'debug':
-        print("Loading data from TIFF files and position files.")
+    verbose_print("Loading data from TIFF files and position files.", print_mode)
     # Define paths
     tif_dir = os.path.join(base_path, "tifs", f"{scan_num:03d}")
 
@@ -1906,8 +1848,7 @@ def _load_data_12idc_tiff(base_path, scan_num, det_Npixel, cen_x, cen_y):
                 pos_arr = np.genfromtxt(pos_file, delimiter="")
                 avg_pos = np.mean(pos_arr, axis=0)
             else:
-                if print_mode == 'debug':
-                    print(f"Warning: Position file not found: {pos_file}")
+                verbose_print(f"Warning: Position file not found: {pos_file}", print_mode)
                 avg_pos = np.array([np.nan, np.nan])
 
             # Crop the diffraction pattern to the requested size
@@ -1927,8 +1868,7 @@ def _load_data_12idc_tiff(base_path, scan_num, det_Npixel, cen_x, cen_y):
                 all_dps.append(dp_cropped)
                 all_positions.append(avg_pos)
             else:
-                if print_mode == 'debug':
-                    print(f"Warning: Diffraction pattern too small to crop: {tif_path}")
+                verbose_print(f"Warning: Diffraction pattern too small to crop: {tif_path}", print_mode)
 
     # Stack all diffraction patterns and positions
     if not all_dps:
@@ -1952,8 +1892,7 @@ def _load_data_12idc_tiff(base_path, scan_num, det_Npixel, cen_x, cen_y):
 
 
 def _load_data_bnp(base_path, scan_num, det_Npixel, cen_x, cen_y):
-    if print_mode == 'debug':
-        print("Loading scan positions and diffraction patterns measured by the Bionanoprobe instrument.")
+    verbose_print("Loading scan positions and diffraction patterns measured by the Bionanoprobe instrument.", print_mode)
 
     import re
     match = re.search(r'(20\d{2})', base_path)
@@ -1990,24 +1929,20 @@ def _load_data_bnp(base_path, scan_num, det_Npixel, cen_x, cen_y):
     N_scan_y, N_scan_x = y_pos.size, x_pos.size
     pattern = os.path.join(dp_dir, f"bnp_fly{scan_num:04d}_*.h5")
     file_list = sorted(glob.glob(pattern))
-    if print_mode == 'debug':
-        print(f"Number of diffraction patterns files: {len(file_list)}")
+    verbose_print(f"Number of diffraction patterns files: {len(file_list)}", print_mode)
 
     if len(file_list) < N_scan_y:
-        if print_mode == 'debug':
-            print(f"Only {len(file_list)} diffraction files found, adjusting N_scan_y from {N_scan_y} to {len(file_list)}.")
+        verbose_print(f"Only {len(file_list)} diffraction files found, adjusting N_scan_y from {N_scan_y} to {len(file_list)}.", print_mode)
         N_scan_y = len(file_list)
     
-    if print_mode == 'debug':
-        print(f"N_scan_y={N_scan_y}, N_scan_x={N_scan_x}, N_scan_dp={N_scan_x * N_scan_y}")
+    verbose_print(f"N_scan_y={N_scan_y}, N_scan_x={N_scan_x}, N_scan_dp={N_scan_x * N_scan_y}", print_mode)
 
     dp, scan_posx, scan_posy = [], [], []
 
     for i in range(N_scan_y):
         dp_file_name =  f"bnp_fly{scan_num:04d}_{i:06d}.h5"
         fileName = os.path.join(dp_dir, dp_file_name)
-        if print_mode == 'debug':
-            print(f"Loading scan line No.{i + 1} from {dp_file_name}")
+        verbose_print(f"Loading scan line No.{i + 1} from {dp_file_name}", print_mode)
 
         with h5py.File(fileName, "r") as h5_data:
             # h5_data = h5py.File(fileName,'r')
@@ -2018,8 +1953,7 @@ def _load_data_bnp(base_path, scan_num, det_Npixel, cen_x, cen_y):
             # dp_temp = np.clip(h5_data[filePath][...], 0, 1e7)
             # dp_temp = np.clip(h5_data[filePath][...], 0, 1e7)
             if dp_temp.shape[0] < 5:
-                if print_mode == 'debug':
-                    print(f"A lot of pixels are missed on this line: {dp_temp.shape[0]} pixels, Skip!")
+                verbose_print(f"A lot of pixels are missed on this line: {dp_temp.shape[0]} pixels, Skip!", print_mode)
                 continue
 
             dp_crop = dp_temp[:, index_y_lb:index_y_ub, index_x_lb:index_x_ub]
@@ -2091,8 +2025,7 @@ def _read_position_file(posfile):
 
 
 def _load_data_lynx(base_path, scan_num, det_Npixel, cen_x, cen_y):
-    if print_mode == 'debug':
-        print("Loading scan positions and diffraction patterns measured by the LYNX instrument.")
+    verbose_print("Loading scan positions and diffraction patterns measured by the LYNX instrument.", print_mode)
     # Load positions from .dat file
     pos_file = f"{base_path}/scan_positions/scan_{scan_num:05d}.dat"
     out_orch = _read_position_file(pos_file)
@@ -2132,8 +2065,7 @@ def _load_data_lynx(base_path, scan_num, det_Npixel, cen_x, cen_y):
     # crop square diffraction patterns to ensure isotropic resolution
     N_dp_crop = min(N_dp_x_max, N_dp_y_max, det_Npixel)
     if N_dp_crop < det_Npixel:
-        if print_mode == 'debug':
-            print(f"The maximum size can be cropped from raw diffraction patterns is {N_dp_crop}")
+        verbose_print(f"The maximum size can be cropped from raw diffraction patterns is {N_dp_crop}", print_mode)
 
     index_x_lb = int(cen_x - N_dp_crop // 2)
     index_x_ub = int(cen_x + (N_dp_crop + 1) // 2)
@@ -2144,8 +2076,7 @@ def _load_data_lynx(base_path, scan_num, det_Npixel, cen_x, cen_y):
     with h5py.File(file_path, "r") as h5_data:
         dp_temp = h5_data["entry/data/eiger_4"][:]
         N_scan_dp = dp_temp.shape[0]
-        if print_mode == 'debug':
-            print(f"Number of diffraction patterns: {N_scan_dp}")
+        verbose_print(f"Number of diffraction patterns: {N_scan_dp}", print_mode)
 
         # Initialize output array
         dp = np.zeros((N_scan_dp, N_dp_crop, N_dp_crop))
@@ -2163,8 +2094,7 @@ def _load_data_lynx(base_path, scan_num, det_Npixel, cen_x, cen_y):
 
 
 def _load_data_velo(base_path, scan_num, det_Npixel, cen_x, cen_y):
-    if print_mode == 'debug':
-        print("Loading scan positions and diffraction patterns measured by the Velociprobe instrument.")
+    verbose_print("Loading scan positions and diffraction patterns measured by the Velociprobe instrument.", print_mode)
 
     dp_dir = f"{base_path}/ptycho/fly{scan_num:03d}/"
 
@@ -2183,8 +2113,7 @@ def _load_data_velo(base_path, scan_num, det_Npixel, cen_x, cen_y):
     rot_ang = 0
     ppX *= np.cos(rot_ang / 180 * np.pi)
     N_scan_pos = ppX.size
-    if print_mode == 'debug':
-        print("Number of scan positions: " + str(N_scan_pos))
+    verbose_print(f"Number of scan positions: {N_scan_pos}", print_mode)
 
     # Load diffraction patterns
     N_dp_x_input = det_Npixel
@@ -2197,8 +2126,7 @@ def _load_data_velo(base_path, scan_num, det_Npixel, cen_x, cen_y):
     # Determine N_scan_y
     list = os.listdir(dp_dir)
     N_scan_y = len(list) - 1 - 1 - 1
-    if print_mode == 'debug':
-        print("N_scan_y=" + str(N_scan_y))
+    verbose_print(f"N_scan_y={N_scan_y}", print_mode)
 
     # Determine N_scan_x
     filePath = "entry/data/data"
@@ -2206,21 +2134,18 @@ def _load_data_velo(base_path, scan_num, det_Npixel, cen_x, cen_y):
     h5_data = h5py.File(fileName, "r")
     dp_temp = h5_data[filePath][...]
     N_scan_x = dp_temp.shape[0]
-    if print_mode == 'debug':
-        print("N_scan_x=" + str(N_scan_x))
+    verbose_print(f"N_scan_x={N_scan_x}", print_mode)
 
     N_scan_x_lb = 0
     N_scan_y_lb = 0
     N_scan_dp = N_scan_x * N_scan_y
-    if print_mode == 'debug':
-        print("N_scan_dp=" + str(N_scan_dp))
+    verbose_print(f"N_scan_dp={N_scan_dp}", print_mode)
 
     resampleFactor = 1
     resizeFactor = 1
 
     dp = np.zeros((N_scan_dp, int(N_dp_y_input * resizeFactor), int(N_dp_x_input * resizeFactor)))
-    if print_mode == 'debug':
-        print(dp.shape)
+    verbose_print(f"{dp.shape}", print_mode)
 
     for i in range(N_scan_y):
         fileName = (
@@ -2278,20 +2203,17 @@ def _process_diffraction_patterns(dp, params):
     """
     # Apply transformations in sequence if specified
     if params.get("flip_diffraction_patterns_up_down", False):
-        if print_mode == 'debug':
-            print("Flipping diffraction patterns up-down")
+        verbose_print("Flipping diffraction patterns up-down", print_mode)
         # Create a contiguous copy after flipping to avoid negative strides
         dp = np.ascontiguousarray(np.flip(dp, axis=1))
 
     if params.get("flip_diffraction_patterns_left_right", False):
-        if print_mode == 'debug':
-            print("Flipping diffraction patterns left-right")
+        verbose_print("Flipping diffraction patterns left-right", print_mode)
         # Create a contiguous copy after flipping to avoid negative strides
         dp = np.ascontiguousarray(np.flip(dp, axis=2))
 
     if params.get("transpose_diffraction_patterns", False):
-        if print_mode == 'debug':
-            print("Transposing diffraction patterns")
+        verbose_print("Transposing diffraction patterns", print_mode)
         # Transpose each pattern individually
         dp = np.transpose(dp, axes=(0, 2, 1))
 

@@ -5,7 +5,7 @@ from ptychi.utils import (set_default_complex_dtype,
 import os
 os.environ['HDF5_PLUGIN_PATH'] = '/mnt/micdata3/ptycho_tools/DectrisFileReader/HDF5Plugin'
 
-from .pear_utils import select_gpu, generate_scan_list, FileBasedTracker, check_gpu_availability
+from .pear_utils import select_gpu, generate_scan_list, FileBasedTracker, check_gpu_availability, verbose_print
 from .pear_plot import plot_affine_evolution, plot_affine_summary
 import numpy as np
 
@@ -157,17 +157,17 @@ def ptycho_recon(run_recon=True, **params):
     if params['update_batch_size'] is not None:
         options.reconstructor_options.batch_size = params['update_batch_size']
         params['number_of_batches'] = N_dp // options.reconstructor_options.batch_size
-        if print_mode == 'debug':
-            print(f"User-specified batch size: {params['update_batch_size']} " 
-              f"({params['number_of_batches']} batches for {N_dp} data points)")
+        verbose_print(f"User-specified batch size: {params['update_batch_size']} " 
+                      f"({params['number_of_batches']} batches for {N_dp} data points)", 
+                      print_mode)
     elif params['number_of_batches'] is not None:
         # Calculate batch size from number of batches
         params['update_batch_size'] = max(1, N_dp // params['number_of_batches'])
         options.reconstructor_options.batch_size = params['update_batch_size']
        
-        if print_mode == 'debug':
-            print(f"User-specified batch size: {params['update_batch_size']} " 
-              f"({params['number_of_batches']} batches for {N_dp} data points)")
+        verbose_print(f"User-specified batch size: {params['update_batch_size']} " 
+                      f"({params['number_of_batches']} batches for {N_dp} data points)", 
+                      print_mode)
     else:
         #params['auto_batch_size_adjustment'] = True
         # Auto-configure based on batch selection scheme
@@ -177,9 +177,9 @@ def ptycho_recon(run_recon=True, **params):
         options.reconstructor_options.batch_size = params['update_batch_size']
         
         # Log the auto-configuration for transparency
-        if print_mode == 'debug':
-            print(f"Auto-configured batch size: {params['update_batch_size']} " 
-              f"({params['number_of_batches']} batches for {N_dp} data points)")
+        verbose_print(f"Auto-configured batch size: {params['update_batch_size']} " 
+                      f"({params['number_of_batches']} batches for {N_dp} data points)", 
+                      print_mode)
 
     #options.reconstructor_options.forward_model_options.pad_for_shift = 16
     #options.reconstructor_options.use_low_memory_forward_model = True

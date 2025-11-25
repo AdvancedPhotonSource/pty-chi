@@ -10,6 +10,19 @@ import shutil
 import fcntl
 from datetime import datetime
 
+def verbose_print(message, current_print_mode, mode='debug'):
+    """
+    Utility print function that only prints if the current print_mode matches.
+    
+    Args:
+        message: The message to print
+        current_print_mode: The current print mode setting ('debug', 'prod', etc.)
+        mode: The print mode required to show the message ('debug', 'prod', 'all')
+              'all' will always print regardless of print_mode
+    """
+    if mode == 'all' or current_print_mode == mode:
+        print(message)
+
 def select_gpu(gpu_list=None):
     # Get GPU stats
     gpu_stats = get_gpu_usage()
