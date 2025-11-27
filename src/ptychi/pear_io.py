@@ -850,6 +850,11 @@ def initialize_recon(params):
 
     positions_m = _apply_affine_transform(positions_m, params)
 
+    # Center positions so that max positive value equals max negative value
+    if params.get("center_init_positions", True):
+        positions_m[:, 0] = positions_m[:, 0] - (np.max(positions_m[:, 0]) + np.min(positions_m[:, 0])) / 2
+        positions_m[:, 1] = positions_m[:, 1] - (np.max(positions_m[:, 1]) + np.min(positions_m[:, 1])) / 2
+
     params["det_pixel_size_m"] = (
         75e-6
         if instrument
