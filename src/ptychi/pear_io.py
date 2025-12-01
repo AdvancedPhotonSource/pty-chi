@@ -49,7 +49,11 @@ def save_reconstructions(task, recon_path, iter, params):
 
     # Object
     recon_object = task.get_data_to_cpu("object", as_numpy=True)
-    recon_object_roi = task.object.get_object_in_roi().cpu().detach()
+    if params.get("save_full_object", False):
+        recon_object_roi = torch.from_numpy(recon_object)
+    else:
+        recon_object_roi = task.object.get_object_in_roi().cpu().detach()
+
     if recon_object_roi.shape[0] > 1:  # multislice recon
         # object_ph_stack = [normalize_by_bit_depth(unwrap_phase_2d(slice.cuda(),
         #                                                          image_grad_method='fourier_differentiation',

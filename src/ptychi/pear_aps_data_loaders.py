@@ -550,10 +550,6 @@ def load_data_lynx(base_path, scan_num, det_Npixel, cen_x, cen_y, print_mode='de
     x_positions = -out_orch["Average_x_st_fzp"]
     y_positions = -out_orch["Average_y_st_fzp"]
 
-    # Center positions so that max positive value equals max negative value
-    x_positions = x_positions - (np.max(x_positions) + np.min(x_positions)) / 2
-    y_positions = y_positions - (np.max(y_positions) + np.min(y_positions)) / 2
-
     # Convert to meters if needed (adjust multiplier as needed)
     x_positions = x_positions * 1e-6  # Adjust this factor based on your data units
     y_positions = y_positions * 1e-6

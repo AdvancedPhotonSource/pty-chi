@@ -8,7 +8,8 @@ os.environ['HDF5_PLUGIN_PATH'] = '/mnt/micdata3/ptycho_tools/DectrisFileReader/H
 from .pear_utils import select_gpu, generate_scan_list, FileBasedTracker, check_gpu_availability, verbose_print
 from .pear_plot import plot_affine_evolution, plot_affine_summary
 import numpy as np
-
+import torch
+from ptychi.utils import get_suggested_object_size, get_default_complex_dtype
 import logging
 #logging.basicConfig(level=logging.ERROR)
 #logging.basicConfig(level=logging.INFO)
@@ -216,17 +217,17 @@ def ptycho_recon(run_recon=True, **params):
 
     recon_path = create_reconstruction_path(params, options)
     save_initial_conditions(recon_path, params, options)
-
-    task = PtychographyTask(options)
     
     if not run_recon:
-        return task, recon_path, params
+        return options, recon_path, params
+
+    task = PtychographyTask(options)
     
     for i in range(params['number_of_iterations'] // params['save_freq_iterations']):
         task.run(params['save_freq_iterations'])
         save_reconstructions(task, recon_path, params['save_freq_iterations']*(i+1), params)
 
-    return task, recon_path, params
+    return options, recon_path, params
     
 
 def ptycho_batch_recon(base_params):
@@ -564,6 +565,92 @@ ptycho_recon(run_recon=True, **params)
             time.sleep(wait_time_seconds)
    
     print(f"Batch processing complete.")
+
+def ptycho_multiscan_recon(run_recon=True, **params):
+    """
+    Perform multi-scan ptychography reconstruction with a shared object.
+    
+    Parameters:
+    -----------
+    run_recon : bool
+        If True, run the reconstruction. If False, only prepare options.
+    **params : dict
+        Reconstruction parameters. Must include 'scan_num' as a list of scan numbers.
+    
+    Returns:
+    --------
+    tuple
+        (options, recon_path, params) for all scans
+    """
+    params_base = params.copy()
+    num_scans = len(params_base['scan_num'])
+    print(f"Total number of scans: {num_scans}")
+    
+    if num_scans == 1:
+        return ptycho_recon(run_recon=False, **params_base)
+    
+    # Load options for each scan
+    options = []
+    all_positions_x = []
+    all_positions_y = []
+    
+    for scan_num in params_base['scan_num']:
+        params_scan = params_base.copy()
+        params_scan['scan_num'] = scan_num
+        params_scan['save_full_object'] = True
+        print(f"Loading scan {scan_num}...")
+        
+        option, recon_path, params_scan = ptycho_recon(run_recon=False, **params_scan)
+        options.append(option)
+        all_positions_x.append(option.probe_position_options.position_x_px)
+        all_positions_y.append(option.probe_position_options.position_y_px)
+    
+    # Combine and center all positions
+    combined_x = np.concatenate(all_positions_x)
+    combined_y = np.concatenate(all_positions_y)
+    center_x = (np.max(combined_x) + np.min(combined_x)) / 2
+    center_y = (np.max(combined_y) + np.min(combined_y)) / 2
+    
+    # Center each scan's positions
+    for i, option in enumerate(options):
+        option.probe_position_options.position_x_px = all_positions_x[i] - center_x
+        option.probe_position_options.position_y_px = all_positions_y[i] - center_y
+    
+    # Create combined positions array for object size estimation
+    positions_px = np.column_stack((combined_y - center_y, combined_x - center_x))
+    
+    # Initialize shared object for all scans
+    object_shape = [params_scan["number_of_slices"], *get_suggested_object_size(positions_px, np.array([128, 128]), extra=100)]
+    shared_object = torch.ones(object_shape, dtype=get_default_complex_dtype())
+    shared_object = shared_object + 1j * torch.rand(*object_shape) * 1e-3
+    
+    # Create tasks with shared object
+    for option in options:
+        option.object_options.initial_guess = shared_object.clone()
+    
+    if not run_recon:
+        return options, recon_path, params_scan
+
+    tasks = []
+    for i, option in enumerate(options):
+        task = PtychographyTask(option)
+        if i > 0:
+            task.reconstructor.pbar.disable = True
+        tasks.append(task)
+    
+    # Alternating multi-scan reconstruction
+    for epoch in range(params_scan['number_of_iterations']):
+        for task_idx, task in enumerate(tasks):
+            task.run(1)
+            # Copy object to next task (cyclic)
+            next_task_idx = (task_idx + 1) % num_scans
+            tasks[next_task_idx].copy_data_from_task(task, params_to_copy=("object",))
+        
+        # Save reconstructions at specified intervals
+        if (epoch + 1) % params_scan['save_freq_iterations'] == 0:
+            save_reconstructions(tasks[-1], recon_path, epoch + 1, params_scan)
+    
+    return options, recon_path, params_scan
 
 def ptycho_batch_recon_affine_calibration(base_params):
     """
