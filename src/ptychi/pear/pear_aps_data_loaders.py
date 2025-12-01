@@ -13,12 +13,12 @@ import h5py
 import hdf5plugin
 import numpy as np
 import scipy.ndimage
-from ptychi.pear_utils import verbose_print
+from .pear_utils import verbose_print
 
 
 def load_data_2xfm(base_path, scan_num, det_Npixel, cen_x, cen_y, x_exclude=-2, print_mode='debug'):
     verbose_print("Loading scan positions and diffraction patterns measured by the XFM instrument at 2IDE.", print_mode)
-    from ptychi.pear_utils_aps import readMDA
+    from .pear_utils_aps import readMDA
 
     dp_dir = f"{base_path}/ptycho/"
     filePath = "/entry/data/data"
@@ -419,7 +419,7 @@ def load_data_bnp(base_path, scan_num, det_Npixel, cen_x, cen_y, print_mode='deb
         XRFfile_path = f"{base_path}/mda/bnp_fly{scan_num:04d}.mda" 
         if not os.path.exists(XRFfile_path):
             raise FileNotFoundError(f"The XRF file path does not exist: {XRFfile_path}")
-        from ptychi.pear_utils_aps import readMDA
+        from .pear_utils_aps import readMDA
         XRFfile = readMDA(XRFfile_path)
         y_pos=np.array(XRFfile[1].p[0].data)
         x_pos=np.array(XRFfile[2].p[0].data)[0]

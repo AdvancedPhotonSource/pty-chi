@@ -18,8 +18,8 @@ from ptychi.maths import compose_2x2_affine_transform_matrix
 import matplotlib.pyplot as plt
 
 # from matplotlib.patches import Rectangle
-from ptychi.pear_utils import make_fzp_probe, resize_complex_array, find_matching_recon, crop_pad, verbose_print
-from ptychi.pear_aps_data_loaders import (
+from .pear_utils import make_fzp_probe, resize_complex_array, find_matching_recon, crop_pad, verbose_print
+from .pear_aps_data_loaders import (
     load_data_2xfm,
     load_data_12idc,
     load_data_bnp,
@@ -200,7 +200,7 @@ def save_reconstructions(task, recon_path, iter, params):
 
     # Save probe propagation in multislice reconstruction
     if recon_object_roi.shape[0] > 1:
-        from ptychi.pear_utils import near_field_evolution
+        from .pear_utils import near_field_evolution
 
         # Get the primary probe mode
         # Extract the primary probe mode based on dimensionality
@@ -1382,7 +1382,7 @@ def _prepare_initial_probe(dp, params):
     # Propagate probe if a propagation distance is specified
     propagation_distance_mm = params.get("init_probe_propagation_distance_mm", 0)
     if propagation_distance_mm != 0:
-        from ptychi.pear_utils import near_field_evolution
+        from .pear_utils import near_field_evolution
 
         extent = probe.shape[-1] * params["obj_pixel_size_m"]
         # Convert mm to meters for propagation
