@@ -39,7 +39,7 @@ def ptycho_recon(run_recon=True, **params):
         logging.basicConfig(level=logging.INFO)
 
     if params['gpu_id'] is None:
-        params['gpu_id'] = select_gpu(params)
+        params['gpu_id'] = select_gpu(gpu_list=None)
         print(f"Auto-selected GPU: {params['gpu_id']} for scan {params['scan_num']}")
     else:
         print(f"Using GPU: {params['gpu_id']} for scan {params['scan_num']}")

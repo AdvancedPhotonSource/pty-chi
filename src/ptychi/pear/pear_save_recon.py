@@ -20,6 +20,11 @@ def save_reconstructions(task, recon_path, iter, params):
     if task.rank != 0:
         return
     
+    # Declare global variables that are initialized in save_initial_conditions
+    global init_positions_x, init_positions_y
+    global pos_x_min, pos_x_max, pos_y_min, pos_y_max, range_factor
+    global pos_scale, pos_assymetry, pos_rotation, pos_shear, iterations
+    
     if params.get("beam_source", "xray") == "electron":
         pixel_size = task.object_options.pixel_size_m * 1e9
         pixel_unit = "nm"
