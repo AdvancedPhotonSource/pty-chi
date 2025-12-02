@@ -29,21 +29,30 @@ class MultiprocessMixin:
             return dist.get_world_size()
         except ValueError:
             return 1
-    
-    def get_chunk_of_current_rank(self, tensor: Tensor) -> Tensor:
+
+    def get_chunk_of_current_rank(
+        self,
+        tensor: Tensor,
+        return_chunk_sizes: bool = False,
+    ) -> Tensor:
         """
         Get a chunk of the tensor for the current rank.
-        
+
         Parameters
         ----------
         tensor : Tensor
             The tensor to be chunked. The first dimension of the tensor is assumed
             to be the batch dimension and it will be split along this dimension.
-            
+        return_chunk_sizes : bool
+            If True, return a list of integers representing the chunk sizes for each rank.
+
         Returns
         -------
         Tensor
             A chunk of the tensor for the current rank.
+        list[int]
+            A list of integers representing the chunk sizes for each rank, Returned
+            only if return_chunk_sizes is True.
         """
         chunks = torch.chunk(tensor, self.n_ranks, dim=0)
         if len(chunks) != self.n_ranks:
@@ -51,15 +60,26 @@ class MultiprocessMixin:
             chunk_size = tensor.shape[0] // self.n_ranks
             start = self.rank * chunk_size
             end = min(start + chunk_size, tensor.shape[0])
-            return tensor[start:end]
+            chunk = tensor[start:end]
+            if return_chunk_sizes:
+                chunk_sizes = [
+                    min(r * chunk_size + chunk_size, tensor.shape[0]) - r * chunk_size
+                    for r in range(self.n_ranks)
+                ]
         else:
-            return chunks[self.rank]
+            chunk = chunks[self.rank]
+            if return_chunk_sizes:
+                chunk_sizes = [len(c) for c in chunks]
+        if return_chunk_sizes:
+            return chunk, chunk_sizes
+        return chunk
 
     def sync_buffer(
-        self, buffer: Any, 
-        indices: Optional[Tensor] = None, 
+        self,
+        buffer: Any,
+        indices: Optional[Tensor] = None,
         source_rank: Optional[int] = None,
-        op: dist.ReduceOp = dist.ReduceOp.SUM
+        op: dist.ReduceOp = dist.ReduceOp.SUM,
     ) -> Any:
         """Synchronize a buffer across ranks.
         

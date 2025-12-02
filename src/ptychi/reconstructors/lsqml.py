@@ -1271,10 +1271,16 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
 
 class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.chunk_sizes_all_ranks = None
+
     def run_minibatch(self, input_data, y_true, *args, **kwargs) -> None:
         indices = input_data[0]
         full_indices = indices.clone()
-        indices = self.get_chunk_of_current_rank(full_indices)
+        indices, self.chunk_sizes_all_ranks = self.get_chunk_of_current_rank(
+            full_indices, return_chunk_sizes=True
+        )
         if len(indices) == 0:
             raise ValueError(
                 "A rank didn't get any data in this minibatch. This happens when "
@@ -1394,6 +1400,29 @@ class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
         delta_p_hat = delta_p_hat / bsize_all_ranks
         return delta_p_hat
 
+    def apply_reconstruction_parameter_updates(self, indices: torch.Tensor):
+        """Perform updates for reconstruction parameters using the
+        update vectors stored in the `grad` attribute of the corresponding
+        `ReconstructionParameter` objects.
+
+        This method overrides the parent method to synchronize buffer across ranks.
+
+        Parameters
+        ----------
+        indices : torch.Tensor
+            The indices of the diffraction patterns processed in the current batch.
+        """
+        tensor_list = [
+            torch.zeros(
+                self.chunk_sizes_all_ranks[r],
+                dtype=indices.dtype,
+                device=torch.get_default_device(),
+            )
+            for r in range(self.n_ranks)
+        ]
+        dist.all_gather(tensor_list, indices.to(torch.get_default_device()))
+        indices_all_ranks = torch.cat(tensor_list)
+        super().apply_reconstruction_parameter_updates(indices_all_ranks)
 
     def run_post_epoch_hooks(self) -> None:
         if self.current_epoch == 0 and self.options.rescale_probe_intensity_in_first_epoch:
