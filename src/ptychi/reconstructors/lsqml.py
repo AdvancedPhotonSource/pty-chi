@@ -1362,6 +1362,37 @@ class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
                 -self.parameter_group.object.get_grad()[slice_index : slice_index + 1]
             )
         return delta_o_hat
+    
+    
+    def _precondition_probe_update_direction(self, delta_p):
+        """
+        Eq. 25a of Odstrcil, 2018.
+        
+        This method overrides the parent method to synchronize buffer across ranks.
+
+        Parameters
+        ----------
+        delta_p : Tensor
+            A (batch_size, n_probe_modes, h, w) tensor giving the probe update direction.
+
+        Returns
+        -------
+        Tensor
+            A (n_probe_modes, h, w) tensor giving the preconditioned probe update direction.
+        """
+        # Shape of delta_p_hat:  (n_probe_modes, h, w)
+        delta_p_hat = torch.sum(delta_p, dim=0)  # Eq. 25a
+        delta_p_hat = self.sync_buffer(
+            delta_p_hat,
+            op=dist.ReduceOp.SUM,
+        )
+        bsize_current_rank = delta_p.shape[0]
+        bsize_all_ranks = self.sync_buffer(
+            bsize_current_rank,
+            op=dist.ReduceOp.SUM,
+        )
+        delta_p_hat = delta_p_hat / bsize_all_ranks
+        return delta_p_hat
 
 
     def run_post_epoch_hooks(self) -> None:
