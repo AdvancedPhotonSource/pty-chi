@@ -1318,7 +1318,52 @@ class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
 
         self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
         self.loss_tracker.synchronize_accumulated_losses()
+
+    def _combine_object_patch_update_directions(
+        self, delta_o_patches, positions, onto_accumulated=False, slice_index=0
+    ):
+        """
+        Combine the update directions of object patches into a buffer with the
+        same size as the whole object.
         
+        This method overrides the parent method to synchronize buffer across ranks.
+
+        Parameters
+        ----------
+        delta_o_patches : Tensor
+            A (batch_size, 1, h, w) tensor giving the update direction for object patches.
+        onto_accumulated : bool
+            If True, add the update direction to the accumulated update direction stored in
+            `object.grad`. Otherwise, just return the update direction accumulated on an empty
+            buffer.
+
+        Returns
+        -------
+        Tensor
+            A (1, h, w) tensor giving the combined update direction for the whole object.
+        """
+        delta_o_patches = delta_o_patches[:, 0]
+
+        # Stitch all delta O patches on the object buffer
+        # Shape of delta_o_hat:  (h_whole, w_whole)
+        delta_o_hat = self.parameter_group.object.place_patches_on_empty_buffer(
+            positions.round().int(), delta_o_patches, integer_mode=True
+        )
+        
+        # Synchronize buffer across ranks.
+        delta_o_hat = self.sync_buffer(
+            delta_o_hat,
+            op=dist.ReduceOp.SUM,
+        )
+        
+        delta_o_hat = delta_o_hat[None, ...]
+        if onto_accumulated:
+            delta_o_hat = delta_o_hat + (
+                -self.parameter_group.object.get_grad()[slice_index : slice_index + 1]
+            )
+        return delta_o_hat
+
+
     def run_post_epoch_hooks(self) -> None:
         if self.current_epoch == 0 and self.options.rescale_probe_intensity_in_first_epoch:
             super().run_post_epoch_hooks()
