@@ -13,22 +13,30 @@ from ptychi.api.types import Numeric
 from ptychi.utils import to_tensor
 
 
+def get_rank():
+    try:
+        return dist.get_rank()
+    except ValueError:
+        return 0
+
+
+def get_world_size():
+    try:
+        return dist.get_world_size()
+    except ValueError:
+        return 1
+
+
 class MultiprocessMixin:
     backend = "nccl"
     
     @property
     def rank(self) -> int:
-        try:
-            return dist.get_rank()
-        except ValueError:
-            return 0
+        return get_rank()
     
     @property
     def n_ranks(self) -> int:
-        try:
-            return dist.get_world_size()
-        except ValueError:
-            return 1
+        return get_world_size()
 
     def get_chunk_of_current_rank(
         self,
