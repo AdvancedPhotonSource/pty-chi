@@ -309,19 +309,10 @@ class PtychographyUniformBatchSampler(torch.utils.data.Sampler):
         for i in np.random.choice(range(len(self)), len(self), replace=False):
             yield self.batches_of_indices[i]
             
-    def check_omp_num_threads(self):
-        if get_world_size() == 1:
-            return
-        val = os.environ.get("OMP_NUM_THREADS", "unset")
-        if not (val != "unset" and int(val) > 1):
-            logging.warning(
-                f"You are using multi-processing but OMP_NUM_THREADS is {val}. "
-                f"Index building in uniform batching mode may be slower than expected. "
-                f"Set OMP_NUM_THREADS to a value greater than 1 to improve performance."
-            )
-            
     def build_or_sync_indices(self):
-        self.check_omp_num_threads()
+        orig_device = self.positions.device
+        self.positions = self.positions.to(torch.get_default_device())
+        
         if get_rank() == 0:
             self.build_indices()
             
@@ -329,17 +320,15 @@ class PtychographyUniformBatchSampler(torch.utils.data.Sampler):
             # Temporarily move indices to GPU.
             if get_rank() == 0:
                 batch_lengths = torch.tensor(
-                    [len(batch) for batch in self.batches_of_indices], device=torch.get_default_device(), dtype=torch.long
+                    [len(batch) for batch in self.batches_of_indices], device=self.positions.device, dtype=torch.long
                 )
-                flat_indices = torch.cat(self.batches_of_indices).to(torch.get_default_device())
+                flat_indices = torch.cat(self.batches_of_indices).to(self.positions.device)
             else:
-                batch_lengths = torch.empty(len(self), dtype=torch.long, device=torch.get_default_device())
-                flat_indices = torch.empty(len(self.positions), dtype=torch.long, device=torch.get_default_device())
+                batch_lengths = torch.empty(len(self), dtype=torch.long, device=self.positions.device)
+                flat_indices = torch.empty(len(self.positions), dtype=torch.long, device=self.positions.device)
 
             torch.distributed.broadcast(batch_lengths, src=0)
             torch.distributed.broadcast(flat_indices, src=0)
-            batch_lengths = batch_lengths.to(self.positions.device)
-            flat_indices = flat_indices.to(self.positions.device)
 
             # Re-assemble batch index list.
             if get_rank() != 0:
@@ -350,6 +339,9 @@ class PtychographyUniformBatchSampler(torch.utils.data.Sampler):
                     batches.append(flat_indices[start:end].clone())
                     start = end
                 self.batches_of_indices = tuple(batches)
+                
+        # Move back to original device.
+        self.batches_of_indices = [x.to(orig_device) for x in self.batches_of_indices]
 
     def build_indices(self):
         dist_mat = torch.cdist(self.positions, self.positions, p=2)
