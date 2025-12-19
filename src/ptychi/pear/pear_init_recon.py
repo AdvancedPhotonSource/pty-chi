@@ -197,7 +197,7 @@ def initialize_recon(params):
 
                 # print(f"  Cluster {label}: Averaged {len(cluster_indices)} diffraction patterns")
 
-        verbose_print(f"Original dp shape: {dp.shape}, Clustered dp shape: {dp_clustered.shape}", print_mode)
+        verbose_print(f"Original dp shape: {dp.shape}, Clustered dp shape: {dp_clustered.shape}", print_mode=print_mode)
 
         # Replace the original diffraction patterns with the clustered ones
         dp = dp_clustered
