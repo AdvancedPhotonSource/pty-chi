@@ -197,7 +197,7 @@ def initialize_recon(params):
 
                 # print(f"  Cluster {label}: Averaged {len(cluster_indices)} diffraction patterns")
 
-        verbose_print(f"Original dp shape: {dp.shape}, Clustered dp shape: {dp_clustered.shape}", print_mode=print_mode)
+        verbose_print(f"Original dp shape: {dp.shape}, Clustered dp shape: {dp_clustered.shape}", print_mode)
 
         # Replace the original diffraction patterns with the clustered ones
         dp = dp_clustered
@@ -250,7 +250,7 @@ def _load_data_raw(instrument, base_path, scan_num, dp_Npix, dp_cen_x, dp_cen_y)
     if instrument not in instrument_loaders:
         raise ValueError(f"Unsupported instrument: {instrument}")
 
-    dp, positions = instrument_loaders[instrument](base_path, scan_num, dp_Npix, dp_cen_x, dp_cen_y, print_mode)
+    dp, positions = instrument_loaders[instrument](base_path, scan_num, dp_Npix, dp_cen_x, dp_cen_y, print_mode=print_mode)
 
     return dp, positions
 
