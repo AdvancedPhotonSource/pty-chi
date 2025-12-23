@@ -77,40 +77,21 @@ class Probe(dsbase.ReconstructParameter):
         shifted_probe : Tensor
             Shifted probe.
         """
-        # if shifts.ndim == 1:
-        #     probe_straightened = self.tensor.complex().view(-1, *self.shape[-2:])
-        #     shifted_probe = ip.fourier_shift(
-        #         probe_straightened, shifts[None, :].repeat([probe_straightened.shape[0], 1])
-        #     )
-        #     shifted_probe = shifted_probe.view(*self.shape)
-        # else:
-        #     n_shifts = shifts.shape[0]
-        #     n_images_each_probe = self.shape[0] * self.shape[1]
-        #     probe_straightened = self.tensor.complex().view(n_images_each_probe, *self.shape[-2:])
-        #     probe_straightened = probe_straightened.repeat(n_shifts, 1, 1)
-        #     shifts = shifts.repeat_interleave(n_images_each_probe, dim=0)
-        #     shifted_probe = ip.fourier_shift(probe_straightened, shifts)
-        #     shifted_probe = shifted_probe.reshape(n_shifts, *self.shape)
-        # return shifted_probe
-        
-        probe_straightened = self.tensor.complex()[0,...]
-        
-        shifted_probe = ip.fourier_shift(
-            probe_straightened, shifts[None, :].repeat([probe_straightened.shape[0], 1])
-        )
-        
-        current_probe = self.tensor.complex()
-        
-        current_probe[0,...] = shifted_probe
-   
-        return current_probe
-        
-        
-        
-        
-        
-        
-        
+        if shifts.ndim == 1:
+            probe_straightened = self.tensor.complex().view(-1, *self.shape[-2:])
+            shifted_probe = ip.fourier_shift(
+                probe_straightened, shifts[None, :].repeat([probe_straightened.shape[0], 1])
+            )
+            shifted_probe = shifted_probe.view(*self.shape)
+        else:
+            n_shifts = shifts.shape[0]
+            n_images_each_probe = self.shape[0] * self.shape[1]
+            probe_straightened = self.tensor.complex().view(n_images_each_probe, *self.shape[-2:])
+            probe_straightened = probe_straightened.repeat(n_shifts, 1, 1)
+            shifts = shifts.repeat_interleave(n_images_each_probe, dim=0)
+            shifted_probe = ip.fourier_shift(probe_straightened, shifts)
+            shifted_probe = shifted_probe.reshape(n_shifts, *self.shape)
+        return shifted_probe
 
     @property
     def n_modes(self):
@@ -413,7 +394,7 @@ class Probe(dsbase.ReconstructParameter):
 
         logger.info("Probe scaled by {}.".format(power_correction))
         #logger.info("Probe and object scaled by {}.".format(power_correction))
-
+        # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 
 
@@ -424,30 +405,169 @@ class Probe(dsbase.ReconstructParameter):
         blurred probe magnitude.
         """
         data = self.data
+
+        # from torchvision.transforms.functional import gaussian_blur
+        # Xabs = gaussian_blur( torch.abs(data[0,...]), kernel_size=(13, 13), sigma=(12.0, 12.0)) 
+        # data[0,...] = Xabs * torch.exp(1j * torch.angle(data[0,...]))
+
+        import torch.nn.functional as F
         
-        
-        data_intensity = torch.sum( torch.abs( data[0,...] )**2, 0 )
-        
-        rows, cols = data_intensity.shape[-2:]
-        center_r, center_c = rows // 2, cols // 2
-        radius_r = ( rows * 0.80 / 2 )
-        radius_c = ( cols * 0.80 / 2 )
-        y, x = np.ogrid[:rows, :cols]
-        dist = ((y - center_r)**2 / radius_r**2) + ((x - center_c)**2 / radius_c**2)
-        fixed_support = torch.tensor( dist <= 1, dtype = torch.float32 )
-        fixed_support = ip.gaussian_filter(fixed_support, sigma=4, size=5).abs()
-        data = data * fixed_support
+        def median_filter_2d(input_tensor, kernel_size):
+            """Custom 2D median filter implementation using PyTorch operations."""
+            # Store original shape
+            original_shape = input_tensor.shape
             
+            # Add batch and channel dimensions if needed
+            if input_tensor.dim() == 2:
+                input_tensor = input_tensor.unsqueeze(0).unsqueeze(0)
+            elif input_tensor.dim() == 3:
+                input_tensor = input_tensor.unsqueeze(0)
+            
+            # Calculate padding
+            pad = kernel_size // 2
+            
+            # Pad the input tensor
+            padded = F.pad(input_tensor, (pad, pad, pad, pad), mode='reflect')
+            
+            # Unfold to get patches
+            patches = F.unfold(padded, kernel_size=kernel_size, stride=1)
+            
+            # Reshape patches for median calculation
+            # patches shape: [batch_size, channels * kernel_size^2, num_patches]
+            batch_size, channels_times_kernel_sq, num_patches = patches.shape
+            channels = input_tensor.shape[1]
+            patches = patches.view(batch_size, channels, kernel_size * kernel_size, num_patches)
+            
+            # Calculate median along the kernel dimension
+            median_patches = torch.median(patches, dim=2)[0]
+            
+            # Reshape back to spatial dimensions
+            h, w = input_tensor.shape[-2:]
+            median_filtered = median_patches.view(batch_size, channels, h, w)
+            
+            # Remove added dimensions and return to original shape
+            result = median_filtered.squeeze()
+            if len(original_shape) == 2:
+                return result
+            else:
+                return result.view(original_shape)
+ 
+        def shift_images_fft(RHO, SIGMA):
+            """
+            Shift images using FFT-based phase multiplication.
+            
+            Parameters:
+            -----------
+            RHO : torch.Tensor, shape (P, M, N), dtype=complex64
+                Collection of P 2D images
+            SIGMA : torch.Tensor, shape (P, 2), dtype=float32
+                Subpixel shifts (row_shift, col_shift) for each image
+            """
+            P, M, N = RHO.shape
+            device = RHO.device
+            
+            # Compute FFT of images
+            RHO_fft = torch.fft.fft2(RHO)
+            
+            # Create frequency grids
+            # For row shifts (y-direction): frequencies from -M/2 to M/2-1
+            ky = torch.arange(M, device=device, dtype=torch.float32)
+            ky = (ky + M // 2) % M - M // 2  # Center frequencies around 0
+            ky = ky.view(M, 1).expand(M, N)
+            
+            # For column shifts (x-direction): frequencies from -N/2 to N/2-1
+            kx = torch.arange(N, device=device, dtype=torch.float32)
+            kx = (kx + N // 2) % N - N // 2  # Center frequencies around 0
+            kx = kx.view(1, N).expand(M, N)
+            
+            # Expand for batch dimension
+            ky = ky.unsqueeze(0).expand(P, -1, -1)  # (P, M, N)
+            kx = kx.unsqueeze(0).expand(P, -1, -1)  # (P, M, N)
+            
+            # Extract shifts (row_shift, col_shift)
+            row_shifts = SIGMA[:, 0].view(P, 1, 1)  # (P, 1, 1)
+            col_shifts = SIGMA[:, 1].view(P, 1, 1)  # (P, 1, 1)
+            
+            # Phase factor: exp(-2πi * (kx*dx + ky*dy))
+            # Note: negative sign because we're shifting the image (not the coordinate system)
+            phase = torch.exp(-2j * torch.pi * (kx * col_shifts / N + ky * row_shifts / M))
+            
+            # Apply phase shift in frequency domain
+            RHO_fft_shifted = RHO_fft * phase
+            
+            # Transform back to spatial domain
+            shifted_RHO = torch.fft.ifft2(RHO_fft_shifted)
+            
+            return shifted_RHO
+
+
+
+
+
+        
+        
+        
+        
+        
+        
+        
+        # kernel_size = 9  
+        # Xre = median_filter_2d(torch.real(data[0,...]), kernel_size=kernel_size)
+        # Xim = median_filter_2d(torch.imag(data[0,...]), kernel_size=kernel_size)
+        # data[0,...] = Xre + 1j * Xim
+        
+ 
+        kernel_size = 3 
+        Xabs = median_filter_2d(torch.abs(data[0,...]), kernel_size=kernel_size)
+        data[0,...] = Xabs * torch.exp(1j * torch.angle(data[0,...]))
+        #self.set_data(data)
+
+
         '''
+
+        import matplotlib.pyplot as plt
+        plt.figure(); plt.imshow((torch.sum( torch.abs( data[0,...] )**2, 0 )).cpu().numpy()); 
+        plt.savefig('/home/beams/ATRIPATH/Desktop/beamtime_092025_9id/fixed_support2.png')
+        
+        '''
+
+        
+
+
+
+        
+        # FIXED PROBE SUPPORT
+        rows, cols = data[0,0,...].shape[-2:]
+        center_r = int( rows // 2 - 0 ) 
+        center_c = int( cols // 2 - 0 ) 
+        radius_r = ( rows * 0.70 / 2 )
+        radius_c = ( cols * 0.70 / 2 )
+        y, x = torch.meshgrid( torch.arange(rows), torch.arange(cols), indexing='ij' )
+        data = data * (((y - center_r)**2 / radius_r**2) + ((x - center_c)**2 / radius_c**2) <= 1)
+         
+         
+         
+         
+
+
+        #X = torch.abs(self.data[0,...])
+        X = torch.abs(data[0,...])
+        com_all = ip.find_center_of_mass(X)
+        shift_all = utils.to_tensor(self.shape[-2:]) // 2 - com_all
+        data[0,...] = shift_images_fft(data[0,...], shift_all)
+        
+        
+        
+        
+        '''
+
         import matplotlib.pyplot as plt
         plt.figure(); plt.imshow(fixed_support.cpu().numpy()); 
         plt.savefig('/home/beams/ATRIPATH/Desktop/beamtime_092025_9id/fixed_support.png')
         
         '''
         
-        # from torchvision.transforms.functional import gaussian_blur
-        # Xabs = gaussian_blur( torch.abs(data[0,...]), kernel_size=(5, 5), sigma=(4.0, 4.0)) 
-        # data[0,...] = Xabs * torch.exp(1j * torch.angle(data[0,...]))
+
                 
         
         # from torchvision.transforms.functional import gaussian_blur
@@ -472,7 +592,7 @@ class Probe(dsbase.ReconstructParameter):
         plt.savefig('/home/beams/ATRIPATH/Desktop/beamtime_092025_9id/mask_shrinkwrap.png')
         
         '''
-        
+        # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         
         
         self.set_data(data)

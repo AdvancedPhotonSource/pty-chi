@@ -361,6 +361,7 @@ class PlanarObject(Object):
         bbox = self.roi_bbox.get_bbox_with_top_left_origin()
         return self.data[:, int(bbox.sy):int(bbox.ey), int(bbox.sx):int(bbox.ex)]
 
+
     # @timer()
     # def constrain_smoothness(self) -> None:
     #     """
@@ -402,10 +403,10 @@ class PlanarObject(Object):
         # Xabs = gaussian_blur( torch.abs(data), kernel_size=(3, 3), sigma=(2.0, 2.0)) 
         # data = Xabs * torch.exp(1j * torch.angle(data))
          
-        # from torchvision.transforms.functional import gaussian_blur
-        # Xre = gaussian_blur( torch.real(data), kernel_size=(3, 3), sigma=(2.0, 2.0)) 
-        # Xim = gaussian_blur( torch.imag(data), kernel_size=(3, 3), sigma=(2.0, 2.0))
-        # data = Xre + 1j * Xim
+        from torchvision.transforms.functional import gaussian_blur
+        Xre = gaussian_blur( torch.real(data), kernel_size=(5, 5), sigma=(2.0, 2.0)) 
+        Xim = gaussian_blur( torch.imag(data), kernel_size=(5, 5), sigma=(2.0, 2.0))
+        data = Xre + 1j * Xim
          
 
          
@@ -499,7 +500,7 @@ class PlanarObject(Object):
         phs_data = torch.angle( data )
         abs_data = torch.abs( data )
         
-        limHI = 5.00
+        limHI = 2.00
         limLO = 0.01
         maskHI = ( abs_data > limHI ) 
         maskLO = ( abs_data < limLO ) 
@@ -507,13 +508,13 @@ class PlanarObject(Object):
         #abs_data  = ( limLO * maskLO + limHI * maskHI + maskOK * abs_data ) 
         abs_data  = ( limLO * maskLO + 0.5 * abs_data * maskHI + maskOK * abs_data ) 
         
-        limHI = +0.5 * torch.pi
-        limLO = -0.5 * torch.pi
-        maskHI = ( abs_data > limHI ) 
-        maskLO = ( abs_data < limLO ) 
-        maskOK = torch.logical_not( maskHI ) * torch.logical_not( maskLO )
-        #phs_data  = ( limLO * maskLO + limHI * maskHI + maskOK * phs_data ) 
-        phs_data  = ( limLO * maskLO + 0.5 * phs_data * maskHI + maskOK * phs_data ) 
+        # limHI = +0.5 * torch.pi
+        # limLO = -0.5 * torch.pi
+        # maskHI = ( abs_data > limHI ) 
+        # maskLO = ( abs_data < limLO ) 
+        # maskOK = torch.logical_not( maskHI ) * torch.logical_not( maskLO )
+        # phs_data  = ( limLO * maskLO + limHI * maskHI + maskOK * phs_data ) 
+        # #phs_data  = ( limLO * maskLO + 0.5 * phs_data * maskHI + maskOK * phs_data ) 
         
         data = abs_data * torch.exp( 1j * phs_data )
 
@@ -634,73 +635,16 @@ class PlanarObject(Object):
         # #     return
         # # l1_grad = torch.sgn(data) / data.numel()
         # # data = data - self.options.l1_norm_constraint.weight * l1_grad
-        
-        
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # @timer()
-    # def constrain_total_variation(self) -> None:
-    #     if self.options.total_variation.weight <= 0:
-    #         return
-    #     data = self.data
-    #     for i_slice in range(self.n_slices):
-    #         data[i_slice] = ip.total_variation_2d_chambolle(
-    #             data[i_slice], lmbda=self.options.total_variation.weight, niter=2
-    #         )
-    #     self.set_data(data)
-    
     @timer()
     def constrain_total_variation(self) -> None:
-        
-        # if self.options.total_variation.weight < 0:            # if self.options.total_variation.weight <= 0:
-        #     return
-        
-    
+        if self.options.total_variation.weight <= 0:
+            return
         data = self.data
-        
-         
-        # from torchvision.transforms.functional import gaussian_blur
-        # Xre = gaussian_blur( torch.real(data), kernel_size=(3, 3), sigma=(2.0, 2.0)) 
-        # Xim = gaussian_blur( torch.imag(data), kernel_size=(3, 3), sigma=(2.0, 2.0))
-        # data = Xre + 1j * Xim
-        
-        '''
-        import numpy as np
-        import matplotlib.pyplot as plt
-        plt.figure(); plt.imshow(np.abs( data[0,...].cpu().numpy())); 
-        plt.savefig('/home/beams/ATRIPATH/Desktop/beamtime_092025_9id/object_fixed_support.png')
-
-        '''
-        
-
-        if self.options.total_variation.weight > 0:
-            for i_slice in range(self.n_slices):
-                data[i_slice] = ip.total_variation_2d_chambolle(
-                    data[i_slice], lmbda=self.options.total_variation.weight, niter=2
-                )
-            
-
+        for i_slice in range(self.n_slices):
+            data[i_slice] = ip.total_variation_2d_chambolle(
+                data[i_slice], lmbda=self.options.total_variation.weight, niter=2
+            )
         self.set_data(data)
 
     @timer()
