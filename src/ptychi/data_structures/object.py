@@ -78,31 +78,11 @@ class Object(dsbase.ReconstructParameter):
 
     @timer()
     def constrain_l1_norm(self):
-        
-        
-        
         if self.options.l1_norm_constraint.weight <= 0:
             return
-        
-        
         data = self.data
-        
-        
-        # from torchvision.transforms.functional import gaussian_blur
-        # Xre = gaussian_blur( torch.real(data), kernel_size=(5, 5), sigma=(4.0, 4.0)) 
-        # Xim = gaussian_blur( torch.imag(data), kernel_size=(5, 5), sigma=(4.0, 4.0))
-        # data = Xre + 1j * Xim
-        
-        from torchvision.transforms.functional import gaussian_blur
-        Xabs = gaussian_blur( torch.abs(data), kernel_size=(7, 7), sigma=(6.0, 6.0)) 
-        data = Xabs * torch.exp(1j * torch.angle(data))
-        
-        
-        
-        # l1_grad = torch.sgn(data) / data.numel()
-        # data = data - self.options.l1_norm_constraint.weight * l1_grad
-        
-        
+        l1_grad = torch.sgn(data) / data.numel()
+        data = data - self.options.l1_norm_constraint.weight * l1_grad
         self.set_data(data)
         logger.debug("L1 norm constraint applied to object.")
         
@@ -407,6 +387,8 @@ class PlanarObject(Object):
         Smooth the magnitude of the object.
         """
         
+        # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        
         data = self.data
         
 
@@ -425,19 +407,67 @@ class PlanarObject(Object):
         # Xim = gaussian_blur( torch.imag(data), kernel_size=(3, 3), sigma=(2.0, 2.0))
         # data = Xre + 1j * Xim
          
+
          
          
-         
-         
-        exp_phs_data = torch.exp( 1j * torch.angle( data )) 
-        abs_data = torch.abs(data)
-        limHI = 2.00
-        limLO = 1e-2
-        maskHI = ( abs_data > limHI ) 
-        maskLO = ( abs_data < limLO ) 
-        maskOK = torch.logical_not( maskHI ) * torch.logical_not( maskLO )
-        data = ( limLO * maskLO + limHI * maskHI + maskOK * abs_data ) * exp_phs_data
+        # import torch.nn.functional as F
         
+        # def median_filter_2d(input_tensor, kernel_size):
+        #     """Custom 2D median filter implementation using PyTorch operations."""
+        #     # Store original shape
+        #     original_shape = input_tensor.shape
+            
+        #     # Add batch and channel dimensions if needed
+        #     if input_tensor.dim() == 2:
+        #         input_tensor = input_tensor.unsqueeze(0).unsqueeze(0)
+        #     elif input_tensor.dim() == 3:
+        #         input_tensor = input_tensor.unsqueeze(0)
+            
+        #     # Calculate padding
+        #     pad = kernel_size // 2
+            
+        #     # Pad the input tensor
+        #     padded = F.pad(input_tensor, (pad, pad, pad, pad), mode='reflect')
+            
+        #     # Unfold to get patches
+        #     patches = F.unfold(padded, kernel_size=kernel_size, stride=1)
+            
+        #     # Reshape patches for median calculation
+        #     # patches shape: [batch_size, channels * kernel_size^2, num_patches]
+        #     batch_size, channels_times_kernel_sq, num_patches = patches.shape
+        #     channels = input_tensor.shape[1]
+        #     patches = patches.view(batch_size, channels, kernel_size * kernel_size, num_patches)
+            
+        #     # Calculate median along the kernel dimension
+        #     median_patches = torch.median(patches, dim=2)[0]
+            
+        #     # Reshape back to spatial dimensions
+        #     h, w = input_tensor.shape[-2:]
+        #     median_filtered = median_patches.view(batch_size, channels, h, w)
+            
+        #     # Remove added dimensions and return to original shape
+        #     result = median_filtered.squeeze()
+        #     if len(original_shape) == 2:
+        #         return result
+        #     else:
+        #         return result.view(original_shape)
+        
+        # # kernel_size = 9  
+        # # Xre = median_filter_2d(torch.real(data[0,...]), kernel_size=kernel_size)
+        # # Xim = median_filter_2d(torch.imag(data[0,...]), kernel_size=kernel_size)
+        # # data[0,...] = Xre + 1j * Xim
+        
+        # kernel_size = 3  
+        # Xabs = median_filter_2d(torch.abs(data[0,...]), kernel_size=kernel_size)
+        # data[0,...] = Xabs * torch.exp(1j * torch.angle(data[0,...]))
+         
+         
+         
+         
+         
+         
+         
+         
         
         # if self.options.smoothness_constraint.alpha <= 0:
         #     return
@@ -452,10 +482,172 @@ class PlanarObject(Object):
         #     slc0 = data[i_slice]
         #     slc = ip.convolve2d(slc0, psf, "same")
         #     data[i_slice] = slc
+         
+         
+         
+         
+         
+         
+         
+         
+         
+         
+         
+         
+         
+         
+        phs_data = torch.angle( data )
+        abs_data = torch.abs( data )
+        
+        limHI = 5.00
+        limLO = 0.01
+        maskHI = ( abs_data > limHI ) 
+        maskLO = ( abs_data < limLO ) 
+        maskOK = torch.logical_not( maskHI ) * torch.logical_not( maskLO )
+        #abs_data  = ( limLO * maskLO + limHI * maskHI + maskOK * abs_data ) 
+        abs_data  = ( limLO * maskLO + 0.5 * abs_data * maskHI + maskOK * abs_data ) 
+        
+        limHI = +0.5 * torch.pi
+        limLO = -0.5 * torch.pi
+        maskHI = ( abs_data > limHI ) 
+        maskLO = ( abs_data < limLO ) 
+        maskOK = torch.logical_not( maskHI ) * torch.logical_not( maskLO )
+        #phs_data  = ( limLO * maskLO + limHI * maskHI + maskOK * phs_data ) 
+        phs_data  = ( limLO * maskLO + 0.5 * phs_data * maskHI + maskOK * phs_data ) 
+        
+        data = abs_data * torch.exp( 1j * phs_data )
+
             
             
             
         self.set_data(data)
+
+
+
+
+        
+        # # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        
+        # rows, cols = self.data[0,...].shape[-2:]
+        # center_r = int( rows // 2 - 0 * rows / 100 ) 
+        # center_c = int( cols // 2 - 0 * cols / 100 ) 
+        # radius_r = ( rows * 0.25 )
+        # radius_c = ( cols * 0.20 )
+        # y, x = torch.meshgrid( torch.arange(rows), torch.arange(cols), indexing='ij' )
+        # dist = ((y - center_r)**2 / radius_r**2) + ((x - center_c)**2 / radius_c**2)
+        # fixed_support = dist <= 1
+  
+
+        # # y_coords, x_coords = torch.meshgrid(torch.arange(rows), torch.arange(cols), indexing='ij')
+
+        # # # Translate coordinates to ellipse center
+        # # x_translated = x_coords - center_x
+        # # y_translated = y_coords - center_y
+
+        # # # Convert angle to radians
+        # # angle_radians = math.radians(1)
+
+        # # # Rotate coordinates
+        # # x_rotated = x_translated * math.cos(angle_radians) + y_translated * math.sin(angle_radians)
+        # # y_rotated = -x_translated * math.sin(angle_radians) + y_translated * math.cos(angle_radians)
+
+        # # # Apply ellipse equation
+        # # ellipse_equation_result = (x_rotated / semi_major_axis)**2 + (y_rotated / semi_minor_axis)**2
+
+        # # mask = (ellipse_equation_result <= 1).float()
+    
+  
+  
+        
+        # # fixed_support = torch.zeros(self.data.shape[-2:], dtype = torch.float32)
+        # # rows, cols = self.data.shape[-2:]
+        # # center_r = int( rows // 2 - 1 * rows / 100 ) 
+        # # center_c = int( cols // 2 - 1 * cols / 100 ) 
+        # # len_r = int( rows * 0.20 )
+        # # len_c = int( cols * 0.15 )
+        # # fixed_support[ center_r - len_r : center_r + len_r, center_c - len_c : center_c + len_c ] = 1
+ 
+ 
+ 
+ 
+        # w = 0.3
+        # data = w * self.data * fixed_support[None,...] + (1-w) * self.data
+        
+        # # w = 0.5
+        # # data = torch.abs( data ) * torch.exp(1j * ( w * torch.angle( data ) + (1-w) *  torch.angle( data ) * fixed_support[None,...] ))
+  
+        # #data[torch.abs(data)==0] = 0.9
+
+        # self.set_data(data)
+        
+        # '''
+        
+
+        # import numpy as np
+        # import matplotlib.pyplot as plt
+        
+        # plt.figure(); plt.imshow(np.abs( self.data[0,:,:].cpu().numpy())); 
+        # plt.savefig('/home/beams/ATRIPATH/Desktop/beamtime_092025_9id/fixed_support.png', dpi=600)
+        # plt.close('all')
+        
+        # plt.figure(); plt.imshow(np.abs( ( self.data[0,:,:] * fixed_support ).cpu().numpy())); 
+        # plt.savefig('/home/beams/ATRIPATH/Desktop/beamtime_092025_9id/object_fixed_support.png', dpi=600)
+        # plt.close('all')
+        
+        # '''
+        
+        
+        
+        
+        
+        # # if self.options.l2_norm_constraint.weight <= 0:
+        # #     return
+        # # data = self.data
+        # # l2_grad = data * 2 / data.numel()
+        # # data = data - self.options.l2_norm_constraint.weight * l2_grad
+        # # self.set_data(data)
+        # # logger.debug("L2 norm constraint applied to object.")
+
+
+
+        
+        # from torchvision.transforms.functional import gaussian_blur
+        
+        # ks = int( self.options.l1_norm_constraint.weight )
+        # sg = float( self.options.l1_norm_constraint.weight - 1)
+        
+        # # data_blur = gaussian_blur( torch.abs(data), kernel_size=(ks, ks), sigma=(sg, sg)) 
+        # # w = 0.5
+        # # data = w * (data_blur * torch.exp(1j * torch.angle(data))) + (1-w) * data
+        
+        # from torchvision.transforms.functional import gaussian_blur
+        # Xre = gaussian_blur( torch.real(data), kernel_size=(ks, ks), sigma=(sg, sg)) 
+        # Xim = gaussian_blur( torch.imag(data), kernel_size=(ks, ks), sigma=(sg, sg))
+        # data_blur = Xre + 1j * Xim
+
+        # w = 0.7
+        # data = w * data_blur + (1-w) * data
+        
+        
+        
+        # # if self.options.l1_norm_constraint.weight <= 0:
+        # #     return
+        # # l1_grad = torch.sgn(data) / data.numel()
+        # # data = data - self.options.l1_norm_constraint.weight * l1_grad
+        
+        
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
