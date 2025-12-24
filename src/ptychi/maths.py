@@ -213,6 +213,10 @@ def orthogonalize_svd(
 def project(a, b, dim=None):
     """Return complex vector projection of a onto b for along given axis."""
     projected_length = inner(a, b, dim=dim, keepdims=True) / inner(b, b, dim=dim, keepdims=True)
+    
+    # if the inner product of b with itself has any zeros:
+    projected_length = torch.nan_to_num(projected_length, nan=0.0)
+    
     return projected_length * b
 
 def inner(x, y, dim=None, keepdims=False):
