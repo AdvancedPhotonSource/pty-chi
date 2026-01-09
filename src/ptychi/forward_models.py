@@ -19,6 +19,7 @@ from ptychi.propagate import (
 from ptychi.metrics import MSELossOfSqrt
 import ptychi.image_proc as ip
 from ptychi.timing.timer_utils import timer
+from ptychi.utils import move_nested_tensors_to_device
 
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group
@@ -86,6 +87,31 @@ class ForwardModel(torch.nn.Module):
                 self.intermediate_variables[name].append(var.detach())
             else:
                 self.intermediate_variables[name] = var.detach()
+
+    def move_intermediate_variables_to_device(self, device):
+        inter = self.intermediate_variables
+        if inter is None:
+            return
+        if isinstance(device, str):
+            device = torch.device(device)
+
+        if dataclasses.is_dataclass(inter):
+            for field in dataclasses.fields(inter):
+                value = getattr(inter, field.name)
+                if value is None:
+                    continue
+                setattr(inter, field.name, move_nested_tensors_to_device(value, device))
+        elif isinstance(inter, dict):
+            items = inter.items()
+            for key, value in list(items):
+                if value is None:
+                    continue
+                inter[key] = move_nested_tensors_to_device(value, device)
+        else:
+            for key, value in vars(inter).items():
+                if value is None:
+                    continue
+                setattr(inter, key, move_nested_tensors_to_device(value, device))
 
 
 class PlanarPtychographyForwardModel(ForwardModel):

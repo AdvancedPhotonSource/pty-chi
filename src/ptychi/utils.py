@@ -331,6 +331,19 @@ def to_tensor(data: Union[ndarray, Tensor], device=None, dtype=None) -> Tensor:
     return data
 
 
+def move_nested_tensors_to_device(value, device):
+    """Recursively move tensors contained in lists/tuples/dicts to a device."""
+    if torch.is_tensor(value):
+        return value.to(device)
+    if isinstance(value, list):
+        return [move_nested_tensors_to_device(v, device) for v in value]
+    if isinstance(value, tuple):
+        return tuple(move_nested_tensors_to_device(v, device) for v in value)
+    if isinstance(value, dict):
+        return {k: move_nested_tensors_to_device(v, device) for k, v in value.items()}
+    return value
+
+
 def to_numpy(data: Union[ndarray, Tensor]) -> ndarray:
     if isinstance(data, Tensor):
         data = data.detach().cpu().numpy()

@@ -358,6 +358,50 @@ class PtychographyTask(Task):
                     )
                 else:
                     raise ValueError(f"Invalid parameter name: {param}")
+
+    def set_large_tensor_device(
+        self,
+        device: Literal["cpu", "cuda"] | torch.device | None = None,
+    ) -> None:
+        """Move large task buffers between CPU and a target device.
+
+        This helper is aimed at multi-task workflows where only one task is
+        active on the accelerator at a time. Call it with ``device="cpu"`` to
+        offload the heavy object/probe/diffraction buffers to system memory,
+        and call it again (without arguments, or with an explicit device string)
+        before resuming the task to bring the tensors back to the accelerator.
+
+        Parameters
+        ----------
+        device : str | torch.device | None, optional
+            Target device for the large buffers. If None, tensors are moved back
+            to the current default device. If a string is given, it must be either
+            "cpu" or "cuda".
+        """
+
+        if device is None:
+            device = torch.get_default_device()
+        device = torch.device(device)
+
+        if self.reconstructor is None:
+            raise RuntimeError("Reconstructor is not built yet.")
+
+        parameter_group = self.reconstructor.parameter_group
+        with torch.no_grad():
+            # Move object and probe buffers.
+            parameter_group.object.to(device)
+            parameter_group.probe.to(device)
+
+            # Move diffraction patterns.
+            self.dataset.patterns = self.dataset.patterns.to(device)
+            # Keep dataset bookkeeping in sync with where patterns live.
+            self.dataset.save_data_on_device = device.type != "cpu"
+
+            # Move intermediate variables in forward model.
+            self.reconstructor.forward_model.move_intermediate_variables_to_device(device)
+
+        if device.type == "cpu":
+            AcceleratorModuleWrapper.get_module().empty_cache()
                 
     def get_options_as_dict(self) -> dict:
         return self.options.get_dict()
