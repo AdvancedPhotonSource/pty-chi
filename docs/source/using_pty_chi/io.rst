@@ -69,3 +69,47 @@ and will be disregarded when loading the settings if they are present.
 - ``OPRModeWeightsOptions.initial_weights``
 
 These data should be exported or loaded separately.
+
+
+Outputs
+-------
+
+Once a reconstruction finishes, a :class:`~ptychi.api.task.PtychographyTask`
+already holds every optimizable tensor you might want to examine or save.
+Use the helper accessors below instead of reaching into internal buffers so
+that lazy object/probe generators can finalize their states before you read
+them.
+
+Fetching reconstructed tensors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``task.get_data(name)`` returns a detached tensor on the current device for
+any of ``"object"``, ``"probe"``, ``"probe_positions"``, or
+``"opr_mode_weights"``. To immediately move the data to host memory, call
+``task.get_data_to_cpu(name, as_numpy=True)``. The shortcut methods
+``task.get_probe_positions_x`` and ``task.get_probe_positions_y`` provide the
+individual coordinate arrays if you only need the scan map. The snippet below
+copies the complex object estimate to NumPy and saves it:
+
+.. code-block:: python
+
+    obj = task.get_data_to_cpu("object", as_numpy=True)
+    np.save("object_final.npy", obj)
+
+Extracting the ROI content
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Pty-Chi tracks which portion of the simulation grid the scan illuminated so
+you can focus on that cropped region. Grab the current object parameter from
+the reconstructor, fetch its bounding box, and then request the ROI tensor:
+
+.. code-block:: python
+
+    obj_param = task.reconstructor.parameter_group.object
+    bbox = obj_param.get_probe_position_frame_roi_bounding_box()
+    obj_roi = obj_param.get_roi(bbox)
+
+``obj_roi`` now contains only the slices that lie inside the illuminated
+bounding box (with bounds reported in probe-position coordinates). You can
+pass that tensor to visualization utilities or convert it to NumPy in the
+same way as other fetched data.
