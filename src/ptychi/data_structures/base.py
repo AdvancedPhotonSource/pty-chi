@@ -192,6 +192,13 @@ class ReconstructParameter(Module):
             return self.tensor.complex()
         else:
             return self.tensor.clone()
+
+    def to(self, device):
+        super().to(device)
+        for sub_module in self.sub_modules:
+            if hasattr(sub_module, "to"):
+                sub_module.to(device)
+        return self
         
     def register_optimizable_sub_module(self, sub_module):
         if sub_module.optimizable and sub_module not in self.optimizable_sub_modules:
