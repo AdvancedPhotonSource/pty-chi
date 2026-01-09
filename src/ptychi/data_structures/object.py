@@ -128,6 +128,29 @@ class Object(dsbase.ReconstructParameter):
     
     def update_pos_origin_coordinates(self, *args, **kwargs):
         raise NotImplementedError
+    
+    def get_probe_position_frame_roi_bounding_box(self) -> dsbase.BoundingBox:
+        """Get the ROI bounding box whose bounds are given by the limits
+        of probe positions.
+
+        Returns
+        -------
+        dsbase.BoundingBox
+            The bounding box.
+        """
+        return self.roi_bbox
+    
+    def get_pixel_frame_roi_bounding_box(self) -> dsbase.BoundingBox:
+        """Get the ROI bounding box whose bounds are given in pixel indices
+        of the object buffer. (0, 0) is the top left corner.
+
+        Returns
+        -------
+        dsbase.BoundingBox
+            The bounding box.
+        """
+        return self.roi_bbox.get_bbox_with_top_left_origin()
+    
 
 
 class PlanarObject(Object):
@@ -224,6 +247,22 @@ class PlanarObject(Object):
 
     def get_slice(self, index):
         return self.data[index, ...]
+    
+    def get_roi(self, bbox: dsbase.BoundingBox) -> Tensor:
+        """Get the object in the ROI defined by the bounding box
+        as a tensor.
+
+        Parameters
+        ----------
+        bbox : dsbase.BoundingBox
+            The bounding box.
+
+        Returns
+        -------
+        Tensor
+            A (n_slices, h', w') tensor of the object in the ROI.
+        """
+        return self.data[..., *bbox.get_slicer()]
 
     @timer()
     def extract_patches(
