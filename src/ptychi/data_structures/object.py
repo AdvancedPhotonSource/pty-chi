@@ -151,7 +151,22 @@ class Object(dsbase.ReconstructParameter):
         """
         return self.roi_bbox.get_bbox_with_top_left_origin()
     
+    def get_roi(self, bbox: dsbase.BoundingBox) -> Tensor:
+        """Get the object in the ROI defined by the bounding box
+        as a tensor.
 
+        Parameters
+        ----------
+        bbox : dsbase.BoundingBox
+            The bounding box.
+
+        Returns
+        -------
+        Tensor
+            A (n_slices, h', w') tensor of the object in the ROI.
+        """
+        return self.data[..., *bbox.get_slicer()]
+    
 
 class PlanarObject(Object):
     """
@@ -247,22 +262,6 @@ class PlanarObject(Object):
 
     def get_slice(self, index):
         return self.data[index, ...]
-    
-    def get_roi(self, bbox: dsbase.BoundingBox) -> Tensor:
-        """Get the object in the ROI defined by the bounding box
-        as a tensor.
-
-        Parameters
-        ----------
-        bbox : dsbase.BoundingBox
-            The bounding box.
-
-        Returns
-        -------
-        Tensor
-            A (n_slices, h', w') tensor of the object in the ROI.
-        """
-        return self.data[..., *bbox.get_slicer()]
 
     @timer()
     def extract_patches(
