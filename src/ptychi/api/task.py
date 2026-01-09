@@ -361,7 +361,7 @@ class PtychographyTask(Task):
 
     def set_large_tensor_device(
         self,
-        device: str | torch.device | None = None,
+        device: Literal["cpu", "cuda"] | torch.device | None = None,
     ) -> None:
         """Move large task buffers between CPU and a target device.
 
@@ -375,7 +375,8 @@ class PtychographyTask(Task):
         ----------
         device : str | torch.device | None, optional
             Target device for the large buffers. If None, tensors are moved back
-            to the current default device.
+            to the current default device. If a string is given, it must be either
+            "cpu" or "cuda".
         """
 
         if device is None:
