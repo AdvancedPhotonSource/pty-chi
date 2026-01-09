@@ -457,5 +457,36 @@ class BoundingBox(torch.nn.Module):
         bbox = BoundingBox(*(self.origin.repeat_interleave(2) + self.tensor), origin=(0, 0))
         return bbox
 
-    def get_slicer(self) -> slice:
-        return (slice(int(self.sy), int(self.ey)), slice(int(self.sx), int(self.ex)))
+    def get_slicer(self) -> Tuple[slice, slice]:
+        """Get a tuple of slice objects that can be used to slice the last
+        two dimensions of the object tensor. If the origin of the current bounding box
+        object is not (0, 0), a new bounding box with the top left origin is created
+        so that the coordinates are given in pixel indices of the object buffer.
+
+        Returns
+        -------
+        slice
+            _description_
+        """
+        if not torch.all(self.origin == 0):
+            bbox = self.get_bbox_with_top_left_origin()
+        else:
+            bbox = self
+        return (slice(int(bbox.sy), int(bbox.ey)), slice(int(bbox.sx), int(bbox.ex)))
+
+    def union(self, other: "BoundingBox") -> "BoundingBox":
+        """Union two bounding boxes.
+        """
+        if not torch.all(self.origin == other.origin):
+            raise ValueError(
+                "Union of bounding boxes with different origins is not supported. "
+                "Hint: you can use `get_bbox_with_top_left_origin` to create a new "
+                "bounding box with the top left origin."
+            )
+        return BoundingBox(
+            sy=min(self.sy, other.sy),
+            ey=max(self.ey, other.ey),
+            sx=min(self.sx, other.sx),
+            ex=max(self.ex, other.ex),
+            origin=self.origin,
+        )
