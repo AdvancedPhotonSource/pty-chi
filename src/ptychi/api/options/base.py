@@ -253,11 +253,13 @@ class ObjectSmoothnessConstraintOptions(FeatureOptions):
     The relaxation smoothing constant. This value should be in the range  0 < alpha <= 1/8.
 
     Smoothing is done by constructing a 3x3 kernel of
-    ```
+
+    ..  code-block::
+
         alpha, alpha,         alpha
         alpha, 1 - 8 * alpha, alpha
         alpha, alpha,         alpha
-    ```
+
     and convolve it with the object magnitude. When `alpha == 1 / 8`, the smoothing power
     is maximal. The value of alpha should not be larger than 1 / 8.
     """
@@ -859,9 +861,10 @@ class OPRModeWeightsOptions(ParameterOptions):
     initial_weights: Union[ndarray] = None
     """
     The initial weight(s) of the eigenmode(s). Acceptable values include the following:
+
     - a (n_scan_points, n_opr_modes) array of initial weights for every point.
     - a (n_opr_modes,) array that gives the weights of each OPR mode. These weights
-        will be duplicated for every point.
+      will be duplicated for every point.
     """
     
     optimizable: bool = False

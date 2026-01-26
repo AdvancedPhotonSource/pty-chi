@@ -56,11 +56,6 @@ Base Options
    :undoc-members:
    :show-inheritance:
 
-.. autoclass:: ptychi.api.options.base.ProbePositionMagnitudeLimitOptions
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 .. autoclass:: ptychi.api.options.base.ForwardModelOptions
    :members:
    :undoc-members:
