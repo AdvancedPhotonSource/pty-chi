@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from .settings import MovieFileTypes, ObjectMovieSettings, PlotTypes, ProbeMovieSettings, PositionsMovieSettings
 
-movie_setting_types = Union[ObjectMovieSettings, ProbeMovieSettings, PositionsMovieSettings]
+# movie_setting_types = Union[ObjectMovieSettings, ProbeMovieSettings, PositionsMovieSettings]
 dataset_name = "frames"
 
 

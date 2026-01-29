@@ -7,9 +7,7 @@ import numpy as np
 from .settings import (
     MovieFileSettings,
     MovieFileTypes,
-    ObjectMovieSettings,
     PlotTypes,
-    ProbeMovieSettings,
     PositionsMovieSettings,
 )
 from .mappings import prepare_movie_subject, movie_setting_types
@@ -93,8 +91,9 @@ class MovieBuilder:
                 compress=self.settings.movie_file.compress,
                 upper_bound=self.settings.movie_file.upper_bound,
                 lower_bound=self.settings.movie_file.lower_bound,
-                image_type=image_type
+                image_type=image_type,
             )
+
     def reset(self):
         self.current_frame = 0
         self.epochs = []
