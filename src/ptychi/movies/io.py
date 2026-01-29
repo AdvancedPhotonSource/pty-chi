@@ -2,16 +2,15 @@
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
 import numpy as np
-from typing import Optional, Union
+from typing import Optional
 import h5py
 from PIL import Image, ImageDraw, ImageFont
 import cv2
 import os
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from .settings import MovieFileTypes, ObjectMovieSettings, PlotTypes, ProbeMovieSettings, PositionsMovieSettings
+from .settings import MovieFileTypes, PlotTypes
 
-# movie_setting_types = Union[ObjectMovieSettings, ProbeMovieSettings, PositionsMovieSettings]
 dataset_name = "frames"
 
 
