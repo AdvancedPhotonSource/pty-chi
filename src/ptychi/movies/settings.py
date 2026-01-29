@@ -15,6 +15,7 @@ class MovieFileTypes(StrEnum):
 class MovieSubjectTypes(StrEnum):
     OBJECT = auto()
     PROBE = auto()
+    POSITIONS = auto()
 
 
 class ProcessFunctionType(StrEnum):
@@ -26,6 +27,10 @@ class ProbePlotTypes(StrEnum):
     INCOHERENT_SUM = auto()
     SEPERATE_MODES = auto()
 
+
+class PlotTypes(StrEnum):
+    IMAGE = auto()
+    LINE_PLOT = auto()
 
 @dataclasses.dataclass
 class SnapshotSettings:
@@ -84,6 +89,16 @@ class ProbeMovieSettings:
     Indices of modes to be selected for plotting. This is only used 
     when `plot_type` is `SEPERATE_MODES`.
     """
+
+    snapshot: SnapshotSettings = dataclasses.field(default_factory=SnapshotSettings)
+
+    movie_file: MovieFileSettings = dataclasses.field(default_factory=MovieFileSettings)
+
+    save_intermediate_data_to_hdf5: bool = False
+
+@dataclasses.dataclass
+class PositionsMovieSettings:
+    # process_function: ProcessFunctionType = ProcessFunctionType.MAGNITUDE
 
     snapshot: SnapshotSettings = dataclasses.field(default_factory=SnapshotSettings)
 

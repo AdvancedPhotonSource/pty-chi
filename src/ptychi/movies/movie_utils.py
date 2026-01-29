@@ -4,8 +4,14 @@
 from typing import Optional
 import numpy as np
 
-from .settings import MovieFileSettings, MovieFileTypes
-
+from .settings import (
+    MovieFileSettings,
+    MovieFileTypes,
+    ObjectMovieSettings,
+    PlotTypes,
+    ProbeMovieSettings,
+    PositionsMovieSettings,
+)
 from .mappings import prepare_movie_subject, movie_setting_types
 from .io import append_array_to_h5, save_movie_to_file
 import os
@@ -70,19 +76,25 @@ class MovieBuilder:
                 frames = F[dataset_name][:]
         else:
             frames = self.frames
-        save_movie_to_file(
-            array=frames,
-            file_type=file_type,
-            output_path=output_path,
-            fps=self.settings.movie_file.fps,
-            enhance_contrast=self.settings.movie_file.high_contrast,
-            colormap=self.settings.movie_file.colormap,
-            titles=[str(i) for i in self.epochs],
-            compress=self.settings.movie_file.compress,
-            upper_bound=self.settings.movie_file.upper_bound,
-            lower_bound=self.settings.movie_file.lower_bound,
-        )
+            if isinstance(self.settings, PositionsMovieSettings):
+                image_type = PlotTypes.LINE_PLOT
+            else:
+                image_type = PlotTypes.IMAGE
 
+            # save arrays as images
+            save_movie_to_file(
+                array=frames,
+                file_type=file_type,
+                output_path=output_path,
+                fps=self.settings.movie_file.fps,
+                enhance_contrast=self.settings.movie_file.high_contrast,
+                colormap=self.settings.movie_file.colormap,
+                titles=[str(i) for i in self.epochs],
+                compress=self.settings.movie_file.compress,
+                upper_bound=self.settings.movie_file.upper_bound,
+                lower_bound=self.settings.movie_file.lower_bound,
+                image_type=image_type
+            )
     def reset(self):
         self.current_frame = 0
         self.epochs = []
@@ -92,7 +104,8 @@ class MovieBuilder:
 class MoviesManager:
     """Class that handles the updating of `MovieBuilder` instances."""
 
-    movie_builders: dict[str, MovieBuilder] = {}
+    def __init__(self):
+        self.movie_builders: dict[str, MovieBuilder] = {}
 
     def add_movie_builder(
         self,

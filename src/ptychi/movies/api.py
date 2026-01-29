@@ -7,6 +7,15 @@ from .mappings import movie_setting_types
 from .settings import MovieFileTypes, MovieFileSettings
 from ptychi.timing.timer_utils import timer
 import ptychi.reconstructors.base as base
+from .io import (
+    append_array_to_h5,
+    numpy_to_gif,
+    numpy_to_mp4,
+    numpy_to_line_plot_gif,
+    numpy_to_line_plot_mp4,
+    save_movie_to_file,
+)
+from .settings import ObjectMovieSettings, ProbeMovieSettings, PositionsMovieSettings, PlotTypes
 
 MOVIES_MANAGER = MoviesManager()
 ENABLE_MOVIES = False

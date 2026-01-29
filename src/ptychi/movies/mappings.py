@@ -7,12 +7,13 @@ from ptychi.movies.settings import (
     ProbeMovieSettings,
     ProbePlotTypes,
     ProcessFunctionType,
+    PositionsMovieSettings,
 )
 import ptychi.reconstructors.base as base
 import torch
 import numpy as np
 
-movie_setting_types = Union[ObjectMovieSettings, ProbeMovieSettings]
+movie_setting_types = Union[ObjectMovieSettings, ProbeMovieSettings, PositionsMovieSettings]
 
 
 def prepare_movie_subject(
@@ -23,6 +24,8 @@ def prepare_movie_subject(
         array_out = prepare_object(reconstructor, movie_settings)
     elif isinstance(movie_settings, ProbeMovieSettings):
         array_out = prepare_probe(reconstructor, movie_settings)
+    elif isinstance(movie_settings, PositionsMovieSettings):
+        array_out = prepare_positions(reconstructor, movie_settings)
 
     scale = movie_settings.snapshot.scale
     array_out = array_out.cpu().detach().numpy()[::scale, ::scale]
@@ -59,4 +62,8 @@ def prepare_probe(reconstructor: "base.Reconstructor", movie_settings: ProbeMovi
         array_out = array_out.reshape(shape=(-1, probe_width))
         array_out = array_out.transpose(1, 0)
 
+    return array_out
+
+def prepare_positions(reconstructor: "base.Reconstructor", movie_settings: PositionsMovieSettings):
+    array_out = reconstructor.parameter_group.probe_positions.data
     return array_out
