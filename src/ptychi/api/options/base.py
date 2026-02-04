@@ -565,16 +565,31 @@ class ProbeOrthogonalizeOPRModesOptions(FeatureOptions):
 @dataclasses.dataclass
 class ProbeSupportConstraintOptions(FeatureOptions):
     """
-    Settings for probe shrinkwrapping, where small values are set to 0.
+    Settings for probe support constraint. The constraint applies shrinkwrapping, 
+    where small values below a threshold are set to 0. It can also optionally
+    apply a probe support mask before shrinkwrapping.
     """
         
     enabled: bool = False
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
-
+    
+    fixed_probe_support: str = enums.ProbeSupportMethods.NONE
+    """
+    If not `NONE`, a fixed probe support mask is generated and applied before shrinkwrapping.
+    The mask is applied to each incoherent probe mode. Choices are: `ELLIPSE`, `RECTANGLE`.
+    """
+    
+    fixed_probe_support_params: Union[ndarray, Tensor] = None
+    """
+    If using the use_fixed_probe_support option, define the center, widths, and heights
+    for the ellipse/rectangle, format is:
+    [center (rows), center (columns), side length (rows), side length (columns)]
+    """
+    
     threshold: float = 0.005
     """
-    The threshold for the probe support constraint. The value of a pixel (x, y) is set to 0
+    The threshold for shrinkwrapping. The value of a pixel (x, y) is set to 0
     if `p(x, y) < [max(blur(p)) * `threshold`](x, y)`.
     """
 
