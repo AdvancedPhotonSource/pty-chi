@@ -431,6 +431,30 @@ class PlanarObject(Object):
         self.set_data(data)
 
     @timer()
+    def constrain_hard_limits_magnitude_phase(self) -> None:
+
+        data = self.data
+        
+        phs_data = torch.angle(data)
+        abs_data = torch.abs(data)
+        
+        def project_hard_limits(X, limits):
+            limHI = limits[-1]
+            limLO = limits[-2]
+            maskHI = (X > limHI) 
+            maskLO = (X < limLO) 
+            maskOK = torch.logical_not(maskHI) * torch.logical_not(maskLO)
+            X = (limLO * maskLO + limHI * maskHI + maskOK * X)  
+            return X
+        
+        abs_data  = project_hard_limits(abs_data, self.options.hard_limits_magnitude_phase.abs_lim) 
+        phs_data  = project_hard_limits(phs_data, self.options.hard_limits_magnitude_phase.phs_lim) 
+        
+        data = abs_data * torch.exp( 1j * phs_data )
+        
+        self.set_data(data)
+        
+    @timer()
     def remove_grid_artifacts(self):
         data = self.data
         for i_slice in range(self.n_slices):
