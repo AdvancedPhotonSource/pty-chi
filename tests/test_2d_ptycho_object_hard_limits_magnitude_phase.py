@@ -9,9 +9,6 @@ from ptychi.utils import get_suggested_object_size, get_default_complex_dtype, g
 
 import test_utils as tutils
 
-import os
-os.environ["PTYCHO_CI_DATA_DIR"] = "/net/s8iddata/export/8-id-ECA/Analysis/atripath/ptychointerim-data/ci_data"
-
 class Tester2DPtychoObjectHardLimitsMagnitudePhase(tutils.TungstenDataTester):
     
     @pytest.mark.local
