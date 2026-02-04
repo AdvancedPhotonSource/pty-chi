@@ -11,8 +11,6 @@ import ptychi.utils as utils
 
 import test_utils as tutils
 
-import os
-os.environ["PTYCHO_CI_DATA_DIR"] = "/net/s8iddata/export/8-id-ECA/Analysis/atripath/ptychointerim-data/ci_data"
 class Tester2DPtychoProbePowerConstraint(tutils.TungstenDataTester):
 
     @tutils.TungstenDataTester.wrap_recon_tester(name='test_2d_ptycho_probe_power_constraint_lsqml_no_propagation')
