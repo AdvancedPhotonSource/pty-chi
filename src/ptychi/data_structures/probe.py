@@ -350,37 +350,46 @@ class Probe(dsbase.ReconstructParameter):
     ) -> None:
         if self.probe_power <= 0.0:
             return
+        if self.options.power_constraint.use_propagated_field:
 
-        if isinstance(opr_mode_weights, oprweights.OPRModeWeights):
-            opr_mode_weights = opr_mode_weights.data
+            if isinstance(opr_mode_weights, oprweights.OPRModeWeights):
+                opr_mode_weights = opr_mode_weights.data
 
-        if propagator is None:
-            propagator = FourierPropagator()
+            if propagator is None:
+                propagator = FourierPropagator()
 
-        # Shape of probe_composed:        (n_modes, h, w)
-        if self.has_multiple_opr_modes:
-            avg_weights = opr_mode_weights.mean(dim=0)
-            probe_composed = self.get_unique_probes(avg_weights, mode_to_apply=0)
-        else:
-            probe_composed = self.get_opr_mode(0)
+            # Shape of probe_composed:        (n_modes, h, w)
+            if self.has_multiple_opr_modes:
+                avg_weights = opr_mode_weights.mean(dim=0)
+                probe_composed = self.get_unique_probes(avg_weights, mode_to_apply=0)
+            else:
+                probe_composed = self.get_opr_mode(0)
 
-        propagated_probe = propagator.propagate_forward(probe_composed)
-        if isinstance(propagator, FourierPropagator):
-            # Cancel the normalization factor so that the power is conserved.
-            if propagator.norm == "backward" or propagator.norm is None:
-                propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) / self.data.size().numel()
-            elif propagator.norm == "forward":
-                propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) * self.data.size().numel()
+            propagated_probe = propagator.propagate_forward(probe_composed)
+            if isinstance(propagator, FourierPropagator):
+                # Cancel the normalization factor so that the power is conserved.
+                if propagator.norm == "backward" or propagator.norm is None:
+                    propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) / self.data.size().numel()
+                elif propagator.norm == "forward":
+                    propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) * self.data.size().numel()
+                else:
+                    propagated_probe_power = torch.sum(propagated_probe.abs() ** 2)
             else:
                 propagated_probe_power = torch.sum(propagated_probe.abs() ** 2)
+            power_correction = torch.sqrt(self.probe_power / propagated_probe_power)
+
+            self.set_data(self.data * power_correction)
+            object_.set_data(object_.data / power_correction)
+
+            logger.info("Probe and object scaled by {}.".format(power_correction))
+            
         else:
-            propagated_probe_power = torch.sum(propagated_probe.abs() ** 2)
-        power_correction = torch.sqrt(self.probe_power / propagated_probe_power)
+ 
+            probe_power = torch.sum(torch.abs(self.data[0,...]) ** 2)
+            power_correction = torch.sqrt(self.probe_power / probe_power)
+            self.set_data(self.data[0,...] * power_correction)
 
-        self.set_data(self.data * power_correction)
-        object_.set_data(object_.data / power_correction)
-
-        logger.info("Probe and object scaled by {}.".format(power_correction))
+            logger.info("Probe scaled by {}.".format(power_correction))
 
     def constrain_support(self):
         """

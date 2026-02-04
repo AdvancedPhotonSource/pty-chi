@@ -11,9 +11,64 @@ import ptychi.utils as utils
 
 import test_utils as tutils
 
-
+import os
+os.environ["PTYCHO_CI_DATA_DIR"] = "/net/s8iddata/export/8-id-ECA/Analysis/atripath/ptychointerim-data/ci_data"
 class Tester2DPtychoProbePowerConstraint(tutils.TungstenDataTester):
 
+    @tutils.TungstenDataTester.wrap_recon_tester(name='test_2d_ptycho_probe_power_constraint_lsqml_no_propagation')
+    def test_2d_ptycho_probe_power_constraint_lsqml_no_propagation(self):
+        self.setup_ptychi(cpu_only=False)
+
+        data, probe, pixel_size_m, positions_px = self.load_tungsten_data(pos_type='true', additional_opr_modes=3)
+        object_init = torch.ones(
+            [1, *utils.get_suggested_object_size(positions_px, probe.shape[-2:], extra=100)], 
+            dtype=utils.get_default_complex_dtype()
+        )
+        
+        options = LSQMLOptions()
+        options.data_options.data = data
+        
+        options.object_options.initial_guess = object_init
+        options.object_options.pixel_size_m = pixel_size_m
+        options.object_options.optimizable = True
+        options.object_options.optimizer = api.Optimizers.SGD
+        options.object_options.step_size = 1
+        
+        options.probe_options.power_constraint.use_propagated_field = bool( 0 )
+        options.probe_options.power_constraint.probe_power = np.mean(np.sum(data, (-1, -2)), axis=0) / np.prod(data.shape[-2:]) 
+        options.probe_options.power_constraint.enabled = True
+        
+        options.probe_options.initial_guess = probe * torch.sqrt(options.probe_options.power_constraint.probe_power / torch.sum(torch.abs(probe[0,...])**2)) 
+        options.probe_options.optimizable = True
+        options.probe_options.optimizer = 'sgd'
+        options.probe_options.step_size = 1
+        
+        options.probe_position_options.position_x_px = positions_px[:, 1]
+        options.probe_position_options.position_y_px = positions_px[:, 0]
+        options.probe_position_options.correction_options.update_magnitude_limit = 5.0
+        options.probe_position_options.optimizable = True
+        options.probe_position_options.optimizer = api.Optimizers.ADAM
+        options.probe_position_options.step_size = 1e-1
+        
+        options.opr_mode_weight_options.initial_weights = np.array([1, 1e-6, 1e-6, 1e-6])
+        options.opr_mode_weight_options.optimize_intensity_variation = True
+        options.opr_mode_weight_options.optimizable = True
+        
+        options.reconstructor_options.num_epochs = 4
+        options.reconstructor_options.batch_size = 40
+        options.reconstructor_options.default_device = api.Devices.GPU
+        options.reconstructor_options.displayed_loss_function = api.LossFunctions.MSE_SQRT
+        options.reconstructor_options.allow_nondeterministic_algorithms = False
+        
+        with PtychographyTask(options) as task:
+            task.run()
+            # This should be equivalent to:
+            # for _ in range(64):
+            #     task.run(1)
+            
+            recon = task.get_data_to_cpu(name='object', as_numpy=True)[0]
+        return recon
+    
     @tutils.TungstenDataTester.wrap_recon_tester(name='test_2d_ptycho_probe_power_constraint_lsqml')
     def test_2d_ptycho_probe_power_constraint_lsqml(self):
         self.setup_ptychi(cpu_only=False)
@@ -128,6 +183,7 @@ if __name__ == '__main__':
 
     tester = Tester2DPtychoProbePowerConstraint()
     tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=True)
+    tester.test_2d_ptycho_probe_power_constraint_lsqml_no_propagation()
     tester.test_2d_ptycho_probe_power_constraint_ad()
     tester.test_2d_ptycho_probe_power_constraint_lsqml()
     
