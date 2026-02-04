@@ -125,3 +125,9 @@ class MagPhaseComponents(StrEnum):
     MAGNITUDE = auto()
     PHASE = auto()
     BOTH = auto()
+
+
+class ProbeSupportMethods(StrEnum):
+    NONE = auto()
+    ELLIPSE = auto()
+    RECTANGLE = auto()
