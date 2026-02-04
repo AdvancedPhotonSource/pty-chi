@@ -9,8 +9,8 @@ from ptychi.utils import get_suggested_object_size, get_default_complex_dtype, g
 
 import test_utils as tutils
 
-# import os
-# os.environ["PTYCHO_CI_DATA_DIR"] = "/net/s8iddata/export/8-id-ECA/Analysis/atripath/ptychointerim-data/ci_data"
+import os
+os.environ["PTYCHO_CI_DATA_DIR"] = "/net/s8iddata/export/8-id-ECA/Analysis/atripath/ptychointerim-data/ci_data"
 
 class Tester2DPtychoObjectHardLimitsMagnitudePhase(tutils.TungstenDataTester):
     
@@ -32,8 +32,8 @@ class Tester2DPtychoObjectHardLimitsMagnitudePhase(tutils.TungstenDataTester):
         options.object_options.build_preconditioner_with_all_modes = True
         
         options.object_options.hard_limits_magnitude_phase.enabled = True
-        options.object_options.hard_limits_magnitude_phase.abs_lim = torch.asarray([1.0e-2, 2.0])
-        options.object_options.hard_limits_magnitude_phase.phs_lim = torch.asarray([-0.4 * torch.pi, +0.4 * torch.pi])
+        options.object_options.hard_limits_magnitude_phase.abs_lim = torch.asarray([0.5, 1.2])
+        options.object_options.hard_limits_magnitude_phase.phs_lim = torch.asarray([-0.2 * torch.pi, +0.2 * torch.pi])
         
         options.probe_options.initial_guess = probe
         options.probe_options.optimizable = True

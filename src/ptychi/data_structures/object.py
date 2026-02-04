@@ -438,20 +438,18 @@ class PlanarObject(Object):
         phs_data = torch.angle(data)
         abs_data = torch.abs(data)
         
-        limHI = self.options.hard_limits_magnitude_phase.abs_lim[-1]
-        limLO = self.options.hard_limits_magnitude_phase.abs_lim[-2]
-        maskHI = (abs_data > limHI) 
-        maskLO = (abs_data < limLO) 
-        maskOK = torch.logical_not(maskHI) * torch.logical_not(maskLO)
-        abs_data = (limLO * maskLO + limHI * maskHI + maskOK * abs_data) 
-
-        limHI = self.options.hard_limits_magnitude_phase.phs_lim[-1]
-        limLO = self.options.hard_limits_magnitude_phase.phs_lim[-2]
-        maskHI = (phs_data > limHI) 
-        maskLO = (phs_data < limLO) 
-        maskOK = torch.logical_not(maskHI) * torch.logical_not(maskLO)
-        phs_data  = (limLO * maskLO + limHI * maskHI + maskOK * phs_data) 
-
+        def project_hard_limits(X, limits):
+            limHI = limits[-1]
+            limLO = limits[-2]
+            maskHI = (X > limHI) 
+            maskLO = (X < limLO) 
+            maskOK = torch.logical_not(maskHI) * torch.logical_not(maskLO)
+            X = (limLO * maskLO + limHI * maskHI + maskOK * X)  
+            return X
+        
+        abs_data  = project_hard_limits(abs_data, self.options.hard_limits_magnitude_phase.abs_lim) 
+        phs_data  = project_hard_limits(phs_data, self.options.hard_limits_magnitude_phase.phs_lim) 
+        
         data = abs_data * torch.exp( 1j * phs_data )
         
         self.set_data(data)
