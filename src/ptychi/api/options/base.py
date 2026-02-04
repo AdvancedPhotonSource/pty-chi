@@ -217,7 +217,7 @@ class ObjectMultisliceRegularizationOptions(FeatureOptions):
 
 @dataclasses.dataclass
 class ObjectHardLimitsMagnitudePhase(FeatureOptions):
-    """Settings for the L1 norm constraint."""
+    """Settings for the hard constraint on sample mangitude and phase limits."""
 
     enabled: bool = False
 
