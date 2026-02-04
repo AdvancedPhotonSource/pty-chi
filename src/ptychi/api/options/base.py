@@ -571,7 +571,20 @@ class ProbeSupportConstraintOptions(FeatureOptions):
     enabled: bool = False
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
-
+    
+    use_fixed_probe_support: str = None
+    '''
+    Specify the type of fixed putative probe support to be used as a constraint for each shared
+    probe mode; choices are: 'ELLIPSE', 'RECTANGLE'
+    '''
+    
+    fixed_probe_support_params: Union[ndarray, Tensor] = None
+    '''
+    If using the use_fixed_probe_support option, define the center, widths, and heights
+    for the ellipse/rectangle, format is:
+    [center (rows), center (columns), side length (rows), side length (columns)]
+    '''
+    
     threshold: float = 0.005
     """
     The threshold for the probe support constraint. The value of a pixel (x, y) is set to 0

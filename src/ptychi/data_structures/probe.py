@@ -388,6 +388,24 @@ class Probe(dsbase.ReconstructParameter):
         blurred probe magnitude.
         """
         data = self.data
+        if self.options.support_constraint.use_fixed_probe_support == 'ELLIPSE':
+            rows, cols = data.shape[-2:]
+            center_r = self.options.support_constraint.fixed_probe_support_params[0]
+            center_c = self.options.support_constraint.fixed_probe_support_params[1]
+            radius_r = self.options.support_constraint.fixed_probe_support_params[2]
+            radius_c = self.options.support_constraint.fixed_probe_support_params[3]
+            y, x = torch.meshgrid( torch.arange(rows), torch.arange(cols), indexing='ij' )
+            data = data * (((y - center_r)**2 / radius_r**2) + ((x - center_c)**2 / radius_c**2) <= 1)
+        elif self.options.support_constraint.use_fixed_probe_support == 'RECTANGLE':
+            rows, cols = data.shape[-2:]
+            center_r = self.options.support_constraint.fixed_probe_support_params[0]
+            center_c = self.options.support_constraint.fixed_probe_support_params[1]
+            len_r = self.options.support_constraint.fixed_probe_support_params[2]
+            len_c = self.options.support_constraint.fixed_probe_support_params[3]
+            fixed_support = torch.zeros(self.data.shape[-2:], dtype = torch.float32)
+            fixed_support[ int(center_r - len_r) : int(center_r + len_r), int(center_c - len_c) : int(center_c + len_c) ] = 1
+            data = data * fixed_support
+            
         mask = ip.gaussian_filter(data, sigma=3, size=5).abs()
         thresh = (
             mask.max(-1, keepdim=True).values.max(-2, keepdim=True).values
