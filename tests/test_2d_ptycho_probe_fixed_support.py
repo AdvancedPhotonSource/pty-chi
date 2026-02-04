@@ -62,7 +62,7 @@ class Test2dPtychoLsqmlFixedProbeSupport(tutils.TungstenDataTester):
         recon = task.get_data_to_cpu('object', as_numpy=True)[0]
         return recon
     
-    @tutils.TungstenDataTester.wrap_recon_tester(name='test_2d_ptycho_lsqml_fixed_elliptical_probe_support')
+    @tutils.TungstenDataTester.wrap_recon_tester(name='test_2d_ptycho_lsqml_fixed_rectangular_probe_support')
     def test_2d_ptycho_lsqml_fixed_rectangular_probe_support(self):        
         self.setup_ptychi(cpu_only=False)
 
