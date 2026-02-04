@@ -445,10 +445,10 @@ class PlanarObject(Object):
         maskOK = torch.logical_not(maskHI) * torch.logical_not(maskLO)
         abs_data = (limLO * maskLO + limHI * maskHI + maskOK * abs_data) 
 
-        limHI = self.options.hard_limits_magnitude_phase.abs_lim[-1]
-        limLO = self.options.hard_limits_magnitude_phase.abs_lim[-2]
-        maskHI = (abs_data > limHI) 
-        maskLO = (abs_data < limLO) 
+        limHI = self.options.hard_limits_magnitude_phase.phs_lim[-1]
+        limLO = self.options.hard_limits_magnitude_phase.phs_lim[-2]
+        maskHI = (phs_data > limHI) 
+        maskLO = (phs_data < limLO) 
         maskOK = torch.logical_not(maskHI) * torch.logical_not(maskLO)
         phs_data  = (limLO * maskLO + limHI * maskHI + maskOK * phs_data) 
 
