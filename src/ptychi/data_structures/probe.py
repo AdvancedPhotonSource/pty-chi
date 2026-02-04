@@ -343,7 +343,7 @@ class Probe(dsbase.ReconstructParameter):
 
     def constrain_probe_power(
         self,
-        object_: "object.Object",
+        object_: Optional["object.Object"] = None,
         opr_mode_weights: Optional[Union[Tensor, "oprweights.OPRModeWeights"]] = None,
     ) -> None:
         if self.probe_power <= 0.0:
@@ -365,9 +365,13 @@ class Probe(dsbase.ReconstructParameter):
         power_correction = torch.sqrt(self.probe_power / probe_power)
 
         self.set_data(self.data * power_correction)
-        object_.set_data(object_.data / power_correction)
-
-        logger.info("Probe and object scaled by {}.".format(power_correction))
+        if self.options.power_constraint.scale_object:
+            if object_ is None:
+                raise ValueError("scale_object is True but no object was provided.")
+            object_.set_data(object_.data / power_correction)
+            logger.info("Probe and object scaled by {}.".format(power_correction))
+        else:
+            logger.info("Probe scaled by {}.".format(power_correction))
 
     def constrain_support(self):
         """

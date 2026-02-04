@@ -536,6 +536,12 @@ class ProbePowerConstraintOptions(FeatureOptions):
     the power of the probe itself is `probe_power`.
     """
 
+    scale_object: bool = True
+    """
+    If True, scale the object inversely when the probe power is constrained.
+    If False, only the probe is rescaled.
+    """
+
 @dataclasses.dataclass
 class ProbeOrthogonalizeIncoherentModesOptions(FeatureOptions):
     """
