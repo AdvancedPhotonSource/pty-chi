@@ -12,7 +12,7 @@ import test_utils as tutils
 import os
 os.environ["PTYCHO_CI_DATA_DIR"] = "/net/s8iddata/export/8-id-ECA/Analysis/atripath/ptychointerim-data/ci_data"
 
-class Test2dPtychoLsqml(tutils.TungstenDataTester):
+class Test2dPtychoLsqmlFixedProbeSupport(tutils.TungstenDataTester):
     
     @tutils.TungstenDataTester.wrap_recon_tester(name='test_2d_ptycho_lsqml_fixed_elliptical_probe_support')
     def test_2d_ptycho_lsqml_fixed_elliptical_probe_support(self):        
@@ -115,8 +115,8 @@ if __name__ == '__main__':
     parser.add_argument('--generate-gold', action='store_true')
     args = parser.parse_args()
 
-    tester = Test2dPtychoLsqml()
-    tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=True)
+    tester = Test2dPtychoLsqmlFixedProbeSupport()
+    tester.setup_method(name="", generate_data=True, generate_gold=args.generate_gold, debug=True)
     tester.test_2d_ptycho_lsqml_fixed_elliptical_probe_support()
     tester.test_2d_ptycho_lsqml_fixed_rectangular_probe_support()
 
