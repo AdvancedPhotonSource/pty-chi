@@ -17,7 +17,6 @@ import ptychi.utils as utils
 import ptychi.data_structures.base as dsbase
 import ptychi.data_structures.object as object
 import ptychi.data_structures.opr_mode_weights as oprweights
-from ptychi.propagate import FourierPropagator, WavefieldPropagator
 import ptychi.maps as maps
 import ptychi.api.enums as enums
 
@@ -345,43 +344,35 @@ class Probe(dsbase.ReconstructParameter):
 
     def constrain_probe_power(
         self,
-        object_: "object.Object",
-        opr_mode_weights: Union[Tensor, "oprweights.OPRModeWeights"],
-        propagator: Optional[WavefieldPropagator] = None,
+        object_: Optional["object.Object"] = None,
+        opr_mode_weights: Optional[Union[Tensor, "oprweights.OPRModeWeights"]] = None,
     ) -> None:
         if self.probe_power <= 0.0:
             return
-
         if isinstance(opr_mode_weights, oprweights.OPRModeWeights):
             opr_mode_weights = opr_mode_weights.data
 
-        if propagator is None:
-            propagator = FourierPropagator()
-
-        # Shape of probe_composed:        (n_modes, h, w)
+        # Shape of probe_composed: (n_modes, h, w)
         if self.has_multiple_opr_modes:
-            avg_weights = opr_mode_weights.mean(dim=0)
-            probe_composed = self.get_unique_probes(avg_weights, mode_to_apply=0)
+            if opr_mode_weights is not None:
+                avg_weights = opr_mode_weights.mean(dim=0)
+                probe_composed = self.get_unique_probes(avg_weights, mode_to_apply=0)
+            else:
+                probe_composed = self.get_opr_mode(0)
         else:
             probe_composed = self.get_opr_mode(0)
 
-        propagated_probe = propagator.propagate_forward(probe_composed)
-        if isinstance(propagator, FourierPropagator):
-            # Cancel the normalization factor so that the power is conserved.
-            if propagator.norm == "backward" or propagator.norm is None:
-                propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) / self.data.size().numel()
-            elif propagator.norm == "forward":
-                propagated_probe_power = torch.sum(propagated_probe.abs() ** 2) * self.data.size().numel()
-            else:
-                propagated_probe_power = torch.sum(propagated_probe.abs() ** 2)
-        else:
-            propagated_probe_power = torch.sum(propagated_probe.abs() ** 2)
-        power_correction = torch.sqrt(self.probe_power / propagated_probe_power)
+        probe_power = torch.sum(torch.abs(probe_composed) ** 2)
+        power_correction = torch.sqrt(self.probe_power / probe_power)
 
         self.set_data(self.data * power_correction)
-        object_.set_data(object_.data / power_correction)
-
-        logger.info("Probe and object scaled by {}.".format(power_correction))
+        if self.options.power_constraint.scale_object:
+            if object_ is None:
+                raise ValueError("scale_object is True but no object was provided.")
+            object_.set_data(object_.data / power_correction)
+            logger.info("Probe and object scaled by {}.".format(power_correction))
+        else:
+            logger.info("Probe scaled by {}.".format(power_correction))
 
     def constrain_support(self):
         """
