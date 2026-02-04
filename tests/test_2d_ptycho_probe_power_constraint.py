@@ -32,7 +32,6 @@ class Tester2DPtychoProbePowerConstraint(tutils.TungstenDataTester):
         options.object_options.optimizer = api.Optimizers.SGD
         options.object_options.step_size = 1
         
-        options.probe_options.power_constraint.use_propagated_field = bool( 0 )
         options.probe_options.power_constraint.probe_power = np.mean(np.sum(data, (-1, -2)), axis=0) / np.prod(data.shape[-2:]) 
         options.probe_options.power_constraint.enabled = True
         

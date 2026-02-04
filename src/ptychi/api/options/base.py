@@ -533,14 +533,7 @@ class ProbePowerConstraintOptions(FeatureOptions):
     probe_power: float = 0.0
     """
     The target probe power. The probe and object intensity will be scaled such that 
-    the power of the far-field probe is `probe_power`.
-    """
-    
-    use_propagated_field: bool = True
-    """
-    Whether to take into account the type of scaling used in the wavefield propagation
-    from exitwave to detector. If set to False then we don't use the forward model to 
-    compute probe power; instead we simply rescale the probe based on target probe power.
+    the power of the probe itself is `probe_power`.
     """
 
 @dataclasses.dataclass
