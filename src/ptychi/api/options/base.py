@@ -532,10 +532,15 @@ class ProbePowerConstraintOptions(FeatureOptions):
 
     probe_power: float = 0.0
     """
-    The target probe power. The probe and object intensity will be scaled such that 
-    the power of the far-field probe is `probe_power`.
+    The target probe power. The intensity of the probe and optionally the object will be 
+    scaled such that the power of the probe itself is `probe_power`.
     """
 
+    scale_object: bool = True
+    """
+    If True, scale the object inversely when the probe power is constrained.
+    If False, only the probe is rescaled.
+    """
 
 @dataclasses.dataclass
 class ProbeOrthogonalizeIncoherentModesOptions(FeatureOptions):
