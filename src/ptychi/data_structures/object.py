@@ -431,6 +431,24 @@ class PlanarObject(Object):
         self.set_data(data)
 
     @timer()
+    def constrain_hard_limits_magnitude_phase(self) -> None:
+        data = self.data
+        phs_data = torch.angle(data)
+        abs_data = torch.abs(data)
+        abs_data = torch.clamp(
+            abs_data, 
+            min=self.options.hard_limits_magnitude_phase.abs_lim[0], 
+            max=self.options.hard_limits_magnitude_phase.abs_lim[1]
+        )
+        phs_data = torch.clamp(
+            phs_data, 
+            min=self.options.hard_limits_magnitude_phase.phase_lim[0], 
+            max=self.options.hard_limits_magnitude_phase.phase_lim[1]
+        )
+        data = abs_data * torch.exp(1j * phs_data)
+        self.set_data(data)
+        
+    @timer()
     def remove_grid_artifacts(self):
         data = self.data
         for i_slice in range(self.n_slices):

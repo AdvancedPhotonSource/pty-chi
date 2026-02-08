@@ -215,6 +215,20 @@ class ObjectMultisliceRegularizationOptions(FeatureOptions):
         - DISCRETE: Use cumulative sum.
     """
 
+@dataclasses.dataclass
+class ObjectHardLimitsMagnitudePhase(FeatureOptions):
+    """Settings for the hard constraint on sample mangitude and phase limits."""
+
+    enabled: bool = False
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+
+    abs_lim: Optional[ndarray] = None
+    """Hard constraint for object magnitude: abs_lim[0] <= abs(object) <= abs_lim[1]."""
+    
+    phase_lim: Optional[ndarray] = None
+    """Hard constraint for object phase: phase_lim[0] <= angle(object) <= phase_lim[1]."""
+
 
 @dataclasses.dataclass
 class ObjectL1NormConstraintOptions(FeatureOptions):
@@ -380,6 +394,10 @@ class ObjectOptions(ParameterOptions):
 
     total_variation: ObjectTotalVariationOptions = field(
         default_factory=ObjectTotalVariationOptions
+    )
+    
+    hard_limits_magnitude_phase: ObjectHardLimitsMagnitudePhase = field(
+        default_factory=ObjectHardLimitsMagnitudePhase
     )
 
     remove_grid_artifacts: RemoveGridArtifactsOptions = field(

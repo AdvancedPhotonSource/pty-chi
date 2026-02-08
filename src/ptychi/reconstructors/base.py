@@ -476,6 +476,10 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             ):
                 object_.regularize_multislice()
 
+            # Hard limit constraint on object magnitude and phase
+            if object_.options.hard_limits_magnitude_phase.is_enabled_on_this_epoch(self.current_epoch):
+                object_.constrain_hard_limits_magnitude_phase()
+                
             # Apply smoothness constraint.
             if object_.options.smoothness_constraint.is_enabled_on_this_epoch(self.current_epoch):
                 object_.constrain_smoothness()
