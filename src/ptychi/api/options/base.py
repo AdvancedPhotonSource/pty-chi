@@ -224,11 +224,12 @@ class ObjectHardLimitsMagnitudePhase(FeatureOptions):
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
 
     abs_lim: Optional[ndarray] = None
-    """Hard constraint for object magnitude: abs_lim[0] <= abs( object ) <= abs_lim[1]"""
+    """Hard constraint for object magnitude: abs_lim[0] <= abs(object) <= abs_lim[1]."""
     
-    phs_lim: Optional[ndarray] = None
-    """Hard constraint for object phase: phs_lim[0] <= angle( object ) <= phs_lim[1]"""
-    
+    phase_lim: Optional[ndarray] = None
+    """Hard constraint for object phase: phase_lim[0] <= angle(object) <= phase_lim[1]."""
+
+
 @dataclasses.dataclass
 class ObjectL1NormConstraintOptions(FeatureOptions):
     """Settings for the L1 norm constraint."""

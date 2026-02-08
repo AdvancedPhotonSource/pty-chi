@@ -432,26 +432,20 @@ class PlanarObject(Object):
 
     @timer()
     def constrain_hard_limits_magnitude_phase(self) -> None:
-
         data = self.data
-        
         phs_data = torch.angle(data)
         abs_data = torch.abs(data)
-        
-        def project_hard_limits(X, limits):
-            limHI = limits[-1]
-            limLO = limits[-2]
-            maskHI = (X > limHI) 
-            maskLO = (X < limLO) 
-            maskOK = torch.logical_not(maskHI) * torch.logical_not(maskLO)
-            X = (limLO * maskLO + limHI * maskHI + maskOK * X)  
-            return X
-        
-        abs_data  = project_hard_limits(abs_data, self.options.hard_limits_magnitude_phase.abs_lim) 
-        phs_data  = project_hard_limits(phs_data, self.options.hard_limits_magnitude_phase.phs_lim) 
-        
-        data = abs_data * torch.exp( 1j * phs_data )
-        
+        abs_data = torch.clamp(
+            abs_data, 
+            min=self.options.hard_limits_magnitude_phase.abs_lim[0], 
+            max=self.options.hard_limits_magnitude_phase.abs_lim[1]
+        )
+        phs_data = torch.clamp(
+            phs_data, 
+            min=self.options.hard_limits_magnitude_phase.phase_lim[0], 
+            max=self.options.hard_limits_magnitude_phase.phase_lim[1]
+        )
+        data = abs_data * torch.exp(1j * phs_data)
         self.set_data(data)
         
     @timer()
