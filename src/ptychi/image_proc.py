@@ -1534,31 +1534,56 @@ def remove_polynomial_background(
     """
     if polyfit_order == 0:
         return img - img[flat_region_mask].mean()
+
+    if polyfit_order < 0:
+        raise ValueError("polyfit_order must be >= 0.")
+
     ys, xs = torch.where(flat_region_mask)
+    if ys.numel() == 0:
+        raise ValueError("flat_region_mask must contain at least one True value.")
+
     y_full, x_full = torch.meshgrid(
         torch.arange(img.shape[0]), torch.arange(img.shape[1]), indexing="ij"
     )
     y_full = y_full.reshape(-1)
     x_full = x_full.reshape(-1)
 
-    y_all_orders = []
-    x_all_orders = []
-    y_full_all_orders = []
-    x_full_all_orders = []
-    for order in range(polyfit_order + 1):
-        y_all_orders.append(ys**order)
-        x_all_orders.append(xs**order)
-        y_full_all_orders.append(y_full**order)
-        x_full_all_orders.append(x_full**order)
-    const_basis = torch.ones(len(ys), device=img.device)
-    const_basis_full = torch.ones(len(y_full), device=img.device)
+    fit_dtype = torch.float64
+    ys = ys.to(device=img.device, dtype=fit_dtype)
+    xs = xs.to(device=img.device, dtype=fit_dtype)
+    y_full = y_full.to(device=img.device, dtype=fit_dtype)
+    x_full = x_full.to(device=img.device, dtype=fit_dtype)
 
-    a_mat = torch.stack(y_all_orders + x_all_orders + [const_basis], dim=1)
-    b_vec = img[flat_region_mask].reshape(-1, 1)
-    x_vec = torch.linalg.solve(a_mat, b_vec)
-    a_mat_full = torch.stack(y_full_all_orders + x_full_all_orders + [const_basis_full], dim=1)
+    y_scale = max(img.shape[0] - 1, 1)
+    x_scale = max(img.shape[1] - 1, 1)
+    ys = ys / y_scale
+    xs = xs / x_scale
+    y_full = y_full / y_scale
+    x_full = x_full / x_scale
+
+    basis = []
+    basis_full = []
+    for total_order in range(polyfit_order + 1):
+        for y_order in range(total_order + 1):
+            x_order = total_order - y_order
+            basis.append((ys**y_order) * (xs**x_order))
+            basis_full.append((y_full**y_order) * (x_full**x_order))
+
+    a_mat = torch.stack(basis, dim=1)
+    b_vec = img[flat_region_mask].reshape(-1, 1).to(fit_dtype)
+    b_mean = b_vec.mean()
+    b_std = b_vec.std()
+    if b_std == 0:
+        b_std = torch.tensor(1.0, dtype=b_vec.dtype, device=b_vec.device)
+    b_vec_std = (b_vec - b_mean) / b_std
+    x_vec = torch.linalg.lstsq(a_mat, b_vec_std).solution
+
+    a_mat_full = torch.stack(basis_full, dim=1)
     bg = a_mat_full @ x_vec
-    bg = bg.reshape(img.shape)
+
+    bg = bg * b_std + b_mean
+    bg = bg.reshape(img.shape).to(img.dtype)
+
     return img - bg
 
 
