@@ -294,8 +294,9 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         td = d * (psi_far / (torch.abs(psi_far) + self.eps))
         td = psi_far - td
-        # NOTE: scaling, needed to make fft adjoint for far field ptycho, should be removed for near field ptycho
-        td *= psi_far.shape[-1] * psi_far.shape[-2]
+        # Compensate FFT normalization only for the far-field Fourier propagator.
+        if isinstance(self.forward_model.free_space_propagator, fm.FourierPropagator):
+            td *= psi_far.shape[-1] * psi_far.shape[-2]
         res = 2 * self.forward_model.free_space_propagator.propagate_backward(td)
         return res
 
