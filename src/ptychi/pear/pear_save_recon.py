@@ -479,12 +479,21 @@ def create_reconstruction_path(params, options):
     if params.get("recon_dir_base", ''):
         recon_dir_base = params["recon_dir_base"]
     else:
-        recon_dir_base = os.path.join(
-            params["data_directory"],
-            "ptychi_recons",
-            params["recon_parent_dir"],
-            f"S{params['scan_num']:04d}",
-        )
+        if params.get("instrument", "").lower() == "lynx":
+            recon_dir_base = os.path.join(
+                params["data_directory"],
+                "analysis",
+                "ptychi_recons",
+                params["recon_parent_dir"],
+                f"S{params['scan_num']:04d}",
+            )
+        else:
+            recon_dir_base = os.path.join(
+                params["data_directory"],
+                "ptychi_recons",
+                params["recon_parent_dir"],
+                f"S{params['scan_num']:04d}",
+            )
 
     # Append batching mode to the path
     batching_mode_suffix = {

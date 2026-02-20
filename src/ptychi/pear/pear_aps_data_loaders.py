@@ -544,7 +544,7 @@ def _read_lynx_position_file(posfile):
 def load_data_lynx(base_path, scan_num, det_Npixel, cen_x, cen_y, print_mode='debug'):
     verbose_print("Loading scan positions and diffraction patterns measured by the LYNX instrument.", print_mode)
     # Load positions from .dat file
-    pos_file = f"{base_path}/scan_positions/scan_{scan_num:05d}.dat"
+    pos_file = f"{base_path}/data/scan_positions/scan_{scan_num:05d}.dat"
     out_orch = _read_lynx_position_file(pos_file)
 
     x_positions = -out_orch["Average_x_st_fzp"]
@@ -561,7 +561,7 @@ def load_data_lynx(base_path, scan_num, det_Npixel, cen_x, cen_y, print_mode='de
     subfolder_start = (scan_num // 1000) * 1000
     subfolder_end = subfolder_start + 999
     data_dir = os.path.join(
-        base_path, "eiger_4", f"S{subfolder_start:05d}-{subfolder_end:05d}", f"S{scan_num:05d}"
+        base_path, "data", "eiger_4", f"S{subfolder_start:05d}-{subfolder_end:05d}", f"S{scan_num:05d}"
     )
     file_path = os.path.join(data_dir, f"run_{scan_num:05d}_000000000000.h5")
     # Validate inputs
