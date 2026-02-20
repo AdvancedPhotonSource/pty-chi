@@ -646,6 +646,13 @@ class AnalyticalIterativePtychographyReconstructor(
         )
         self.forward_model = None
         self.build_forward_model()
+        
+    @property
+    def use_sparse_probe_shared_update(self):
+        return (
+            self.parameter_group.probe.representation == "sparse_code" 
+            and self.parameter_group.probe.options.experimental.sdl_probe_options.enabled_shared
+        )
 
     def build_forward_model(self):
         self.forward_model = fm.PlanarPtychographyForwardModel(
