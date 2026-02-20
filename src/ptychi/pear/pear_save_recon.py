@@ -442,9 +442,7 @@ def save_reconstructions(task, recon_path, iter, params):
     if params["number_of_iterations"] == iter:
         if params.get("collect_object_phase", False):  # copy final object phase to a collection folder
             obj_ph_collection_dir = os.path.join(
-                params["data_directory"],
-                "ptychi_recons",
-                params["recon_parent_dir"],
+                _get_ptychi_recons_dir(params),
                 "object_ph_collection",
             )
             os.makedirs(obj_ph_collection_dir, exist_ok=True)
@@ -459,9 +457,7 @@ def save_reconstructions(task, recon_path, iter, params):
 
         if params.get("collect_probe_magnitude", False):  # copy final probe magnitude to a collection folder
             probe_mag_collection_dir = os.path.join(
-                params["data_directory"],
-                "ptychi_recons",
-                params["recon_parent_dir"],
+                _get_ptychi_recons_dir(params),
                 "probe_mag_collection",
             )
             os.makedirs(probe_mag_collection_dir, exist_ok=True)
@@ -474,24 +470,20 @@ def save_reconstructions(task, recon_path, iter, params):
                 f"{probe_mag_collection_dir}/S{params['scan_num']:04d}.tiff"
             )
 
+def _get_ptychi_recons_dir(params):
+    """Return the base ptychi_recons directory, inserting 'analysis/' for lynx."""
+    if params.get("instrument", "").lower() == "lynx":
+        return os.path.join(params["data_directory"], "analysis", "ptychi_recons", params["recon_parent_dir"])
+    return os.path.join(params["data_directory"], "ptychi_recons", params["recon_parent_dir"])
+
+
 def create_reconstruction_path(params, options):
     # Check if user has specified a custom reconstruction path to overwrite the default
     if params.get("recon_dir_base", ''):
         recon_dir_base = params["recon_dir_base"]
     else:
-        if params.get("instrument", "").lower() == "lynx":
-            recon_dir_base = os.path.join(
-                params["data_directory"],
-                "analysis",
-                "ptychi_recons",
-                params["recon_parent_dir"],
-                f"S{params['scan_num']:04d}",
-            )
-        else:
-            recon_dir_base = os.path.join(
-                params["data_directory"],
-                "ptychi_recons",
-                params["recon_parent_dir"],
+        recon_dir_base = os.path.join(
+                _get_ptychi_recons_dir(params),
                 f"S{params['scan_num']:04d}",
             )
 

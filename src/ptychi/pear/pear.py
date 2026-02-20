@@ -25,7 +25,8 @@ import gc
 from .pear_init_recon import initialize_recon
 from .pear_save_recon import (save_reconstructions,
                                create_reconstruction_path,
-                               save_initial_conditions)
+                               save_initial_conditions,
+                               _get_ptychi_recons_dir)
 
 # Global variable for print mode
 print_mode = 'debug'
@@ -255,17 +256,16 @@ def ptycho_batch_recon(base_params):
     end_scan = base_params.get('end_scan')
     log_dir_suffix = base_params.get('log_dir_suffix', '')
     scan_order = base_params.get('scan_order', 'ascending')
-    exclude_scans = base_params.get('exclude_scans', [])
+    exclude_scans = base_params.get('exclude_scans') or []
     overwrite_ongoing = base_params.get('overwrite_ongoing', False)
     overwrite_ongoing_min_age_hour = base_params.get('overwrite_ongoing_min_age_hour', 0)
     reset_scan_list = base_params.get('reset_scan_list', False)
     wait_time_seconds = base_params.get('wait_time_seconds', 5)
     num_repeats = base_params.get('num_repeats', np.inf)
     auto_batch_size_adjustment = base_params.get('auto_batch_size_adjustment', False)
-    skip_error_types = base_params.get('skip_error_types', '')
+    skip_error_types = base_params.get('skip_error_types') or ''
 
-    log_dir = os.path.join(base_params['data_directory'], 'ptychi_recons', 
-                          base_params['recon_parent_dir'], 
+    log_dir = os.path.join(_get_ptychi_recons_dir(base_params),
                           f'recon_logs_{log_dir_suffix}' if log_dir_suffix else 'recon_logs')
     os.makedirs(log_dir, exist_ok=True)
     
@@ -277,7 +277,7 @@ def ptycho_batch_recon(base_params):
     
     repeat_count = 0
 
-    if base_params.get('scan_list', []) != []:
+    if base_params.get('scan_list'):
         scan_list = base_params.get('scan_list')
     else:
         scan_list = generate_scan_list(start_scan, end_scan, scan_order, exclude_scans)
@@ -358,7 +358,7 @@ def ptycho_batch_recon(base_params):
                 import json
                 
                 # Create a directory for temp files
-                temp_dir = os.path.join(base_params['data_directory'], 'ptychi_recons', 'temp_files')
+                temp_dir = os.path.join(_get_ptychi_recons_dir(base_params), 'temp_files')
                 os.makedirs(temp_dir, exist_ok=True)
                 
                 # Create paths for temp files with scan number included
@@ -678,12 +678,11 @@ def ptycho_batch_recon_affine_calibration(base_params):
     det_sample_dist_m = base_params['det_sample_dist_m']  # initial distance
     
     # Setup directories
-    geom_calibration_dir = os.path.join(base_params['data_directory'], 'ptychi_recons', 
-                                        base_params['recon_parent_dir'], 'geom_calibration')
-    temp_dir = os.path.join(base_params['data_directory'], 'ptychi_recons', 'temp_files')
+    geom_calibration_dir = os.path.join(_get_ptychi_recons_dir(base_params), 'geom_calibration')
+    temp_dir = os.path.join(_get_ptychi_recons_dir(base_params), 'temp_files')
     os.makedirs(geom_calibration_dir, exist_ok=True)
     os.makedirs(temp_dir, exist_ok=True)
-    
+
     # Parameters to track and plot
     params_to_plot = ['scale', 'asymmetry', 'rotation', 'shear']
     affine_params = {}
@@ -951,12 +950,11 @@ ptycho_recon(run_recon=True, **params)
     affine_params = {}
     
     # Setup directories
-    geom_calibration_dir = os.path.join(base_params['data_directory'], 'ptychi_recons', 
-                                       base_params['recon_parent_dir'], 'geom_calibration')
-    temp_dir = os.path.join(base_params['data_directory'], 'ptychi_recons', 'temp_files')
+    geom_calibration_dir = os.path.join(_get_ptychi_recons_dir(base_params), 'geom_calibration')
+    temp_dir = os.path.join(_get_ptychi_recons_dir(base_params), 'temp_files')
     os.makedirs(geom_calibration_dir, exist_ok=True)
     os.makedirs(temp_dir, exist_ok=True)
-    
+
     # Extract parameters
     start_scan = base_params.get('start_scan')
     end_scan = base_params.get('end_scan')
