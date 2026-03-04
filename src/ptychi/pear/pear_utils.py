@@ -607,6 +607,8 @@ class FileBasedTracker:
                         status_data['error_type'] = 'timeout'
                     elif 'too few diffraction patterns' in error_str:
                         status_data['error_type'] = 'too_few_diffraction_patterns'
+                    elif 'all diffraction patterns were removed' in error_str:
+                        status_data['error_type'] = 'all_patterns_filtered'
                     else:
                         status_data['error_type'] = 'unknown'
                 

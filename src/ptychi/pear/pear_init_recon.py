@@ -68,6 +68,9 @@ def initialize_recon(params):
     # Process diffraction patterns with orientation transforms if specified
     dp = _process_diffraction_patterns(dp, params)
 
+    # Filter diffraction patterns by average photon count
+    dp, positions_m = _filter_by_avg_photon_count(dp, positions_m, params)
+
     # Load external positions
     if params["path_to_init_positions"]:
         positions_m = _prepare_initial_positions(params)
@@ -711,6 +714,86 @@ def _load_data_hdf5(h5_dp_path, h5_position_path, dp_Npix, cen_x, cen_y):
     # positions = np.stack((ppX, ppY), axis=1) #ELE
 
     return dp, positions
+
+def _filter_by_avg_photon_count(dp, positions_m, params):
+    """
+    Remove diffraction patterns whose average photon count per pixel falls outside
+    the specified thresholds, mirroring the fold_slice avg_photon_threshold_lb logic.
+
+    Parameters:
+    -----------
+    dp : ndarray, shape (N, H, W)
+    positions_m : ndarray, shape (N, 2)
+    params : dict
+        avg_photon_threshold_lb    : lower bound (patterns below this are removed). 0 = disabled.
+        avg_photon_threshold_ub : upper bound (patterns above this are removed). 0 = disabled.
+
+    Returns:
+    --------
+    dp, positions_m with bad patterns removed.
+    """
+    lb = params.get("avg_photon_threshold_lb", 0)
+    ub = params.get("avg_photon_threshold_ub", 0)
+
+    if not lb and not ub:
+        return dp, positions_m
+
+    n_pixels = dp.shape[1] * dp.shape[2]
+    avg_photons = dp.sum(axis=(1, 2)) / n_pixels  # shape (N,)
+
+    verbose_print(
+        f"Avg photon count per pixel across {len(dp)} patterns: "
+        f"min={avg_photons.min():.4f}, max={avg_photons.max():.4f}, mean={avg_photons.mean():.4f}",
+        print_mode,
+        mode='all',
+    )
+
+    keep = np.ones(len(dp), dtype=bool)
+
+    if lb:
+        low_mask = avg_photons < lb
+        if low_mask.any():
+            verbose_print(
+                f"Removing {low_mask.sum()} diffraction pattern(s) with avg photon count "
+                f"< {lb} (out of {len(dp)} total)",
+                print_mode,
+                mode='all',
+            )
+        else:
+            verbose_print(f"No patterns removed by lower threshold (lb={lb})", print_mode, mode='all')
+        keep &= ~low_mask
+
+    if ub:
+        high_mask = avg_photons > ub
+        if high_mask.any():
+            verbose_print(
+                f"Removing {high_mask.sum()} diffraction pattern(s) with avg photon count "
+                f"> {ub} (out of {len(dp)} total)",
+                print_mode,
+                mode='all',
+            )
+        else:
+            verbose_print(f"No patterns removed by upper threshold (ub={ub})", print_mode, mode='all')
+        keep &= ~high_mask
+
+    n_removed = (~keep).sum()
+    if n_removed:
+        if keep.sum() == 0:
+            raise ValueError(
+                "All diffraction patterns were removed by avg_photon_threshold_lb filtering. "
+                "Check your threshold values."
+            )
+        dp = dp[keep]
+        positions_m = positions_m[keep]
+        verbose_print(
+            f"Photon-count filtering removed {n_removed} pattern(s). "
+            f"{len(dp)} patterns remaining.",
+            print_mode,
+            mode='all',
+        )
+
+    return dp, positions_m
+
 
 def _process_diffraction_patterns(dp, params):
     """
