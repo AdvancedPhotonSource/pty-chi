@@ -221,6 +221,13 @@ class Probe(dsbase.ReconstructParameter):
             return
 
         probe = self.data
+        
+        if self.options.orthogonalize_incoherent_modes.sort_by_occupancy:
+            shared_occupancy = torch.sum(torch.abs(probe[0, ...]) ** 2, (-2, -1)) / torch.sum(
+                torch.abs(probe[0, ...]) ** 2
+            )
+            shared_occupancy = torch.sort(shared_occupancy, dim=0, descending=True)
+            probe[0, ...] = probe[0, shared_occupancy[1], ...]
 
         norm_first_mode_orig = pmath.norm(probe[0, 0], dim=(-2, -1))
 
