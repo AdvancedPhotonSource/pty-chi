@@ -65,7 +65,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             "gaussian": fm.PtychographyGaussianNoiseModel,
             "poisson": fm.PtychographyPoissonNoiseModel,
         }[options.noise_model](
-            **noise_model_params, valid_pixel_mask=self.dataset.valid_pixel_mask.clone()
+            **noise_model_params, 
+            valid_pixel_mask=self.dataset.valid_pixel_mask.clone(),
+            leave_all_measurement_zeros_unconstrained=self.dataset.leave_all_measurement_zeros_unconstrained
         )
 
         self.alpha_psi_far = 0.5

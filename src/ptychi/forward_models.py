@@ -156,6 +156,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         apply_subpixel_shifts_on_probe: bool = True,
         diffraction_pattern_blur_sigma: Optional[float] = None,
         low_memory_mode: bool = False,
+        leave_all_measurement_zeros_unconstrained: bool = False,
         *args,
         **kwargs,
     ) -> None:
@@ -230,6 +231,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
         
         self.diffraction_pattern_blur_sigma = diffraction_pattern_blur_sigma
 
+        self.leave_all_measurement_zeros_unconstrained = leave_all_measurement_zeros_unconstrained
+        
         self.check_inputs()
 
     def check_inputs(self):
@@ -760,12 +763,16 @@ class PlanarPtychographyForwardModel(ForwardModel):
 
 
 class NoiseModel(torch.nn.Module):
-    def __init__(self, eps=1e-6, valid_pixel_mask: Optional[Tensor] = None) -> None:
+    def __init__(self, 
+                 eps=1e-6, 
+                 valid_pixel_mask: Optional[Tensor] = None, 
+                 leave_all_measurement_zeros_unconstrained: bool = False) -> None:
         super().__init__()
         self.eps = eps
         self.noise_statistics = None
         self.valid_pixel_mask = valid_pixel_mask
-
+        self.leave_all_measurement_zeros_unconstrained = leave_all_measurement_zeros_unconstrained
+        
     def nll(self, y_pred: Tensor, y_true: Tensor) -> Tensor:
         """
         Calculate the negative log-likelihood.
@@ -831,8 +838,12 @@ class PtychographyGaussianNoiseModel(GaussianNoiseModel):
             y_pred, y_true, self.valid_pixel_mask, psi_far.shape[-2:]
         )
         g = 1 - torch.sqrt(y_true) / (torch.sqrt(y_pred) + self.eps)  # Eq. 12b
-        if valid_pixel_mask is not None:
+    
+        if self.leave_all_measurement_zeros_unconstrained:
+            g[y_true==0] = 0
+        elif valid_pixel_mask is not None:
             g[:, torch.logical_not(valid_pixel_mask)] = 0
+            
         w = 1 / (2 * self.sigma) ** 2
         g = 2 * w * g[:, None, :, :] * psi_far
         return g

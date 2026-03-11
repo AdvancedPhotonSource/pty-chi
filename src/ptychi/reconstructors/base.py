@@ -657,6 +657,7 @@ class AnalyticalIterativePtychographyReconstructor(
             pad_for_shift=self.options.forward_model_options.pad_for_shift,
             low_memory_mode=self.options.forward_model_options.low_memory_mode,
             diffraction_pattern_blur_sigma=self.options.forward_model_options.diffraction_pattern_blur_sigma,
+            leave_all_measurement_zeros_unconstrained=self.dataset.leave_all_measurement_zeros_unconstrained
         )
 
     def run_post_epoch_hooks(self) -> None:

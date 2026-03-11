@@ -27,6 +27,7 @@ class PtychographyDataset(Dataset):
         self,
         patterns: Union[Tensor, ndarray],
         valid_pixel_mask: Optional[Union[Tensor, ndarray]] = None,
+        leave_all_measurement_zeros_unconstrained: bool = False,
         wavelength_m: float = None,
         free_space_propagation_distance_m: float = 1.0,
         fft_shift: bool = True,
@@ -52,7 +53,8 @@ class PtychographyDataset(Dataset):
         self.free_space_propagation_distance_m = free_space_propagation_distance_m
         
         self.save_data_on_device = save_data_on_device
-
+        self.leave_all_measurement_zeros_unconstrained = leave_all_measurement_zeros_unconstrained
+        
     def __getitem__(self, index):
         if not isinstance(index, torch.Tensor):
             index = torch.tensor(index, device=self.patterns.device, dtype=torch.long)
