@@ -634,6 +634,11 @@ class ProbeCenterConstraintOptions(FeatureOptions):
     to keep it centered, or to use the total probe intensity.
     """
 
+    use_com_for_each_mode_independently: bool = False
+    """
+    Determine and use the center of mass of the probe magnitude to keep each
+    shared mode centered independently.
+    """
 
 @dataclasses.dataclass
 class ProbeOptions(ParameterOptions):
