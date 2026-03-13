@@ -574,7 +574,7 @@ class ProbeOrthogonalizeIncoherentModesOptions(FeatureOptions):
     """The method to use for incoherent_mode orthogonalization."""
     
     sort_by_occupancy: bool = False
-    """Keep the probes sorted so that mode with highest occupancy is the 0th shared mode"""
+    """If True, keep the probes sorted so that mode with highest occupancy is the 0th shared mode."""
 
 @dataclasses.dataclass
 class ProbeOrthogonalizeOPRModesOptions(FeatureOptions):
