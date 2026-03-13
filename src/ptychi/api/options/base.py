@@ -1064,6 +1064,12 @@ class ReconstructorOptions(Options):
     and is not involved in the reconstruction math.
     """
 
+    exclude_measured_pixels_below: Optional[float] = None
+    """
+    If not None, gradients corresponding to measured diffraction pixels whose intensity
+    is less than or equal to this value are set to 0 in reconstructors that support it.
+    """
+
     forward_model_options: ForwardModelOptions = dataclasses.field(
         default_factory=ForwardModelOptions
     )

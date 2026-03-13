@@ -229,7 +229,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         self.intermediate_variables = self.PlanarPtychographyIntermediateVariables()
         
         self.diffraction_pattern_blur_sigma = diffraction_pattern_blur_sigma
-
+        
         self.check_inputs()
 
     def check_inputs(self):
@@ -760,12 +760,18 @@ class PlanarPtychographyForwardModel(ForwardModel):
 
 
 class NoiseModel(torch.nn.Module):
-    def __init__(self, eps=1e-6, valid_pixel_mask: Optional[Tensor] = None) -> None:
+    def __init__(
+        self, 
+        eps: float = 1e-6, 
+        valid_pixel_mask: Optional[Tensor] = None, 
+        exclude_measured_pixels_below: Optional[float] = None,
+    ) -> None:
         super().__init__()
         self.eps = eps
         self.noise_statistics = None
         self.valid_pixel_mask = valid_pixel_mask
-
+        self.exclude_measured_pixels_below = exclude_measured_pixels_below
+        
     def nll(self, y_pred: Tensor, y_true: Tensor) -> Tensor:
         """
         Calculate the negative log-likelihood.
@@ -774,6 +780,25 @@ class NoiseModel(torch.nn.Module):
 
     def backward(self, *args, **kwargs):
         raise NotImplementedError
+
+    @staticmethod
+    def get_constrained_pixel_mask(
+        valid_pixel_mask: Optional[Tensor],
+        exclude_measured_pixels_below: Optional[float],
+        y_true: Tensor,
+    ) -> Tensor:
+        constrained_pixel_mask = torch.ones_like(y_true, dtype=torch.bool)
+        if valid_pixel_mask is not None:
+            constrained_pixel_mask = valid_pixel_mask.to(y_true.device)
+            constrained_pixel_mask = constrained_pixel_mask.unsqueeze(0).expand(
+                y_true.shape[0], -1, -1
+            )
+        if exclude_measured_pixels_below is not None:
+            constrained_pixel_mask = torch.logical_and(
+                constrained_pixel_mask,
+                y_true > exclude_measured_pixels_below,
+            )
+        return constrained_pixel_mask
 
     @timer()
     def conform_to_exit_wave_size(
@@ -822,17 +847,24 @@ class PtychographyGaussianNoiseModel(GaussianNoiseModel):
         $g = \frac{\partial L}{\partial \psi_{far}}$.
         
         When `self.valid_pixel_mask` is not None, pixels of the gradient `g` where the
-        mask is False are set to 0. When `g` is used to update the far-field wavefield
-        `psi_far`, the invalid pixels are kept unchanged.
+        mask is False are set to 0. When `self.exclude_measured_pixels_below` is not
+        None, gradients at pixels with measured intensities less than or equal to that
+        threshold are also set to 0.
         """
         # Shape of g:       (batch_size, h, w)
         # Shape of psi_far: (batch_size, n_probe_modes, h, w)
         y_pred, y_true, valid_pixel_mask = self.conform_to_exit_wave_size(
             y_pred, y_true, self.valid_pixel_mask, psi_far.shape[-2:]
         )
+        constrained_pixel_mask = self.get_constrained_pixel_mask(
+            valid_pixel_mask,
+            self.exclude_measured_pixels_below,
+            y_true,
+        )
         g = 1 - torch.sqrt(y_true) / (torch.sqrt(y_pred) + self.eps)  # Eq. 12b
-        if valid_pixel_mask is not None:
-            g[:, torch.logical_not(valid_pixel_mask)] = 0
+
+        g[torch.logical_not(constrained_pixel_mask)] = 0
+            
         w = 1 / (2 * self.sigma) ** 2
         g = 2 * w * g[:, None, :, :] * psi_far
         return g
@@ -863,8 +895,12 @@ class PtychographyPoissonNoiseModel(PoissonNoiseModel):
         y_pred, y_true, valid_pixel_mask = self.conform_to_exit_wave_size(
             y_pred, y_true, self.valid_pixel_mask, psi_far.shape[-2:]
         )
+        constrained_pixel_mask = self.get_constrained_pixel_mask(
+            valid_pixel_mask,
+            self.exclude_measured_pixels_below,
+            y_true,
+        )
         g = 1 - y_true / (y_pred + self.eps)  # Eq. 12b
-        if valid_pixel_mask is not None:
-            g[:, torch.logical_not(valid_pixel_mask)] = 0
+        g[torch.logical_not(constrained_pixel_mask)] = 0
         g = g[:, None, :, :] * psi_far
         return g

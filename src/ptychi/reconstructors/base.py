@@ -419,6 +419,14 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             )
         return super().build_dataloader(batch_sampler=batch_sampler)
 
+    def get_constrained_pixel_mask(self, y_true: Tensor) -> Tensor:
+        """Get the detector pixels that should constrain the update for a batch."""
+        return fm.NoiseModel.get_constrained_pixel_mask(
+            valid_pixel_mask=self.dataset.valid_pixel_mask,
+            exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+            y_true=y_true,
+        )
+
     def update_preconditioners(self):
         # Update preconditioner of the object only if:
         # - the preconditioner does not exist, or
@@ -684,9 +692,11 @@ class AnalyticalIterativePtychographyReconstructor(
         self.parameter_group.probe.normalize_eigenmodes()
         logger.info("Probe eigenmodes normalized.")
 
-    @staticmethod
     def replace_propagated_exit_wave_magnitude(
-        psi: Tensor, actual_pattern_intensity: Tensor
+        self,
+        psi: Tensor,
+        actual_pattern_intensity: Tensor,
+        constrained_pixel_mask: Optional[Tensor] = None,
     ) -> Tensor:
         """
         Replace the propogated exit wave amplitude.
@@ -697,6 +707,9 @@ class AnalyticalIterativePtychographyReconstructor(
             Predicted exit wave propagated to the detector plane.
         actual_pattern_intensity : Tensor
             The measured diffraction pattern at the detector.
+        constrained_pixel_mask : Tensor, optional
+            If given, only pixels where this mask is True are constrained. Other pixels
+            are left unchanged from `psi`.
 
         Returns
         -------
@@ -705,11 +718,14 @@ class AnalyticalIterativePtychographyReconstructor(
             of `actual_pattern_intensity`.
         """
 
-        return (
+        psi_prime = (
             psi
             / ((psi.abs() ** 2).sum(1, keepdims=True).sqrt() + 1e-7)
             * torch.sqrt(actual_pattern_intensity + 1e-7)[:, None]
         )
+        if constrained_pixel_mask is not None:
+            return torch.where(constrained_pixel_mask[:, None], psi_prime, psi)
+        return psi_prime
         
     @timer()
     def adjoint_shift_probe_update_direction(self, indices, delta_p, first_mode_only=False):

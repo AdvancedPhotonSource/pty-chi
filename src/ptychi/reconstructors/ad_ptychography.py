@@ -137,8 +137,9 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
 
     def run_minibatch(self, input_data, y_true, *args, **kwargs):        
         y_pred = self.forward_model(*input_data)
+        constrained_pixel_mask = self.get_constrained_pixel_mask(y_true)
         batch_loss = self.loss_function(
-            y_pred[:, self.dataset.valid_pixel_mask], y_true[:, self.dataset.valid_pixel_mask]
+            y_pred[constrained_pixel_mask], y_true[constrained_pixel_mask]
         )
 
         batch_loss.backward(retain_graph=self.get_retain_graph())
@@ -149,5 +150,9 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
         self.forward_model.zero_grad()
         self.run_post_update_hooks()
         
-        self.loss_tracker.update_batch_loss(y_pred=y_pred, y_true=y_true, loss=batch_loss.item())
+        self.loss_tracker.update_batch_loss(
+            y_pred=y_pred[constrained_pixel_mask],
+            y_true=y_true[constrained_pixel_mask],
+            loss=batch_loss.item(),
+        )
         self.loss_tracker.update_batch_regularization_loss(reg_loss.item())

@@ -66,15 +66,13 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
     @timer()
     def run_minibatch(self, input_data, y_true, *args, **kwargs):
         self.parameter_group.probe.initialize_grad()
-        (delta_o, delta_p_i, delta_pos), y_pred = self.compute_updates(
-            *input_data, y_true, self.dataset.valid_pixel_mask
-        )
+        (delta_o, delta_p_i, delta_pos), y_pred = self.compute_updates(*input_data, y_true)
         self.apply_updates(delta_o, delta_p_i, delta_pos)
         self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
 
     @timer()
     def compute_updates(
-        self, indices: torch.Tensor, y_true: torch.Tensor, valid_pixel_mask: torch.Tensor
+        self, indices: torch.Tensor, y_true: torch.Tensor
     ) -> tuple[torch.Tensor, ...]:
         """
         Calculates the updates of the whole object, the probe, and other parameters.
@@ -94,10 +92,10 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         psi_far = self.forward_model.intermediate_variables["psi_far"]
         unique_probes = self.forward_model.intermediate_variables.shifted_unique_probes
         
-        psi_prime = self.replace_propagated_exit_wave_magnitude(psi_far, y_true)
-        # Do not swap magnitude for bad pixels.
-        psi_prime = torch.where(
-            valid_pixel_mask.repeat(psi_prime.shape[0], probe.n_modes, 1, 1), psi_prime, psi_far
+        psi_prime = self.replace_propagated_exit_wave_magnitude(
+            psi_far,
+            y_true,
+            constrained_pixel_mask=self.get_constrained_pixel_mask(y_true),
         )
         psi_prime = self.forward_model.free_space_propagator.propagate_backward(psi_prime)
 

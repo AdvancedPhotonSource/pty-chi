@@ -52,7 +52,7 @@ class PtychographyDataset(Dataset):
         self.free_space_propagation_distance_m = free_space_propagation_distance_m
         
         self.save_data_on_device = save_data_on_device
-
+        
     def __getitem__(self, index):
         if not isinstance(index, torch.Tensor):
             index = torch.tensor(index, device=self.patterns.device, dtype=torch.long)
