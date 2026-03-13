@@ -98,11 +98,11 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     @timer()
     def run_minibatch(self, input_data, y_true, *args, **kwargs):
-        dm_error_squared = self.compute_updates(y_true, self.dataset.valid_pixel_mask)
+        dm_error_squared = self.compute_updates(y_true)
         self.loss_tracker.update_batch_loss(loss=dm_error_squared.sqrt())
 
     @timer()
-    def compute_updates(self, y_true: Tensor, valid_pixel_mask: Tensor) -> Tensor:
+    def compute_updates(self, y_true: Tensor) -> Tensor:
         """
         Compute the updates to the object, probe, and exit wave using the procedure
         described here: [Probe retrieval in ptychographic coherent diffractive imaging
@@ -147,7 +147,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         dm_error_squared = 0
         for i in range(n_chunks):
             obj_patches, dm_error_squared, new_psi = self.apply_dm_update_to_exit_wave_chunk(
-                start_pts[i], end_pts[i], y_true, valid_pixel_mask, dm_error_squared
+                start_pts[i], end_pts[i], y_true, dm_error_squared
             )
             if probe.optimization_enabled(self.current_epoch):
                 self.add_to_probe_update_terms(
@@ -223,7 +223,6 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         start_pt: int,
         end_pt: int,
         y_true: Tensor,
-        valid_pixel_mask: Tensor,
         dm_error_squared: Tensor,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """
@@ -246,10 +245,10 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             2 * new_psi - self.psi[start_pt:end_pt]
         )
         # Replace intensities
-        revised_psi = torch.where(
-            valid_pixel_mask.repeat(revised_psi.shape[0], probe.n_modes, 1, 1),
-            self.replace_propagated_exit_wave_magnitude(revised_psi, y_true[start_pt:end_pt]),
+        revised_psi = self.replace_propagated_exit_wave_magnitude(
             revised_psi,
+            y_true[start_pt:end_pt],
+            constrained_pixel_mask=self.get_constrained_pixel_mask(y_true[start_pt:end_pt]),
         )
         # Propagate back to sample plane
         revised_psi = self.forward_model.free_space_propagator.propagate_backward(revised_psi)

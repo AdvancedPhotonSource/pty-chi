@@ -137,6 +137,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         psi_far = self.forward_model.intermediate_variables["psi_far"]
         p = probe.get_opr_mode(0)  # to do for multi modes
         pos = self.positions
+        self.current_constrained_pixel_mask = self.get_constrained_pixel_mask(y_true)[:, None]
 
         # sqrt of data
         d = torch.sqrt(y_true)[:, torch.newaxis]
@@ -294,6 +295,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         td = d * (psi_far / (torch.abs(psi_far) + self.eps))
         td = psi_far - td
+        td = td * self.current_constrained_pixel_mask
         # Compensate FFT normalization only for the far-field Fourier propagator.
         if isinstance(self.forward_model.free_space_propagator, fm.FourierPropagator):
             td *= psi_far.shape[-1] * psi_far.shape[-2]
@@ -305,8 +307,13 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         l0 = psi_far / (torch.abs(psi_far) + self.eps)
         d0 = data / (torch.abs(psi_far) + self.eps)
-        v1 = torch.sum((1 - d0) * reprod(psi_far1, psi_far2))
-        v2 = torch.sum(d0 * reprod(l0, psi_far1) * reprod(l0, psi_far2))
+        v1 = torch.sum(self.current_constrained_pixel_mask * (1 - d0) * reprod(psi_far1, psi_far2))
+        v2 = torch.sum(
+            self.current_constrained_pixel_mask
+            * d0
+            * reprod(l0, psi_far1)
+            * reprod(l0, psi_far2)
+        )
         return 2 * (v1 + v2)
 
     def gradient_o(self, p, gradF):

@@ -781,6 +781,25 @@ class NoiseModel(torch.nn.Module):
     def backward(self, *args, **kwargs):
         raise NotImplementedError
 
+    @staticmethod
+    def get_constrained_pixel_mask(
+        valid_pixel_mask: Optional[Tensor],
+        exclude_measured_pixels_below: Optional[float],
+        y_true: Tensor,
+    ) -> Tensor:
+        constrained_pixel_mask = torch.ones_like(y_true, dtype=torch.bool)
+        if valid_pixel_mask is not None:
+            constrained_pixel_mask = valid_pixel_mask.to(y_true.device)
+            constrained_pixel_mask = constrained_pixel_mask.unsqueeze(0).expand(
+                y_true.shape[0], -1, -1
+            )
+        if exclude_measured_pixels_below is not None:
+            constrained_pixel_mask = torch.logical_and(
+                constrained_pixel_mask,
+                y_true > exclude_measured_pixels_below,
+            )
+        return constrained_pixel_mask
+
     @timer()
     def conform_to_exit_wave_size(
         self, 
@@ -837,12 +856,14 @@ class PtychographyGaussianNoiseModel(GaussianNoiseModel):
         y_pred, y_true, valid_pixel_mask = self.conform_to_exit_wave_size(
             y_pred, y_true, self.valid_pixel_mask, psi_far.shape[-2:]
         )
+        constrained_pixel_mask = self.get_constrained_pixel_mask(
+            valid_pixel_mask,
+            self.exclude_measured_pixels_below,
+            y_true,
+        )
         g = 1 - torch.sqrt(y_true) / (torch.sqrt(y_pred) + self.eps)  # Eq. 12b
 
-        if valid_pixel_mask is not None:
-            g[:, torch.logical_not(valid_pixel_mask)] = 0
-        if self.exclude_measured_pixels_below is not None:
-            g[y_true <= self.exclude_measured_pixels_below] = 0
+        g[torch.logical_not(constrained_pixel_mask)] = 0
             
         w = 1 / (2 * self.sigma) ** 2
         g = 2 * w * g[:, None, :, :] * psi_far
@@ -874,8 +895,12 @@ class PtychographyPoissonNoiseModel(PoissonNoiseModel):
         y_pred, y_true, valid_pixel_mask = self.conform_to_exit_wave_size(
             y_pred, y_true, self.valid_pixel_mask, psi_far.shape[-2:]
         )
+        constrained_pixel_mask = self.get_constrained_pixel_mask(
+            valid_pixel_mask,
+            self.exclude_measured_pixels_below,
+            y_true,
+        )
         g = 1 - y_true / (y_pred + self.eps)  # Eq. 12b
-        if valid_pixel_mask is not None:
-            g[:, torch.logical_not(valid_pixel_mask)] = 0
+        g[torch.logical_not(constrained_pixel_mask)] = 0
         g = g[:, None, :, :] * psi_far
         return g
