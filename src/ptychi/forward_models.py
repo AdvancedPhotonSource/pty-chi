@@ -156,7 +156,6 @@ class PlanarPtychographyForwardModel(ForwardModel):
         apply_subpixel_shifts_on_probe: bool = True,
         diffraction_pattern_blur_sigma: Optional[float] = None,
         low_memory_mode: bool = False,
-        leave_all_measurement_zeros_unconstrained: bool = False,
         *args,
         **kwargs,
     ) -> None:
@@ -230,8 +229,6 @@ class PlanarPtychographyForwardModel(ForwardModel):
         self.intermediate_variables = self.PlanarPtychographyIntermediateVariables()
         
         self.diffraction_pattern_blur_sigma = diffraction_pattern_blur_sigma
-
-        self.leave_all_measurement_zeros_unconstrained = leave_all_measurement_zeros_unconstrained
         
         self.check_inputs()
 
@@ -763,15 +760,17 @@ class PlanarPtychographyForwardModel(ForwardModel):
 
 
 class NoiseModel(torch.nn.Module):
-    def __init__(self, 
-                 eps=1e-6, 
-                 valid_pixel_mask: Optional[Tensor] = None, 
-                 leave_all_measurement_zeros_unconstrained: bool = False) -> None:
+    def __init__(
+        self, 
+        eps: float = 1e-6, 
+        valid_pixel_mask: Optional[Tensor] = None, 
+        exclude_measured_pixels_below: Optional[float] = None,
+    ) -> None:
         super().__init__()
         self.eps = eps
         self.noise_statistics = None
         self.valid_pixel_mask = valid_pixel_mask
-        self.leave_all_measurement_zeros_unconstrained = leave_all_measurement_zeros_unconstrained
+        self.exclude_measured_pixels_below = exclude_measured_pixels_below
         
     def nll(self, y_pred: Tensor, y_true: Tensor) -> Tensor:
         """
@@ -829,8 +828,9 @@ class PtychographyGaussianNoiseModel(GaussianNoiseModel):
         $g = \frac{\partial L}{\partial \psi_{far}}$.
         
         When `self.valid_pixel_mask` is not None, pixels of the gradient `g` where the
-        mask is False are set to 0. When `g` is used to update the far-field wavefield
-        `psi_far`, the invalid pixels are kept unchanged.
+        mask is False are set to 0. When `self.exclude_measured_pixels_below` is not
+        None, gradients at pixels with measured intensities less than or equal to that
+        threshold are also set to 0.
         """
         # Shape of g:       (batch_size, h, w)
         # Shape of psi_far: (batch_size, n_probe_modes, h, w)
@@ -838,11 +838,11 @@ class PtychographyGaussianNoiseModel(GaussianNoiseModel):
             y_pred, y_true, self.valid_pixel_mask, psi_far.shape[-2:]
         )
         g = 1 - torch.sqrt(y_true) / (torch.sqrt(y_pred) + self.eps)  # Eq. 12b
-    
-        if self.leave_all_measurement_zeros_unconstrained:
-            g[y_true==0] = 0
-        elif valid_pixel_mask is not None:
+
+        if valid_pixel_mask is not None:
             g[:, torch.logical_not(valid_pixel_mask)] = 0
+        if self.exclude_measured_pixels_below is not None:
+            g[y_true <= self.exclude_measured_pixels_below] = 0
             
         w = 1 / (2 * self.sigma) ** 2
         g = 2 * w * g[:, None, :, :] * psi_far

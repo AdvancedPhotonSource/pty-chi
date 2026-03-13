@@ -67,7 +67,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         }[options.noise_model](
             **noise_model_params, 
             valid_pixel_mask=self.dataset.valid_pixel_mask.clone(),
-            leave_all_measurement_zeros_unconstrained=self.dataset.leave_all_measurement_zeros_unconstrained
+            exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
         )
 
         self.alpha_psi_far = 0.5

@@ -174,7 +174,6 @@ class PtychographyTask(Task):
             fft_shift=self.data_options.fft_shift,
             save_data_on_device=save_on_device,
             valid_pixel_mask=self.data_options.valid_pixel_mask,
-            leave_all_measurement_zeros_unconstrained=self.data_options.leave_all_measurement_zeros_unconstrained
         )
 
     def build_object(self):

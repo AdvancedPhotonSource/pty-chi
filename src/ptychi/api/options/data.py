@@ -37,9 +37,6 @@ class PtychographyDataOptions(base.Options):
     valid_pixel_mask: Optional[Union[ndarray, Tensor]] = None
     """A 2D boolean mask where valid pixels are True."""
     
-    leave_all_measurement_zeros_unconstrained: bool = False
-    """ Treat ALL unmeasured pixels in the diffraction intensity as unconstrained."""
-    
     save_data_on_device: bool = False
     """Whether to save the diffraction data on acceleration devices like GPU."""
     
