@@ -417,6 +417,9 @@ class Probe(dsbase.ReconstructParameter):
         Move the probe's center of mass to the center of the probe array.
         """
         center_constraint = self.options.center_constraint
+        use_total_intensity_for_com = (
+            center_constraint.use_total_intensity_for_com or center_constraint.use_intensity_for_com
+        )
         center = utils.to_tensor(
             self.shape[-2:],
             device=self.data.device,
@@ -426,7 +429,7 @@ class Probe(dsbase.ReconstructParameter):
         if center_constraint.center_modes_individually:
             probe = self.data.clone()
             probe_to_be_shifted = probe[0]
-            if center_constraint.use_intensity_for_com:
+            if use_total_intensity_for_com:
                 probe_to_be_shifted = torch.abs(probe_to_be_shifted) ** 2
 
             shifts = center.to(probe_to_be_shifted.device) - ip.find_center_of_mass(probe_to_be_shifted)
@@ -434,7 +437,7 @@ class Probe(dsbase.ReconstructParameter):
             self.set_data(probe)
             return
 
-        if center_constraint.use_intensity_for_com:
+        if use_total_intensity_for_com:
             probe_to_be_shifted = torch.sum(torch.abs(self.data[0, ...]) ** 2, dim=0)
         else:
             probe_to_be_shifted = self.get_mode_and_opr_mode(0, 0)

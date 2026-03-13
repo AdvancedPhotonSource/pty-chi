@@ -11,13 +11,13 @@ def _make_probe(
     data: torch.Tensor,
     *,
     center_modes_individually: bool,
-    use_intensity_for_com: bool,
+    use_total_intensity_for_com: bool,
 ) -> Probe:
     options = obase.ProbeOptions()
     options.optimizable = False
     options.center_constraint.enabled = True
     options.center_constraint.center_modes_individually = center_modes_individually
-    options.center_constraint.use_intensity_for_com = use_intensity_for_com
+    options.center_constraint.use_total_intensity_for_com = use_total_intensity_for_com
     return Probe(data=data, options=options)
 
 
@@ -35,7 +35,7 @@ def test_center_probe_can_shift_incoherent_modes_individually():
     probe = _make_probe(
         data,
         center_modes_individually=True,
-        use_intensity_for_com=False,
+        use_total_intensity_for_com=False,
     )
 
     probe.center_probe()
@@ -51,6 +51,21 @@ def test_probe_center_constraint_check_rejects_individual_mode_centering_with_in
     options = obase.ProbeOptions()
     options.initial_guess = torch.zeros((1, 1, 7, 7), dtype=torch.complex64)
     options.center_constraint.center_modes_individually = True
+    options.center_constraint.use_total_intensity_for_com = True
+
+    task_options = SimpleNamespace(
+        object_options=SimpleNamespace(
+            remove_object_probe_ambiguity=SimpleNamespace(enabled=False)
+        )
+    )
+
+    with pytest.raises(ValueError, match="use_total_intensity_for_com"):
+        options.check(task_options)
+
+
+def test_probe_center_constraint_check_promotes_deprecated_intensity_flag():
+    options = obase.ProbeOptions()
+    options.initial_guess = torch.zeros((1, 1, 7, 7), dtype=torch.complex64)
     options.center_constraint.use_intensity_for_com = True
 
     task_options = SimpleNamespace(
@@ -59,5 +74,7 @@ def test_probe_center_constraint_check_rejects_individual_mode_centering_with_in
         )
     )
 
-    with pytest.raises(ValueError, match="use_intensity_for_com"):
+    with pytest.warns(DeprecationWarning, match="use_total_intensity_for_com"):
         options.check(task_options)
+
+    assert options.center_constraint.use_total_intensity_for_com is True
