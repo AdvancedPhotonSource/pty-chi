@@ -234,8 +234,6 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         # - revised_psi --> 2 * Pi_o(psi_n)- psi_n
         # - new_psi --> Pi_o(psi_n)
 
-        probe = self.parameter_group.probe
-
         # Get the update exit wave
         new_psi, obj_patches = self.calculate_exit_wave_chunk(
             start_pt, end_pt, return_obj_patches=True
