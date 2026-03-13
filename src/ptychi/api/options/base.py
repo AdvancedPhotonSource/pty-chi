@@ -7,6 +7,7 @@ from dataclasses import field, fields
 import logging
 from math import ceil
 import enum
+import warnings
 
 from numpy import ndarray
 from torch import Tensor
@@ -629,12 +630,38 @@ class ProbeCenterConstraintOptions(FeatureOptions):
 
     optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
     
-    use_intensity_for_com: bool = False
+    use_total_intensity_for_com: bool = False
     """
     Whether to use the magnitude of the dominant shared probe 
     mode for computing the center of mass of the probe in order 
     to keep it centered, or to use the total probe intensity.
     """
+
+    use_intensity_for_com: bool = False
+    """
+    Deprecated alias for `use_total_intensity_for_com`.
+    """
+
+    center_modes_individually: bool = False
+    """
+    If True, each mode is shifted individually based on their own center of mass.
+    """
+
+    def check(self, options: "task_options.PtychographyTaskOptions"):
+        super().check(options)
+        if self.use_intensity_for_com:
+            warnings.warn(
+                "`probe_options.center_constraint.use_intensity_for_com` is deprecated; "
+                "use `probe_options.center_constraint.use_total_intensity_for_com` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.use_total_intensity_for_com = True
+        if self.center_modes_individually and self.use_total_intensity_for_com:
+            raise ValueError(
+                "`probe_options.center_constraint.use_total_intensity_for_com` must be False when "
+                "`probe_options.center_constraint.center_modes_individually` is True."
+            )
 
 
 @dataclasses.dataclass
@@ -682,6 +709,7 @@ class ProbeOptions(ParameterOptions):
         super().check(options)
         if not (self.initial_guess is not None and self.initial_guess.ndim == 4):
             raise ValueError("Probe initial_guess must be a (n_opr_modes, n_modes, h, w) tensor.")
+        self.center_constraint.check(options)
         if self.power_constraint.enabled and options.object_options.remove_object_probe_ambiguity.enabled:
             logger.warning(
                 "`ObjectOptions.remove_object_probe_ambiguity` and `ProbeOptions.power_constraint` "
