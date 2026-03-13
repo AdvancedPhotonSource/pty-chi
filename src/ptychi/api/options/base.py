@@ -634,6 +634,19 @@ class ProbeCenterConstraintOptions(FeatureOptions):
     to keep it centered, or to use the total probe intensity.
     """
 
+    center_modes_individually: bool = False
+    """
+    If True, each mode is shifted individually based on their own center of mass.
+    """
+
+    def check(self, options: "task_options.PtychographyTaskOptions"):
+        super().check(options)
+        if self.center_modes_individually and self.use_intensity_for_com:
+            raise ValueError(
+                "`probe_options.center_constraint.use_intensity_for_com` must be False when "
+                "`probe_options.center_constraint.center_modes_individually` is True."
+            )
+
 
 @dataclasses.dataclass
 class ProbeOptions(ParameterOptions):
@@ -680,6 +693,7 @@ class ProbeOptions(ParameterOptions):
         super().check(options)
         if not (self.initial_guess is not None and self.initial_guess.ndim == 4):
             raise ValueError("Probe initial_guess must be a (n_opr_modes, n_modes, h, w) tensor.")
+        self.center_constraint.check(options)
         if self.power_constraint.enabled and options.object_options.remove_object_probe_ambiguity.enabled:
             logger.warning(
                 "`ObjectOptions.remove_object_probe_ambiguity` and `ProbeOptions.power_constraint` "
