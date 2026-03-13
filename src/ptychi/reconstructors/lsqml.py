@@ -139,11 +139,17 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         elif isinstance(self.noise_model, fm.PtychographyPoissonNoiseModel):
             # This implementation reproduces PtychoShelves (gradient_descent_xi_solver)
             # and is different from Eq. 17 of Odstrcil (2018).
-            xi = 1 - y_true / (y_pred + eps)
+            constrained_pixel_mask = self.get_constrained_pixel_mask(y_true)
+            xi = (1 - y_true / (y_pred + eps)) * constrained_pixel_mask
             for _ in range(2):
                 alpha_prev = self.alpha_psi_far_all_pos[indices].mean()
                 alpha = (xi * (y_pred - y_true / (1 - alpha_prev * xi))).sum(-1).sum(-1)
-                alpha = alpha / (xi**2 * y_pred).sum(-1).sum(-1)
+                alpha_denominator = (xi**2 * y_pred).sum(-1).sum(-1)
+                alpha = torch.where(
+                    alpha_denominator > 0,
+                    alpha / alpha_denominator,
+                    torch.zeros_like(alpha),
+                )
                 # Use previous step size as momentum.
                 alpha = 0.5 * alpha_prev + 0.5 * alpha
                 alpha = alpha.clamp(0, 1)
