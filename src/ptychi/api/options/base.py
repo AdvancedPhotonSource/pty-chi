@@ -572,7 +572,9 @@ class ProbeOrthogonalizeIncoherentModesOptions(FeatureOptions):
 
     method: enums.OrthogonalizationMethods = enums.OrthogonalizationMethods.SVD
     """The method to use for incoherent_mode orthogonalization."""
-
+    
+    sort_by_occupancy: bool = False
+    """If True, keep the probes sorted so that mode with highest occupancy is the 0th shared mode."""
 
 @dataclasses.dataclass
 class ProbeOrthogonalizeOPRModesOptions(FeatureOptions):
