@@ -494,11 +494,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             The slice index of the object.
         """
         object_ = self.parameter_group.object
-        if (not object_.is_multislice) or (
-            object_.is_multislice
-            and slice_index == 0
-            and self.options.solve_obj_prb_step_size_jointly_for_first_slice_in_multislice
-        ):
+        if (self.options.solve_obj_prb_step_size_jointly 
+            and ((not object_.is_multislice) or (object_.is_multislice and slice_index == 0))):
             (alpha_o_i, alpha_p_i) = self.calculate_object_and_probe_update_step_sizes(
                 chi,
                 obj_patches,
