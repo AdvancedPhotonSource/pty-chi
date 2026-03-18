@@ -44,7 +44,7 @@ class TestMultislicePtychoLsqmlJointStepSize(tutils.TungstenDataTester):
         options.reconstructor_options.batch_size = 96
         options.reconstructor_options.noise_model = api.NoiseModels.GAUSSIAN
         options.reconstructor_options.num_epochs = 8
-        options.reconstructor_options.solve_obj_prb_step_size_jointly_for_first_slice_in_multislice = True
+        options.reconstructor_options.multislice_solve_obj_prb_step_size_jointly = True
         options.reconstructor_options.allow_nondeterministic_algorithms = False
 
         task = PtychographyTask(options)
