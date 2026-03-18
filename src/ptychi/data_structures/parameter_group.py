@@ -19,6 +19,13 @@ class ParameterGroup(MultiprocessMixin):
     def get_all_parameters(self) -> list["dsbase.ReconstructParameter"]:
         return list(self.__dict__.values())
 
+    def get_all_reconstruct_parameters(self) -> list["dsbase.ReconstructParameter"]:
+        parameters = []
+        for var in self.get_all_parameters():
+            if isinstance(var, dsbase.ReconstructParameter):
+                parameters.extend(var.get_all_reconstruct_parameters())
+        return parameters
+
     def get_optimizable_parameters(self) -> list["dsbase.ReconstructParameter"]:
         ovs = []
         for var in self.get_all_parameters():

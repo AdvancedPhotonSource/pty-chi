@@ -745,6 +745,7 @@ class DIPObject(Object):
             )
         if self.optimizable:
             self.optimizer = self.optimizer_class(self.model.parameters(), **self.optimizer_params)
+            self.build_step_size_scheduler()
         
     def generate(self):
         raise NotImplementedError

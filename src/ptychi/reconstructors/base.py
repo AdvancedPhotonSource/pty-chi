@@ -369,6 +369,10 @@ class IterativeReconstructor(Reconstructor):
     def run_post_epoch_hooks(self) -> None:
         pass
 
+    def step_all_step_size_schedulers(self) -> None:
+        for var in self.parameter_group.get_all_reconstruct_parameters():
+            var.step_step_size_scheduler(epoch=self.current_epoch)
+
     @timer()
     def run(self, n_epochs: Optional[int] = None, *args, **kwargs):
         if self.current_epoch == 0:
@@ -385,6 +389,7 @@ class IterativeReconstructor(Reconstructor):
                 self.run_post_update_hooks()
                 self.current_minibatch += 1
             self.run_post_epoch_hooks()
+            self.step_all_step_size_schedulers()
             self.loss_tracker.conclude_epoch(epoch=self.current_epoch)
             self.loss_tracker.print_latest()
 

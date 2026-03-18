@@ -87,6 +87,7 @@ class ReconstructParameter(Module):
     optimizable: bool = True
     optimization_plan: "api.OptimizationPlan" = None
     optimizer = None
+    step_size_scheduler = None
     is_dummy = False
 
     def __init__(
@@ -144,6 +145,8 @@ class ReconstructParameter(Module):
             {"lr": self.options.step_size}, **self.options.optimizer_params
         )
         self.optimizer = None
+        self.step_size_scheduler = None
+        self.step_size = self.optimizer_params["lr"]
         
         self.sub_modules = []
         self.optimizable_sub_modules = []
@@ -206,6 +209,13 @@ class ReconstructParameter(Module):
         if sub_module not in self.sub_modules:
             self.sub_modules.append(sub_module)
 
+    def get_all_reconstruct_parameters(self):
+        parameters = [self]
+        for sub_module in self.sub_modules:
+            if isinstance(sub_module, ReconstructParameter):
+                parameters.extend(sub_module.get_all_reconstruct_parameters())
+        return parameters
+
     def build_optimizer(self):
         if self.optimizable and self.optimizer_class is None:
             raise ValueError(
@@ -216,6 +226,61 @@ class ReconstructParameter(Module):
                 self.optimizer = self.optimizer_class([self.tensor.data], **self.optimizer_params)
             else:
                 self.optimizer = self.optimizer_class([self.tensor], **self.optimizer_params)
+            self.build_step_size_scheduler()
+
+    def _scheduler_step_accepts_no_args(self) -> bool:
+        if self.step_size_scheduler is None:
+            return True
+        for parameter in inspect.signature(self.step_size_scheduler.step).parameters.values():
+            if (
+                parameter.default is inspect._empty
+                and parameter.kind
+                in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            ):
+                return False
+        return True
+
+    def build_step_size_scheduler(self):
+        self.step_size_scheduler = None
+        if not self.optimizable or self.optimizer is None:
+            return
+
+        scheduler_class_name = self.optimization_plan.step_size_scheduler_class
+        if scheduler_class_name is None:
+            return
+
+        scheduler_class = getattr(torch.optim.lr_scheduler, scheduler_class_name, None)
+        if scheduler_class is None:
+            raise ValueError(
+                f"Unknown step-size scheduler {scheduler_class_name!r} for parameter {self.name}."
+            )
+
+        scheduler_options = self.optimization_plan.step_size_scheduler_options
+        if scheduler_options is None:
+            scheduler_options = {}
+        self.step_size_scheduler = scheduler_class(self.optimizer, **scheduler_options)
+        if not self._scheduler_step_accepts_no_args():
+            raise ValueError(
+                f"Step-size scheduler {scheduler_class_name} for parameter {self.name} "
+                "requires arguments in step(), which pty-chi does not provide."
+            )
+        self.sync_step_size_from_optimizer()
+
+    def sync_step_size_from_optimizer(self):
+        if self.optimizer is None:
+            return None
+        step_size = self.optimizer.param_groups[0]["lr"]
+        self.optimizer_params["lr"] = step_size
+        self.step_size = step_size
+        return step_size
+
+    def step_step_size_scheduler(self, epoch: Optional[int] = None):
+        if self.step_size_scheduler is None:
+            return
+        if epoch is not None and not self.optimization_plan.is_in_optimization_interval(epoch):
+            return
+        self.step_size_scheduler.step()
+        self.sync_step_size_from_optimizer()
 
     def set_optimizable(self, optimizable):
         self.optimizable = optimizable

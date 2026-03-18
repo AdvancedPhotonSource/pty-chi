@@ -128,7 +128,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                     obj_patches[:, i_slice : i_slice + 1, ...],    
                     delta_o_patches,
                     self.forward_model.intermediate_variables.shifted_unique_probes[i_slice],
-                    object_.optimizer_params["lr"],
+                    object_.step_size,
                 )
 
             delta_p_i = None

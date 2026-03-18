@@ -1173,7 +1173,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             obj_patches,
             delta_o_patches,
             unique_probes,
-            self.parameter_group.object.optimizer_params["lr"],
+            self.parameter_group.object.step_size,
         )
         delta_pos_full = torch.zeros_like(self.parameter_group.probe_positions.tensor)
         delta_pos_full[indices] = delta_pos

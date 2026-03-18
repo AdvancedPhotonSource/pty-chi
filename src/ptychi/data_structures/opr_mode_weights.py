@@ -77,6 +77,7 @@ class OPRModeWeights(dsbase.ReconstructParameter):
                 self.optimizer = self.optimizer_class([self.tensor.data], **self.optimizer_params)
             else:
                 self.optimizer = self.optimizer_class([self.tensor], **self.optimizer_params)
+            self.build_step_size_scheduler()
 
     def get_weights(self, indices: Union[tuple[int, ...], slice]) -> Tensor:
         return self.data[indices]

@@ -107,6 +107,18 @@ class OptimizationPlan(Options):
     The stride in epochs. Optimization will run every `stride` epochs.
     """
 
+    step_size_scheduler_class: Optional[str] = None
+    """
+    Name of the step-size scheduler class in ``torch.optim.lr_scheduler``.
+    If None, no scheduler is used.
+    """
+
+    step_size_scheduler_options: dict = dataclasses.field(default_factory=dict)
+    """
+    Keyword arguments passed to the step-size scheduler constructor other than
+    ``optimizer``.
+    """
+
     def is_enabled(self, epoch: int) -> bool:
         if self.start is not None and epoch < self.start:
             return False

@@ -562,6 +562,7 @@ class SynthesisDictLearnProbe( Probe ):
             )
         if self.optimizable:
             self.optimizer = self.optimizer_class([self.sparse_code_probe], **self.optimizer_params)
+            self.build_step_size_scheduler()
 
     def set_sparse_code(self, data):
         self.sparse_code_probe.data = data
@@ -622,6 +623,7 @@ class DIPProbe(Probe):
             )
         if self.optimizable:
             self.optimizer = self.optimizer_class(self.model.parameters(), **self.optimizer_params)
+            self.build_step_size_scheduler()
 
     def get_nn_input(self):
         z = torch.rand(
