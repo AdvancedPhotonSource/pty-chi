@@ -26,12 +26,17 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
     The standard deviation of the gaussian noise. Only used when `noise_model == enums.NoiseModels.GAUSSIAN`.
     """
     
-    solve_obj_prb_step_size_jointly: bool = False
+    single_slice_solve_obj_prb_step_size_jointly: bool = True
     """
-    Whether to solve the simultaneous object/probe step length calculation;
-    in FoldSlice they use independent (non-joint) step length calculation, but 
-    we're adding the option of using simultaneous AND non-simultaneous step 
-    length calculation.
+    Whether to solve the object/probe step size jointly for single-slice objects.
+    For multislice objects, use `multislice_solve_obj_prb_step_size_jointly` instead. 
+    """
+
+    multislice_solve_obj_prb_step_size_jointly: bool = False
+    """
+    Whether to solve the object/probe step size jointly for multislice objects at the first slice.
+    Slices other than the first are always solved independently. For single-slice objects, use
+    `single_slice_solve_obj_prb_step_size_jointly` instead.
     """
     
     solve_step_sizes_only_using_first_probe_mode: bool = True
