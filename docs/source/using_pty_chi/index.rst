@@ -6,6 +6,7 @@ Using Pty-chi
 
    data_structures
    task
+   options
    io
    initialization_recommendations
    position_mapping
