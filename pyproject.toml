@@ -27,15 +27,11 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 movies = ["opencv-python"]
-
-[docs]
-dependencies = [
+docs = [
     "sphinx",
     "sphinx-rtd-theme",
 ]
-
-[nn]
-dependencies = [
+nn = [
     "torchinfo",
 ]
 
