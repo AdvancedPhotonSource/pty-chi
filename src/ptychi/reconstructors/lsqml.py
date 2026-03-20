@@ -1,9 +1,10 @@
 # Copyright © 2025 UChicago Argonne, LLC All right reserved
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Literal, TypeAlias
 import logging
 import math
+from dataclasses import dataclass, field
 
 import torch
 from torch.utils.data import Dataset
@@ -25,6 +26,196 @@ if TYPE_CHECKING:
     import ptychi.api as api
 
 logger = logging.getLogger(__name__)
+
+MomentumHistoryAttr: TypeAlias = Literal["update_direction_history", "position_update_history"]
+MomentumFallbackBehavior: TypeAlias = Literal["decay", "update_velocity"]
+MomentumCorrcoefMode: TypeAlias = Literal["complex", "pearson"]
+
+
+@dataclass
+class MomentumState:
+    """Mutable buffers used by LSQML momentum acceleration.
+
+    The same state container is shared by object, probe, and probe-position
+    momentum. Individual callers choose which fields are meaningful for their
+    use case.
+
+    Attributes
+    ----------
+    update_direction_history
+        History of normalized object/probe updates used for correlation-based
+        friction estimation.
+    position_update_history
+        History of full `(n_positions, 2)` probe-position updates. Each entry
+        corresponds to one outer iteration and is filled incrementally across
+        minibatches.
+    velocity_map
+        Momentum buffer with the same shape as the parameter-specific update
+        that receives velocity accumulation.
+    accumulated_update_direction
+        Scratch buffer used by callers that accumulate updates across a full
+        epoch before applying them.
+    position_update_history_epoch
+        Epoch index associated with the most recent
+        `position_update_history` entry.
+    """
+
+    update_direction_history: list[torch.Tensor] = field(default_factory=list)
+    position_update_history: list[torch.Tensor] = field(default_factory=list)
+    velocity_map: torch.Tensor | None = None
+    accumulated_update_direction: torch.Tensor | float | int | None = None
+    position_update_history_epoch: int | None = None
+
+
+class MomentumAccelerator:
+    """Shared momentum utilities for LSQML object, probe, and probe positions."""
+
+    def ensure_velocity_map(self, state: MomentumState, velocity_template: torch.Tensor) -> None:
+        """Initialize the momentum buffer if it has not been created yet."""
+        if state.velocity_map is None:
+            state.velocity_map = torch.zeros_like(velocity_template)
+
+    def update_history(
+        self,
+        state: MomentumState,
+        history_value: torch.Tensor,
+        *,
+        momentum_memory: int,
+        velocity_template: torch.Tensor,
+        history_attr: MomentumHistoryAttr = "update_direction_history",
+        store_history: bool = True,
+        epoch_attr: Optional[Literal["position_update_history_epoch"]] = None,
+        current_epoch: int | None = None,
+        indices: Optional[torch.Tensor] = None,
+    ) -> bool:
+        """Update momentum history and report whether the history window is warm."""
+        history = getattr(state, history_attr)
+        indices = slice(None) if indices is None else indices
+
+        if epoch_attr is not None:
+            if current_epoch is None:
+                raise ValueError("`current_epoch` is required for epoch-scoped momentum history.")
+            if len(history) == 0 or getattr(state, epoch_attr) != current_epoch:
+                history.append(torch.zeros_like(velocity_template))
+                setattr(state, epoch_attr, current_epoch)
+                if len(history) > momentum_memory + 1:
+                    history.pop(0)
+            history[-1][indices] = history_value
+            return len(history) >= momentum_memory + 1
+
+        if store_history:
+            history.append(history_value)
+            history_overflow = len(history) > momentum_memory + 1
+            if history_overflow:
+                history.pop(0)
+            return history_overflow
+
+        return len(history) >= momentum_memory + 1
+
+    def calculate_friction(
+        self,
+        state: MomentumState,
+        *,
+        momentum_memory: int,
+        tensor_template: torch.Tensor,
+        friction_scale: float,
+        history_attr: MomentumHistoryAttr = "update_direction_history",
+        history_selector: int | slice | None = None,
+        corrcoef_mode: MomentumCorrcoefMode = "complex",
+        indices: Optional[torch.Tensor] = None,
+    ) -> tuple[torch.Tensor, bool]:
+        """Calculate friction from recent history correlations."""
+        history = getattr(state, history_attr)
+        scope = (slice(None) if indices is None else indices) if history_attr == "position_update_history" else (slice(None) if history_selector is None else history_selector)
+        current_update = history[-1][scope]
+
+        def _corrcoef(previous_update: torch.Tensor) -> torch.Tensor:
+            if corrcoef_mode == "complex":
+                return (previous_update * current_update.conj()).mean().real
+            if corrcoef_mode == "pearson":
+                if len(current_update) < 2 or len(previous_update) < 2:
+                    return torch.tensor(0.0, device=tensor_template.device, dtype=tensor_template.dtype)
+                current_centered = current_update - current_update.mean(0, keepdim=True)
+                previous_centered = previous_update - previous_update.mean(0, keepdim=True)
+                denominator = torch.sqrt(
+                    (current_centered**2).sum(0) * (previous_centered**2).sum(0)
+                )
+                corr = torch.where(
+                    denominator > 0,
+                    (current_centered * previous_centered).sum(0) / denominator,
+                    torch.zeros_like(denominator),
+                )
+                return corr.mean()
+            raise ValueError(f"Unknown corrcoef_mode: {corrcoef_mode}")
+
+        corr_level = torch.stack(
+            [_corrcoef(history[-1 - i][scope]) for i in range(1, momentum_memory + 1)]
+        )
+        use_momentum = bool(torch.all(corr_level > 0))
+        friction = torch.tensor(0.5, device=corr_level.device, dtype=corr_level.dtype)
+        if use_momentum:
+            p = pmath.polyfit(
+                torch.arange(0.0, momentum_memory + 1.0, device=corr_level.device),
+                torch.concat([torch.zeros([1], device=corr_level.device), torch.log(corr_level)]),
+                deg=1,
+            )
+            friction = friction_scale * (-p[0]).clip(0, None)
+        return friction, use_momentum
+
+    def update_velocity(
+        self,
+        state: MomentumState,
+        update: torch.Tensor,
+        *,
+        friction: torch.Tensor,
+        gradient_mixing_factor: Optional[float],
+        velocity_selector: int | slice | None = None,
+        indices: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Update the selected velocity buffer using the current update."""
+        scope = (slice(None) if indices is None else indices) if indices is not None else (slice(None) if velocity_selector is None else velocity_selector)
+        velocity = state.velocity_map[scope]
+        mixing_factor = friction if gradient_mixing_factor is None else gradient_mixing_factor
+        velocity = (1 - friction) * velocity + mixing_factor * update
+        state.velocity_map[scope] = velocity
+        return velocity
+
+    def apply_fallback(
+        self,
+        state: MomentumState,
+        update: torch.Tensor,
+        *,
+        fallback_behavior: MomentumFallbackBehavior,
+        gradient_mixing_factor: Optional[float],
+        velocity_selector: int | slice | None = None,
+        indices: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Apply the non-momentum fallback update rule to the selected velocity."""
+        scope = (slice(None) if indices is None else indices) if indices is not None else (slice(None) if velocity_selector is None else velocity_selector)
+        velocity = state.velocity_map[scope]
+        if fallback_behavior == "decay":
+            velocity = velocity / 2.0
+        elif fallback_behavior == "update_velocity":
+            friction = torch.tensor(0.5, device=update.device, dtype=update.real.dtype)
+            mixing_factor = friction if gradient_mixing_factor is None else gradient_mixing_factor
+            velocity = (1 - friction) * velocity + mixing_factor * update
+        else:
+            raise ValueError(f"Unknown fallback_behavior: {fallback_behavior}")
+        state.velocity_map[scope] = velocity
+        return velocity
+
+    def modify_update(
+        self,
+        update: torch.Tensor,
+        state: MomentumState,
+        *,
+        gain: float,
+        velocity_selector: int | slice | None = None,
+        indices: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Add the selected velocity contribution to an update tensor."""
+        scope = (slice(None) if indices is None else indices) if indices is not None else (slice(None) if velocity_selector is None else velocity_selector)
+        return update + gain * state.velocity_map[scope]
 
 
 class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
@@ -75,9 +266,10 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         self.indices = []
 
-        self.object_momentum_params = {}
-        self.probe_momentum_params = {}
-        self.probe_position_momentum_params = {}
+        self.object_momentum_params = MomentumState()
+        self.probe_momentum_params = MomentumState()
+        self.probe_position_momentum_params = MomentumState()
+        self.momentum_accelerator = MomentumAccelerator()
 
 
         # Fourier error for momentum acceleration.
@@ -96,6 +288,12 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.reconstructor_buffers.register_buffer("fourier_errors", [], dist.ReduceOp.AVG)
         self.reconstructor_buffers.register_buffer("accumulated_true_intensity", 0, dist.ReduceOp.SUM)
         self.reconstructor_buffers.register_buffer("accumulated_pred_intensity", 0, dist.ReduceOp.SUM)
+
+    def _get_momentum_accelerator(self) -> MomentumAccelerator:
+        """Lazily create the shared momentum helper for unit tests bypassing `__init__`."""
+        if not hasattr(self, "momentum_accelerator"):
+            self.momentum_accelerator = MomentumAccelerator()
+        return self.momentum_accelerator
 
     def check_inputs(self, *args, **kwargs):
         if self.parameter_group.opr_mode_weights.optimizer is not None:
@@ -757,7 +955,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.parameter_group.probe.optimizer.step()
 
     @timer()
-    def _apply_probe_momentum(self, alpha_p_mean, delta_p_hat):
+    def _apply_probe_momentum(
+        self, alpha_p_mean: float | torch.Tensor, delta_p_hat: torch.Tensor
+    ) -> None:
         """
         Apply momentum acceleration to the probe (only the first OPR mode). This is a
         special momentum acceleration used in PtychoShelves, which behaves somewhat
@@ -773,62 +973,67 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         delta_p_hat = delta_p_hat * alpha_p_mean
 
+        momentum = self._get_momentum_accelerator()
         probe = self.parameter_group.probe
-        if "update_direction_history" not in self.probe_momentum_params.keys():
-            self.probe_momentum_params["update_direction_history"] = []
-            self.probe_momentum_params["velocity_map"] = torch.zeros_like(delta_p_hat)
+        momentum.ensure_velocity_map(self.probe_momentum_params, delta_p_hat)
 
         upd = delta_p_hat / (pmath.mnorm(delta_p_hat, dim=(-1, -2), keepdims=True) + 1e-15)
-        self.probe_momentum_params["update_direction_history"].append(upd)
 
         momentum_memory = 3
+        history_ready = momentum.update_history(
+            self.probe_momentum_params,
+            upd,
+            momentum_memory=momentum_memory,
+            velocity_template=delta_p_hat,
+        )
+        if not history_ready:
+            return
 
-        if len(self.probe_momentum_params["update_direction_history"]) > momentum_memory + 1:
-            # Remove the oldest momentum update.
-            self.probe_momentum_params["update_direction_history"].pop(0)
-            # PtychoShelves only applies momentum to the first mode.
-            for i_mode in range(1):
-                # Project older updates to the latest one, ordered from recent to old.
-                projected_updates = [
-                    (
-                        self.probe_momentum_params["update_direction_history"][i][i_mode]
-                        * self.probe_momentum_params["update_direction_history"][-1][i_mode].conj()
+        # PtychoShelves only applies momentum to the first mode.
+        for i_mode in range(1):
+            gain = 0.0
+            if self._fourier_error_ok():
+                friction, use_momentum = momentum.calculate_friction(
+                    self.probe_momentum_params,
+                    momentum_memory=momentum_memory,
+                    tensor_template=delta_p_hat[i_mode],
+                    friction_scale=0.5,
+                    history_selector=i_mode,
+                    corrcoef_mode="complex",
+                )
+                if use_momentum:
+                    momentum.update_velocity(
+                        self.probe_momentum_params,
+                        delta_p_hat[i_mode],
+                        friction=friction,
+                        gradient_mixing_factor=self.options.momentum_acceleration_gradient_mixing_factor,
+                        velocity_selector=i_mode,
                     )
-                    for i in range(len(self.probe_momentum_params["update_direction_history"]) - 1)
-                ][::-1]
-                # Shape of corr_level: (momentum_memory, n_probe_modes)
-                corr_level = [
-                    torch.mean(projected_updates[k]).real for k in range(len(projected_updates))
-                ]
-                corr_level = torch.tensor(corr_level, device=delta_p_hat.device)
-
-                if self._fourier_error_ok() and torch.all(corr_level > 0):
-                    # Estimate optimal friction.
-                    p = pmath.polyfit(
-                        torch.arange(0.0, momentum_memory + 1),
-                        torch.concat([torch.zeros([1]), torch.log(corr_level)], dim=0).reshape(-1),
-                        deg=1,
-                    )
-                    friction = 0.5 * (-p[0]).clip(0, None)
-
-                    m = self.options.momentum_acceleration_gradient_mixing_factor
-                    m = friction if m is None else m
-                    self.probe_momentum_params["velocity_map"][i_mode] = (
-                        1 - friction
-                    ) * self.probe_momentum_params["velocity_map"][i_mode] + m * delta_p_hat[i_mode]
-                    probe.set_data(
-                        probe.data[0, i_mode]
-                        + self.options.momentum_acceleration_gain
-                        * self.probe_momentum_params["velocity_map"][i_mode],
-                        slicer=(0, i_mode),
-                    )
+                    gain = self.options.momentum_acceleration_gain
                 else:
-                    self.probe_momentum_params["velocity_map"][i_mode] = (
-                        self.probe_momentum_params["velocity_map"][i_mode] / 2.0
+                    momentum.apply_fallback(
+                        self.probe_momentum_params,
+                        delta_p_hat[i_mode],
+                        fallback_behavior="decay",
+                        gradient_mixing_factor=self.options.momentum_acceleration_gradient_mixing_factor,
+                        velocity_selector=i_mode,
                     )
+            else:
+                momentum.apply_fallback(
+                    self.probe_momentum_params,
+                    delta_p_hat[i_mode],
+                    fallback_behavior="decay",
+                    gradient_mixing_factor=self.options.momentum_acceleration_gradient_mixing_factor,
+                    velocity_selector=i_mode,
+                )
+            if gain > 0:
+                probe.set_data(
+                    probe.data[0, i_mode] + gain * self.probe_momentum_params.velocity_map[i_mode],
+                    slicer=(0, i_mode),
+                )
 
     @timer()
-    def _clip_probe_position_update(self, delta_pos):
+    def _clip_probe_position_update(self, delta_pos: torch.Tensor) -> torch.Tensor:
         """
         Clip the probe-position update by the configured limits.
 
@@ -867,26 +1072,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         return delta_pos
 
     @timer()
-    def _calculate_probe_position_corrcoef(self, current_update, previous_update):
-        """
-        Calculate the mean of the per-axis Pearson correlation coefficients
-        between two batches of probe-position updates.
-        """
-        if len(current_update) < 2 or len(previous_update) < 2:
-            return torch.tensor(0.0, device=current_update.device, dtype=current_update.dtype)
-
-        current_centered = current_update - current_update.mean(0, keepdim=True)
-        previous_centered = previous_update - previous_update.mean(0, keepdim=True)
-        denominator = torch.sqrt((current_centered**2).sum(0) * (previous_centered**2).sum(0))
-        corr = torch.where(
-            denominator > 0,
-            (current_centered * previous_centered).sum(0) / denominator,
-            torch.zeros_like(denominator),
-        )
-        return corr.mean()
-
-    @timer()
-    def _apply_probe_position_momentum(self, indices, delta_pos):
+    def _apply_probe_position_momentum(
+        self, indices: torch.Tensor, delta_pos: torch.Tensor
+    ) -> torch.Tensor:
         """
         Apply foldslice-style momentum acceleration to the current probe-position
         update after clipping.
@@ -906,6 +1094,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             return delta_pos
         
         probe_positions = self.parameter_group.probe_positions
+        momentum = self._get_momentum_accelerator()
 
         momentum_memory = probe_positions.options.momentum_acceleration_memory
         if momentum_memory < 1:
@@ -913,51 +1102,54 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 "`probe_position_options.momentum_acceleration_memory` must be positive."
             )
 
-        if "position_update_history" not in self.probe_position_momentum_params.keys():
-            self.probe_position_momentum_params["position_update_history"] = []
-            self.probe_position_momentum_params["velocity_map"] = torch.zeros_like(
-                probe_positions.data
-            )
-
-        history = self.probe_position_momentum_params["position_update_history"]
-        history_epoch = self.probe_position_momentum_params.get("position_update_history_epoch")
-        if len(history) == 0 or history_epoch != self.current_epoch:
-            # Match foldslice's `position_update_memory{iter}` behavior by storing
-            # one full update map per epoch and filling it across minibatches.
-            history.append(torch.zeros_like(probe_positions.data))
-            self.probe_position_momentum_params["position_update_history_epoch"] = self.current_epoch
-            if len(history) > momentum_memory + 1:
-                history.pop(0)
-        history[-1][indices] = delta_pos
-
-        if len(history) < momentum_memory + 1:
+        momentum.ensure_velocity_map(
+            self.probe_position_momentum_params, probe_positions.data
+        )
+        history_ready = momentum.update_history(
+            self.probe_position_momentum_params,
+            delta_pos,
+            momentum_memory=momentum_memory,
+            velocity_template=probe_positions.data,
+            history_attr="position_update_history",
+            epoch_attr="position_update_history_epoch",
+            current_epoch=self.current_epoch,
+            indices=indices,
+        )
+        if not history_ready:
             return delta_pos
 
-        corr_level = []
-        current_update = history[-1][indices]
-        for i in range(1, momentum_memory + 1):
-            previous_update = history[-1 - i][indices]
-            corr_level.append(self._calculate_probe_position_corrcoef(current_update, previous_update))
-        corr_level = torch.stack(corr_level)
-
-        gain = 0.0
-        friction = torch.tensor(0.5, device=delta_pos.device, dtype=delta_pos.dtype)
-        if torch.all(corr_level > 0):
-            p = pmath.polyfit(
-                torch.arange(0.0, momentum_memory + 1.0, device=delta_pos.device),
-                torch.concat([torch.zeros([1], device=delta_pos.device), torch.log(corr_level)]),
-                deg=1,
+        friction, use_momentum = momentum.calculate_friction(
+            self.probe_position_momentum_params,
+            momentum_memory=momentum_memory,
+            tensor_template=delta_pos,
+            friction_scale=0.1,
+            history_attr="position_update_history",
+            corrcoef_mode="pearson",
+            indices=indices,
+        )
+        if use_momentum:
+            momentum.update_velocity(
+                self.probe_position_momentum_params,
+                delta_pos,
+                friction=friction,
+                gradient_mixing_factor=probe_positions.options.momentum_acceleration_gradient_mixing_factor,
+                indices=indices,
             )
-            gain = probe_positions.options.momentum_acceleration_gain
-            friction = 0.1 * (-p[0]).clip(0, None)
-
-        m = probe_positions.options.momentum_acceleration_gradient_mixing_factor
-        m = friction if m is None else m
-        self.probe_position_momentum_params["velocity_map"][indices] = (
-            1 - friction
-        ) * self.probe_position_momentum_params["velocity_map"][indices] + m * delta_pos
-        if delta_pos.abs().max() < 0.1:
-            delta_pos = delta_pos + gain * self.probe_position_momentum_params["velocity_map"][indices]
+            if delta_pos.abs().max() < 0.1:
+                delta_pos = momentum.modify_update(
+                    delta_pos,
+                    self.probe_position_momentum_params,
+                    gain=probe_positions.options.momentum_acceleration_gain,
+                    indices=indices,
+                )
+        else:
+            momentum.apply_fallback(
+                self.probe_position_momentum_params,
+                delta_pos,
+                fallback_behavior="update_velocity",
+                gradient_mixing_factor=probe_positions.options.momentum_acceleration_gradient_mixing_factor,
+                indices=indices,
+            )
         return delta_pos
 
     @timer()
@@ -1131,7 +1323,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         direction for the object is stored in `object.grad`.
         """
         if self.options.batching_mode != enums.BatchingModes.COMPACT or self.current_minibatch == 0:
-            self.probe_momentum_params["accumulated_update_direction"] = 0
+            self.probe_momentum_params.accumulated_update_direction = 0
 
     @timer()
     def _update_momentum_buffers(self, delta_p_hat):
@@ -1146,7 +1338,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_p_hat : Tensor
             A (n_opr_modes, n_probe_modes, h, w) tensor giving the update direction for the probe.
         """
-        self.probe_momentum_params["accumulated_update_direction"] += delta_p_hat / len(
+        self.probe_momentum_params.accumulated_update_direction += delta_p_hat / len(
             self.dataloader
         )
 
@@ -1205,7 +1397,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.parameter_group.object.optimizer.step()
 
     @timer()
-    def _apply_object_momentum(self, alpha_o_mean_all_slices, delta_o_hat):
+    def _apply_object_momentum(
+        self, alpha_o_mean_all_slices: torch.Tensor, delta_o_hat: torch.Tensor
+    ) -> None:
         """
         Apply momentum acceleration to the object. This is a special momentum acceleration used
         in PtychoShelves, which behaves somewhat differently from the momentum in `torch.optim.SGD`.
@@ -1214,78 +1408,75 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         # In PtychoShelves, this scaling happens in `update_object.m`.
         delta_o_hat = delta_o_hat * alpha_o_mean_all_slices[:, None, None]
 
+        momentum = self._get_momentum_accelerator()
         object_ = self.parameter_group.object
-        if "update_direction_history" not in self.object_momentum_params.keys():
-            self.object_momentum_params["update_direction_history"] = []
-            self.object_momentum_params["velocity_map"] = torch.zeros_like(object_.data)
+        momentum.ensure_velocity_map(self.object_momentum_params, object_.data)
 
         object_roi_bbox = self.parameter_group.object.roi_bbox.get_bbox_with_top_left_origin()
         object_roi_slicer = object_roi_bbox.get_slicer()
         upd = delta_o_hat * alpha_o_mean_all_slices[:, None, None]
-        upd = upd[:, *object_roi_slicer]
+        upd = upd[(slice(None), *object_roi_slicer)]
         upd = upd / pmath.mnorm(upd, dim=(-1, -2), keepdims=True)
-        self.object_momentum_params["update_direction_history"].append(upd)
 
         momentum_memory = 2
+        use_object_momentum = self._fourier_error_ok()
+        history_ready = momentum.update_history(
+            self.object_momentum_params,
+            upd,
+            momentum_memory=momentum_memory,
+            velocity_template=object_.data,
+        )
+        if not history_ready:
+            return
 
-        if len(self.object_momentum_params["update_direction_history"]) > momentum_memory + 1:
-            # Remove the oldest momentum update.
-            self.object_momentum_params["update_direction_history"].pop(0)
-            for i_slice in range(object_.n_slices):
-                if self._fourier_error_ok():
-                    # Project older updates to the latest one, ordered from recent to old.
-                    projected_updates = [
-                        (
-                            self.object_momentum_params["update_direction_history"][i][i_slice]
-                            * self.object_momentum_params["update_direction_history"][-1][
-                                i_slice
-                            ].conj()
-                        )
-                        for i in range(
-                            len(self.object_momentum_params["update_direction_history"]) - 1
-                        )
-                    ][::-1]
-                    corr_level = [
-                        torch.mean(projected_updates[k]).real for k in range(len(projected_updates))
-                    ]
-                    corr_level = torch.tensor(corr_level, device=delta_o_hat.device)
-
-                if self._fourier_error_ok() and torch.all(corr_level > 0):
-                    # Estimate optimal friction.
-                    p = pmath.polyfit(
-                        torch.arange(0.0, momentum_memory + 1.0, device=delta_o_hat.device),
-                        torch.tensor([0, *torch.log(corr_level)], device=delta_o_hat.device),
-                        deg=1,
+        for i_slice in range(object_.n_slices):
+            gain = 0.0
+            if use_object_momentum:
+                friction, use_momentum = momentum.calculate_friction(
+                    self.object_momentum_params,
+                    momentum_memory=momentum_memory,
+                    tensor_template=delta_o_hat[i_slice],
+                    friction_scale=0.5,
+                    history_selector=i_slice,
+                    corrcoef_mode="complex",
+                )
+                if use_momentum:
+                    momentum.update_velocity(
+                        self.object_momentum_params,
+                        delta_o_hat[i_slice],
+                        friction=friction,
+                        gradient_mixing_factor=self.options.momentum_acceleration_gradient_mixing_factor,
+                        velocity_selector=i_slice,
                     )
-                    # If correlation drops fast as one goes away from the current epoch, p[0]
-                    # is more negative, and friction is larger. Accumulated velocity is weighted
-                    # less to allow the update direction to change more quickly.
-                    friction = 0.5 * (-p[0]).clip(0, None)
-
-                    w = object_.preconditioner / (
-                        0.1 * object_.preconditioner.max() + object_.preconditioner
-                    )
-                    m = self.options.momentum_acceleration_gradient_mixing_factor
-                    m = friction if m is None else m
-                    self.object_momentum_params["velocity_map"][i_slice] = (
-                        1 - friction
-                    ) * self.object_momentum_params["velocity_map"][i_slice] + m * delta_o_hat[
-                        i_slice
-                    ]
-                    object_.set_data(
-                        object_.data[i_slice]
-                        + w
-                        * self.options.momentum_acceleration_gain
-                        * self.object_momentum_params["velocity_map"][i_slice],
-                        slicer=i_slice,
-                    )
+                    gain = self.options.momentum_acceleration_gain
                 else:
-                    self.object_momentum_params["velocity_map"][i_slice] = (
-                        self.object_momentum_params["velocity_map"][i_slice] / 2.0
+                    momentum.apply_fallback(
+                        self.object_momentum_params,
+                        delta_o_hat[i_slice],
+                        fallback_behavior="decay",
+                        gradient_mixing_factor=self.options.momentum_acceleration_gradient_mixing_factor,
+                        velocity_selector=i_slice,
                     )
+            else:
+                momentum.apply_fallback(
+                    self.object_momentum_params,
+                    delta_o_hat[i_slice],
+                    fallback_behavior="decay",
+                    gradient_mixing_factor=self.options.momentum_acceleration_gradient_mixing_factor,
+                    velocity_selector=i_slice,
+                )
+            if gain > 0:
+                w = object_.preconditioner / (
+                    0.1 * object_.preconditioner.max() + object_.preconditioner
+                )
+                object_.set_data(
+                    object_.data[i_slice]
+                    + w * gain * self.object_momentum_params.velocity_map[i_slice],
+                    slicer=i_slice,
+                )
 
     @timer()
-    def _fourier_error_ok(self):
+    def _fourier_error_ok(self) -> bool:
         if len(self.reconstructor_buffers.fourier_errors) < 3:
             return True
         return max(self.reconstructor_buffers.fourier_errors[-3:-1]) > min(self.reconstructor_buffers.fourier_errors[-2:])
@@ -1402,7 +1593,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             ):
                 self._apply_probe_momentum(
                     torch.mean(self.reconstructor_buffers.alpha_probe_all_pos),
-                    self.probe_momentum_params["accumulated_update_direction"],
+                    self.probe_momentum_params.accumulated_update_direction,
                 )
         else:
             # In epoch 0, only correct probe intensity.

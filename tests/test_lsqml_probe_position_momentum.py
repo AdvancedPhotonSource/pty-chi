@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import torch
 
 import ptychi.api as api
-from ptychi.reconstructors.lsqml import LSQMLReconstructor
+from ptychi.reconstructors.lsqml import LSQMLReconstructor, MomentumState
 
 
 def make_valid_options():
@@ -105,8 +105,8 @@ def test_update_probe_positions_uses_position_momentum_math_when_enabled():
     reconstructor.options = SimpleNamespace(momentum_acceleration_gradient_mixing_factor=0.0)
     reconstructor.forward_model = SimpleNamespace(free_space_propagation_distance_m=torch.inf)
     reconstructor.current_epoch = 2
-    reconstructor.probe_position_momentum_params = {
-        "position_update_history": [
+    reconstructor.probe_position_momentum_params = MomentumState(
+        position_update_history=[
             torch.tensor(
                 [[0.0, 0.0], [0.03, -0.024], [0.0, 0.0], [0.012, -0.006]],
                 dtype=torch.float32,
@@ -116,9 +116,9 @@ def test_update_probe_positions_uses_position_momentum_math_when_enabled():
                 dtype=torch.float32,
             ),
         ],
-        "position_update_history_epoch": 1,
-        "velocity_map": torch.zeros((4, 2), dtype=torch.float32),
-    }
+        position_update_history_epoch=1,
+        velocity_map=torch.zeros((4, 2), dtype=torch.float32),
+    )
 
     indices = torch.tensor([1, 3])
     chi = torch.ones((2, 1, 2, 2), dtype=torch.complex64)
@@ -161,8 +161,8 @@ def test_probe_position_momentum_history_is_stored_once_per_epoch():
     reconstructor.parameter_group = SimpleNamespace(probe_positions=probe_positions)
     reconstructor.forward_model = SimpleNamespace(free_space_propagation_distance_m=torch.inf)
     reconstructor.current_epoch = 2
-    reconstructor.probe_position_momentum_params = {
-        "position_update_history": [
+    reconstructor.probe_position_momentum_params = MomentumState(
+        position_update_history=[
             torch.tensor(
                 [[0.09, -0.03], [0.06, -0.02], [0.03, -0.01], [0.015, -0.005]],
                 dtype=torch.float32,
@@ -172,30 +172,30 @@ def test_probe_position_momentum_history_is_stored_once_per_epoch():
                 dtype=torch.float32,
             ),
         ],
-        "position_update_history_epoch": 1,
-        "velocity_map": torch.zeros((4, 2), dtype=torch.float32),
-    }
+        position_update_history_epoch=1,
+        velocity_map=torch.zeros((4, 2), dtype=torch.float32),
+    )
 
     delta_pos_a = torch.tensor([[0.03, -0.01], [0.02, -0.006666667]], dtype=torch.float32)
     delta_pos_b = torch.tensor([[0.01, -0.0033333334], [0.005, -0.0016666667]], dtype=torch.float32)
 
     delta_pos_a_out = reconstructor._apply_probe_position_momentum(torch.tensor([0, 1]), delta_pos_a)
-    assert len(reconstructor.probe_position_momentum_params["position_update_history"]) == 3
+    assert len(reconstructor.probe_position_momentum_params.position_update_history) == 3
 
     delta_pos_b_out = reconstructor._apply_probe_position_momentum(torch.tensor([2, 3]), delta_pos_b)
 
-    history = reconstructor.probe_position_momentum_params["position_update_history"]
+    history = reconstructor.probe_position_momentum_params.position_update_history
     assert len(history) == 3
-    assert reconstructor.probe_position_momentum_params["position_update_history_epoch"] == 2
+    assert reconstructor.probe_position_momentum_params.position_update_history_epoch == 2
     assert torch.equal(history[-1][0:2], delta_pos_a)
     assert torch.equal(history[-1][2:4], delta_pos_b)
     assert torch.equal(delta_pos_a_out, 1.5 * delta_pos_a)
     assert torch.equal(delta_pos_b_out, 1.5 * delta_pos_b)
     assert torch.equal(
-        reconstructor.probe_position_momentum_params["velocity_map"][0:2], delta_pos_a
+        reconstructor.probe_position_momentum_params.velocity_map[0:2], delta_pos_a
     )
     assert torch.equal(
-        reconstructor.probe_position_momentum_params["velocity_map"][2:4], delta_pos_b
+        reconstructor.probe_position_momentum_params.velocity_map[2:4], delta_pos_b
     )
 
 
@@ -221,19 +221,19 @@ def test_probe_position_momentum_history_rolls_over_across_epochs():
         [[0.03, -0.01], [0.02, -0.006666667], [0.01, -0.0033333334], [0.005, -0.0016666667]],
         dtype=torch.float32,
     )
-    reconstructor.probe_position_momentum_params = {
-        "position_update_history": [history_epoch_0.clone(), history_epoch_1.clone(), history_epoch_2.clone()],
-        "position_update_history_epoch": 2,
-        "velocity_map": torch.zeros((4, 2), dtype=torch.float32),
-    }
+    reconstructor.probe_position_momentum_params = MomentumState(
+        position_update_history=[history_epoch_0.clone(), history_epoch_1.clone(), history_epoch_2.clone()],
+        position_update_history_epoch=2,
+        velocity_map=torch.zeros((4, 2), dtype=torch.float32),
+    )
 
     reconstructor.current_epoch = 3
     delta_pos_c = torch.tensor([[0.015, -0.005], [0.005, -0.0016666667]], dtype=torch.float32)
     reconstructor._apply_probe_position_momentum(torch.tensor([0, 3]), delta_pos_c)
 
-    history = reconstructor.probe_position_momentum_params["position_update_history"]
+    history = reconstructor.probe_position_momentum_params.position_update_history
     assert len(history) == 3
-    assert reconstructor.probe_position_momentum_params["position_update_history_epoch"] == 3
+    assert reconstructor.probe_position_momentum_params.position_update_history_epoch == 3
     assert torch.equal(history[0], history_epoch_1)
     assert torch.equal(history[1], history_epoch_2)
 
@@ -253,8 +253,8 @@ def test_probe_position_momentum_non_far_field_keeps_history_but_skips_velocity_
     reconstructor.parameter_group = SimpleNamespace(probe_positions=probe_positions)
     reconstructor.forward_model = SimpleNamespace(free_space_propagation_distance_m=1.0)
     reconstructor.current_epoch = 2
-    reconstructor.probe_position_momentum_params = {
-        "position_update_history": [
+    reconstructor.probe_position_momentum_params = MomentumState(
+        position_update_history=[
             torch.tensor(
                 [[0.09, -0.03], [0.06, -0.02], [0.03, -0.01], [0.015, -0.005]],
                 dtype=torch.float32,
@@ -264,18 +264,18 @@ def test_probe_position_momentum_non_far_field_keeps_history_but_skips_velocity_
                 dtype=torch.float32,
             ),
         ],
-        "position_update_history_epoch": 1,
-        "velocity_map": torch.full((4, 2), 7.0, dtype=torch.float32),
-    }
+        position_update_history_epoch=1,
+        velocity_map=torch.full((4, 2), 7.0, dtype=torch.float32),
+    )
 
     delta_pos = torch.tensor([[0.03, -0.01], [0.02, -0.006666667]], dtype=torch.float32)
     delta_pos_out = reconstructor._apply_probe_position_momentum(torch.tensor([0, 1]), delta_pos)
 
-    history = reconstructor.probe_position_momentum_params["position_update_history"]
+    history = reconstructor.probe_position_momentum_params.position_update_history
     assert len(history) == 2
-    assert reconstructor.probe_position_momentum_params["position_update_history_epoch"] == 1
+    assert reconstructor.probe_position_momentum_params.position_update_history_epoch == 1
     assert torch.equal(
-        reconstructor.probe_position_momentum_params["velocity_map"],
+        reconstructor.probe_position_momentum_params.velocity_map,
         torch.full((4, 2), 7.0, dtype=torch.float32),
     )
     assert torch.equal(delta_pos_out, delta_pos)
