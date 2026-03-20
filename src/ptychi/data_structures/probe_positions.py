@@ -215,10 +215,19 @@ class ProbePositions(dsbase.ReconstructParameter):
         pos_new = self.data * (1 - flexibility) + flexibility * estimated_positions
         self.set_data(pos_new)
 
-    def step_optimizer(self, *args, **kwargs):
+    def step_optimizer(self, clip_update: bool = True, *args, **kwargs):
         """Step the optimizer with gradient filled in. This function
         can optionally impose a limit on the magnitude of the update.
+
+        Parameters
+        ----------
+        clip_update : bool
+            If True, clip the applied position update after the optimizer step.
+            Set to False to skip this post-step clipping.
         """
+        if not clip_update:
+            return super().step_optimizer(*args, **kwargs)
+
         limit_user = self.options.correction_options.update_magnitude_limit
         if limit_user is not None and limit_user <= 0:
             raise ValueError("`update_magnitude_limit` should either be None or a positive number.")

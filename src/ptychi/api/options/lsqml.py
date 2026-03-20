@@ -46,7 +46,7 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
     """
     
     momentum_acceleration_gain: float = 0.0
-    """The gain of momentum acceleration. If 0, momentum acceleration is not used."""
+    """The gain of momentum acceleration for object and probe. If 0, momentum acceleration is not used."""
     
     momentum_acceleration_gradient_mixing_factor: Optional[float] = 1
     """
@@ -116,7 +116,36 @@ class LSQMLProbeOptions(base.ProbeOptions):
     
 @dataclasses.dataclass
 class LSQMLProbePositionOptions(base.ProbePositionOptions):
-    pass
+    momentum_acceleration_gain: float = 0.0
+    """
+    The gain of momentum acceleration for probe positions. If 0, momentum
+    acceleration is not used.
+    """
+
+    momentum_acceleration_gradient_mixing_factor: Optional[float] = 1
+    """
+    Controls how the current position update is mixed with the accumulated
+    velocity in probe-position momentum acceleration:
+
+    `velocity = (1 - friction) * velocity + momentum_acceleration_gradient_mixing_factor * delta_pos`
+
+    If None, this mixing factor is automatically chosen to be `friction`.
+    Set this parameter to 1 to reproduce the behavior in foldslice.
+    """
+
+    momentum_acceleration_memory: int = 3
+    """
+    Number of previous epochs used to estimate the friction of probe-position
+    momentum acceleration.
+    """
+
+    def check(self, options: "LSQMLOptions"):
+        super().check(options)
+        if self.momentum_acceleration_gain > 0 and self.momentum_acceleration_memory < 1:
+            raise ValueError(
+                "`probe_position_options.momentum_acceleration_memory` must be positive "
+                "when probe-position momentum acceleration is enabled."
+            )
 
 
 @dataclasses.dataclass

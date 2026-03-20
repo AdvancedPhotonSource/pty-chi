@@ -77,6 +77,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         self.object_momentum_params = {}
         self.probe_momentum_params = {}
+        self.probe_position_momentum_params = {}
 
 
         # Fourier error for momentum acceleration.
@@ -353,7 +354,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             
         # Update probe positions.
         if self.parameter_group.probe_positions.optimization_enabled(self.current_epoch):
-            self.parameter_group.probe_positions.step_optimizer()
+            self.parameter_group.probe_positions.step_optimizer(
+                clip_update=self.parameter_group.probe_positions.options.momentum_acceleration_gain <= 0
+            )
             
         # Update OPR modes and weights.
         if self.parameter_group.opr_mode_weights.optimization_enabled(self.current_epoch):
@@ -825,6 +828,139 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                     )
 
     @timer()
+    def _clip_probe_position_update(self, delta_pos):
+        """
+        Clip the probe-position update by the configured limits.
+
+        Parameters
+        ----------
+        delta_pos : torch.Tensor
+            A (batch_size, 2) tensor giving the probe-position update.
+        """
+        probe_positions = self.parameter_group.probe_positions
+        limit_user = probe_positions.options.correction_options.update_magnitude_limit
+        if limit_user is not None and limit_user <= 0:
+            raise ValueError(
+                "`probe_position_options.correction_options.update_magnitude_limit` should "
+                "either be None or a positive number."
+            )
+        if limit_user == torch.inf:
+            limit_user = None
+
+        if not probe_positions.options.correction_options.clip_update_magnitude_by_mad and limit_user is None:
+            return delta_pos
+
+        update_mag = delta_pos.abs()
+        update_signs = delta_pos.sign()
+
+        if probe_positions.options.correction_options.clip_update_magnitude_by_mad:
+            limit_mad = pmath.mad(delta_pos, dim=0) * 10
+        else:
+            limit_mad = torch.full(
+                (delta_pos.shape[-1],), torch.inf, device=delta_pos.device, dtype=delta_pos.dtype
+            )
+        if limit_user is not None:
+            limit = torch.clip(limit_mad, max=limit_user)
+        else:
+            limit = limit_mad
+        delta_pos = update_mag.clip(max=limit) * update_signs
+        return delta_pos
+
+    @timer()
+    def _calculate_probe_position_corrcoef(self, current_update, previous_update):
+        """
+        Calculate the mean of the per-axis Pearson correlation coefficients
+        between two batches of probe-position updates.
+        """
+        if len(current_update) < 2 or len(previous_update) < 2:
+            return torch.tensor(0.0, device=current_update.device, dtype=current_update.dtype)
+
+        current_centered = current_update - current_update.mean(0, keepdim=True)
+        previous_centered = previous_update - previous_update.mean(0, keepdim=True)
+        denominator = torch.sqrt((current_centered**2).sum(0) * (previous_centered**2).sum(0))
+        corr = torch.where(
+            denominator > 0,
+            (current_centered * previous_centered).sum(0) / denominator,
+            torch.zeros_like(denominator),
+        )
+        return corr.mean()
+
+    @timer()
+    def _apply_probe_position_momentum(self, indices, delta_pos):
+        """
+        Apply foldslice-style momentum acceleration to the current probe-position
+        update after clipping.
+
+        Parameters
+        ----------
+        indices : torch.Tensor
+            Indices of diffraction patterns in the current minibatch.
+        delta_pos : torch.Tensor
+            A (batch_size, 2) tensor giving the clipped probe-position update
+            for the current minibatch.
+        """
+        # Only do momentum for far-field.
+        free_space_propagation_distance_m = self.forward_model.free_space_propagation_distance_m
+        is_far_field = math.isinf(free_space_propagation_distance_m)
+        if not is_far_field:
+            return delta_pos
+        
+        probe_positions = self.parameter_group.probe_positions
+
+        momentum_memory = probe_positions.options.momentum_acceleration_memory
+        if momentum_memory < 1:
+            raise ValueError(
+                "`probe_position_options.momentum_acceleration_memory` must be positive."
+            )
+
+        if "position_update_history" not in self.probe_position_momentum_params.keys():
+            self.probe_position_momentum_params["position_update_history"] = []
+            self.probe_position_momentum_params["velocity_map"] = torch.zeros_like(
+                probe_positions.data
+            )
+
+        history = self.probe_position_momentum_params["position_update_history"]
+        history_epoch = self.probe_position_momentum_params.get("position_update_history_epoch")
+        if len(history) == 0 or history_epoch != self.current_epoch:
+            # Match foldslice's `position_update_memory{iter}` behavior by storing
+            # one full update map per epoch and filling it across minibatches.
+            history.append(torch.zeros_like(probe_positions.data))
+            self.probe_position_momentum_params["position_update_history_epoch"] = self.current_epoch
+            if len(history) > momentum_memory + 1:
+                history.pop(0)
+        history[-1][indices] = delta_pos
+
+        if len(history) < momentum_memory + 1:
+            return delta_pos
+
+        corr_level = []
+        current_update = history[-1][indices]
+        for i in range(1, momentum_memory + 1):
+            previous_update = history[-1 - i][indices]
+            corr_level.append(self._calculate_probe_position_corrcoef(current_update, previous_update))
+        corr_level = torch.stack(corr_level)
+
+        gain = 0.0
+        friction = torch.tensor(0.5, device=delta_pos.device, dtype=delta_pos.dtype)
+        if torch.all(corr_level > 0):
+            p = pmath.polyfit(
+                torch.arange(0.0, momentum_memory + 1.0, device=delta_pos.device),
+                torch.concat([torch.zeros([1], device=delta_pos.device), torch.log(corr_level)]),
+                deg=1,
+            )
+            gain = probe_positions.options.momentum_acceleration_gain
+            friction = 0.1 * (-p[0]).clip(0, None)
+
+        m = probe_positions.options.momentum_acceleration_gradient_mixing_factor
+        m = friction if m is None else m
+        self.probe_position_momentum_params["velocity_map"][indices] = (
+            1 - friction
+        ) * self.probe_position_momentum_params["velocity_map"][indices] + m * delta_pos
+        if delta_pos.abs().max() < 0.1:
+            delta_pos = delta_pos + gain * self.probe_position_momentum_params["velocity_map"][indices]
+        return delta_pos
+
+    @timer()
     def _calculate_object_patch_update_direction(
         self, chi, incident_wavefields=None, probe_mode_index=None
     ):
@@ -1175,11 +1311,16 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             unique_probes,
             self.parameter_group.object.step_size,
         )
+        if self.parameter_group.probe_positions.options.momentum_acceleration_gain > 0:
+            delta_pos = self._clip_probe_position_update(delta_pos)
+            delta_pos = self._apply_probe_position_momentum(indices, delta_pos)
         delta_pos_full = torch.zeros_like(self.parameter_group.probe_positions.tensor)
         delta_pos_full[indices] = delta_pos
         self.parameter_group.probe_positions.set_grad(-delta_pos_full)
         if apply_updates:
-            self.parameter_group.probe_positions.step_optimizer()
+            self.parameter_group.probe_positions.step_optimizer(
+                clip_update=self.parameter_group.probe_positions.options.momentum_acceleration_gain <= 0
+            )
 
     @timer()
     def _calculate_final_object_update_step_size(self):
