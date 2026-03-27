@@ -117,6 +117,10 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
             probe_positions.set_grad(-delta_pos)
             probe_positions.optimizer.step()
 
+        if self.parameter_group.real_space_scaling.optimization_enabled(self.current_epoch):
+            self.parameter_group.real_space_scaling.step_optimizer()
+            self.parameter_group.real_space_scaling.post_update_hook()
+
     def compute_updates(
         self, indices: torch.Tensor, y_true: torch.Tensor
     ) -> tuple[torch.Tensor, ...]:
@@ -144,6 +148,15 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         # Gradient for the Gaussian model
         gradF = self.gradientF(psi_far, d)
+
+        if self.parameter_group.real_space_scaling.optimization_enabled(self.current_epoch):
+            unique_probe = p.unsqueeze(0).expand(op.shape[0], -1, -1, -1)
+            self.update_real_space_scaling(
+                -0.5 * gradF,
+                op,
+                unique_probe,
+                apply_updates=False,
+            )
 
         # shortcuts
         o_opt = object_.optimization_enabled(self.current_epoch)
@@ -299,7 +312,10 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         # Compensate FFT normalization only for the far-field Fourier propagator.
         if isinstance(self.forward_model.free_space_propagator, fm.FourierPropagator):
             td *= psi_far.shape[-1] * psi_far.shape[-2]
-        res = 2 * self.forward_model.free_space_propagator.propagate_backward(td)
+        if hasattr(self, "propagate_detector_wave_to_exit_adjoint"):
+            res = 2 * self.propagate_detector_wave_to_exit_adjoint(td)
+        else:
+            res = 2 * self.forward_model.free_space_propagator.propagate_backward(td)
         return res
 
     def hessianF(self, psi_far, psi_far1, psi_far2, data):
@@ -362,7 +378,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         top = -redot(do1, do2)
 
         dm2 = p * dop2
-        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dm2)
+        Ldm2 = self.propagate_exit_wave_to_detector(dm2)
         bottom = self.hessianF(psi_far, Ldm2, Ldm2, d)
         return top / bottom
 
@@ -374,7 +390,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         dm2 = dp2 * op + p * dop2
         d2m2 = 2 * dp2 * dop2
-        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dm2)
+        Ldm2 = self.propagate_exit_wave_to_detector(dm2)
         bottom = redot(gradF, d2m2) + self.hessianF(psi_far, Ldm2, Ldm2, d)
         return top / bottom
 
@@ -409,7 +425,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         dm2 = dp2 * op + p * (dop2 + dt)
         d2m2 = p * (2 * dt2 + d2t) + 2 * dp2 * dop2 + 2 * dp2 * dt
 
-        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dm2)
+        Ldm2 = self.propagate_exit_wave_to_detector(dm2)
         bottom = redot(gradF, d2m2) + self.hessianF(psi_far, Ldm2, Ldm2, d)
         return top / bottom
 
@@ -419,8 +435,8 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         dm1 = p * dop1
         dm2 = p * dop2
 
-        Ldm1 = self.forward_model.free_space_propagator.propagate_forward(dm1)
-        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dm2)
+        Ldm1 = self.propagate_exit_wave_to_detector(dm1)
+        Ldm2 = self.propagate_exit_wave_to_detector(dm2)
 
         top = self.hessianF(psi_far, Ldm1, Ldm2, d)
         bottom = self.hessianF(psi_far, Ldm2, Ldm2, d)
@@ -438,8 +454,8 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         d2m1 = dp1 * dop2 + dp2 * dop1
         d2m2 = 2 * dp2 * dop2
 
-        Ldm1 = self.forward_model.free_space_propagator.propagate_forward(dm1)
-        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dm2)
+        Ldm1 = self.propagate_exit_wave_to_detector(dm1)
+        Ldm2 = self.propagate_exit_wave_to_detector(dm2)
 
         top = redot(gradF, d2m1) + self.hessianF(psi_far, Ldm1, Ldm2, d)
         bottom = redot(gradF, d2m2) + self.hessianF(psi_far, Ldm2, Ldm2, d)
@@ -495,8 +511,8 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         d2m1 = p * (dt12 + dt21 + d2t1) + dp1 * (dop2 + dt2) + dp2 * (dop1 + dt1)
         d2m2 = p * (2 * dt22 + d2t2) + 2 * dp2 * dop2 + 2 * dp2 * dt2
 
-        Ldm1 = self.forward_model.free_space_propagator.propagate_forward(dm1)
-        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dm2)
+        Ldm1 = self.propagate_exit_wave_to_detector(dm1)
+        Ldm2 = self.propagate_exit_wave_to_detector(dm2)
 
         top = redot(gradF, d2m1) + self.hessianF(psi_far, Ldm1, Ldm2, d)
         bottom = redot(gradF, d2m2) + self.hessianF(psi_far, Ldm2, Ldm2, d)

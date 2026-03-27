@@ -914,6 +914,38 @@ class ProbePositionOptions(ParameterOptions):
 
 
 @dataclasses.dataclass
+class RealSpaceScalingOptions(ParameterOptions):
+    initial_guess: float = 1.0
+    """Initial global real-space scaling factor."""
+
+    optimizable: bool = False
+    """Whether the real-space scaling factor is optimizable."""
+
+    differentiation_method: enums.ImageGradientMethods = enums.ImageGradientMethods.FOURIER_DIFFERENTIATION
+    """Method used to compute object gradients for the scaling update."""
+
+    def check(self, options: "task_options.PtychographyTaskOptions"):
+        super().check(options)
+        if self.initial_guess <= 0:
+            raise ValueError("`real_space_scaling_options.initial_guess` must be positive.")
+        if self.optimizer == enums.Optimizers.LBFGS and "Autodiff" not in options.__class__.__name__:
+            raise ValueError("LBFGS optimizer is currently only supported for Autodiff reconstructors.")
+        affine_constraint = options.probe_position_options.affine_transform_constraint
+        if (
+            self.optimizable
+            and options.probe_position_options.optimizable
+            and affine_constraint.enabled
+            and enums.AffineDegreesOfFreedom.SCALE in affine_constraint.degrees_of_freedom
+        ):
+            logger.warning(
+                "Do not enable `real_space_scaling_options.optimizable` together with "
+                "`probe_position_options.affine_transform_constraint` when "
+                "`AffineDegreesOfFreedom.SCALE` is included. Both refine the same "
+                "far-field scale ambiguity."
+            )
+
+
+@dataclasses.dataclass
 class OPRModeWeightsSmoothingOptions(FeatureOptions):
     """Settings for smoothing OPR mode weights."""
 
