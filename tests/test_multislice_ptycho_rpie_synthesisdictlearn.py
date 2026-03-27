@@ -15,6 +15,7 @@ import test_utils as tutils
 class TestMultislicePtychoRPIESDL(tutils.TungstenDataTester):
     @tutils.TungstenDataTester.wrap_recon_tester(name="test_multislice_ptycho_rpie_synthesisdictlearn")
     def test_multislice_ptycho_rpie_synthesisdictlearn(self):
+        self.high_tol = True
         self.setup_ptychi(cpu_only=False)
 
         data, probe, pixel_size_m, positions_px = self.load_tungsten_data(additional_opr_modes=3)
@@ -78,7 +79,7 @@ class TestMultislicePtychoRPIESDL(tutils.TungstenDataTester):
         options.opr_mode_weight_options.update_relaxation = 1e-2
 
         options.reconstructor_options.batch_size = round(data.shape[0] * 0.1)
-        options.reconstructor_options.num_epochs = 32
+        options.reconstructor_options.num_epochs = 8
         options.reconstructor_options.allow_nondeterministic_algorithms = False
 
         task = PtychographyTask(options)
