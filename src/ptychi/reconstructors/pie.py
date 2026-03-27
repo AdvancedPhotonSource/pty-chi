@@ -65,6 +65,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
     @timer()
     def run_minibatch(self, input_data, y_true, *args, **kwargs):
         self.parameter_group.probe.initialize_grad()
+        self.parameter_group.real_space_scaling.initialize_grad()
         (delta_o, delta_p_i, delta_pos), y_pred = self.compute_updates(*input_data, y_true)
         self.apply_updates(delta_o, delta_p_i, delta_pos)
         self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
@@ -96,7 +97,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
             y_true,
             constrained_pixel_mask=self.get_constrained_pixel_mask(y_true),
         )
-        psi_prime = self.forward_model.free_space_propagator.propagate_backward(psi_prime)
+        psi_prime = self.propagate_detector_wave_to_exit_adjoint(psi_prime)
 
         delta_exwv_i = psi_prime - psi
         delta_o = torch.zeros_like(object_.data)
@@ -132,6 +133,17 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                 )
                 delta_pos[indices] = self.forward_model.probe_displacements_to_object_pixels(
                     delta_pos_i
+                )
+
+            if (
+                self.parameter_group.real_space_scaling.optimization_enabled(self.current_epoch)
+                and i_slice == self.parameter_group.probe_positions.get_slice_for_correction(object_.n_slices)
+            ):
+                self.update_real_space_scaling(
+                    delta_exwv_i,
+                    obj_patches[:, i_slice : i_slice + 1, ...],
+                    unique_probes[i_slice],
+                    apply_updates=False,
                 )
 
             delta_p_i = None
@@ -282,6 +294,10 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         if delta_pos is not None:
             probe_positions.set_grad(-delta_pos)
             probe_positions.step_optimizer()
+
+        if self.parameter_group.real_space_scaling.optimization_enabled(self.current_epoch):
+            self.parameter_group.real_space_scaling.step_optimizer()
+            self.parameter_group.real_space_scaling.post_update_hook()
 
 
 class EPIEReconstructor(PIEReconstructor):
