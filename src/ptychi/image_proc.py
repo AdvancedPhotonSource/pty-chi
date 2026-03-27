@@ -7,7 +7,7 @@ import logging
 
 import torch
 from torch import Tensor
-import torch.signal
+import torch.nn.functional as F
 
 import ptychi.maths as pmath
 from ptychi.api.types import ComplexTensor, RealTensor
@@ -24,6 +24,46 @@ class ExtractPatchesProtocol(Protocol):
 
 
 logger = logging.getLogger(__name__)
+
+
+def tukey_window(
+    length: int,
+    alpha: float = 0.5,
+    *,
+    device: torch.device | None = None,
+    dtype: torch.dtype | None = None,
+) -> Tensor:
+    """Return a 1D Tukey window.
+
+    Returns
+    -------
+    Tensor
+        A real tensor of shape ``(length,)``.
+    """
+    if length <= 0:
+        raise ValueError("Window length must be positive.")
+    if alpha <= 0:
+        return torch.ones(length, device=device, dtype=dtype)
+    if alpha >= 1:
+        return torch.hann_window(length, periodic=False, device=device, dtype=dtype)
+    if length == 1:
+        return torch.ones(1, device=device, dtype=dtype)
+
+    x = torch.linspace(0, 1, length, device=device, dtype=dtype)
+    window = torch.ones(length, device=device, dtype=dtype)
+    edge = alpha / 2
+
+    left = x < edge
+    if torch.any(left):
+        window[left] = 0.5 * (1 + torch.cos(math.pi * ((2 * x[left] / alpha) - 1)))
+
+    right = x >= (1 - edge)
+    if torch.any(right):
+        window[right] = 0.5 * (
+            1 + torch.cos(math.pi * ((2 * x[right] / alpha) - (2 / alpha) + 1))
+        )
+
+    return window
 
 
 @timer()
@@ -563,6 +603,161 @@ def shift_images(
     if pad is not None and pad > 0:
         images = images[..., pad:-pad, pad:-pad]
     return images
+
+
+def _prepare_rescale_factors(
+    scales: float | Tensor, n_images: int, device: torch.device, dtype: torch.dtype
+) -> Tensor:
+    """Broadcast scaling factors to match a batch of images.
+
+    Parameters
+    ----------
+    scales : float | Tensor
+        Scalar or real tensor of shape ``(n_images,)``.
+    n_images : int
+        Batch size.
+
+    Returns
+    -------
+    Tensor
+        A real tensor of shape ``(n_images,)``.
+    """
+    scales = torch.as_tensor(scales, device=device, dtype=dtype)
+    if scales.ndim == 0:
+        scales = scales.expand(n_images)
+    elif scales.numel() == 1:
+        scales = scales.reshape(1).expand(n_images)
+    elif scales.shape != (n_images,):
+        raise ValueError(
+            f"`scales` should be a scalar or a ({n_images},)-shaped tensor, got {tuple(scales.shape)}."
+        )
+    return scales
+
+
+def _rescale_images_channels(images: Tensor, scales: Tensor, mode: str) -> Tensor:
+    """Rescale channel-packed images.
+
+    Parameters
+    ----------
+    images : Tensor
+        A real tensor of shape ``(n_images, n_channels, h, w)``.
+    scales : Tensor
+        A real tensor of shape ``(n_images,)``.
+
+    Returns
+    -------
+    Tensor
+        A real tensor of shape ``(n_images, n_channels, h, w)``.
+    """
+    n_images, n_channels, height, width = images.shape
+    theta = torch.zeros((n_images, 2, 3), device=images.device, dtype=images.dtype)
+    theta[:, 0, 0] = 1.0 / scales
+    theta[:, 1, 1] = 1.0 / scales
+    grid = F.affine_grid(theta, images.shape, align_corners=False)
+    return F.grid_sample(
+        images,
+        grid,
+        mode=mode,
+        padding_mode="border",
+        align_corners=False,
+    )
+
+
+def _pack_rescale_channels(images: Tensor) -> tuple[Tensor, bool]:
+    """Pack real/imaginary parts into a channel dimension.
+
+    Parameters
+    ----------
+    images : Tensor
+        A real or complex tensor of shape ``(n_images, h, w)``.
+
+    Returns
+    -------
+    tuple[Tensor, bool]
+        The first entry is a real tensor of shape
+        ``(n_images, n_channels, h, w)``, where ``n_channels`` is 1 for
+        real inputs and 2 for complex inputs. The second entry indicates
+        whether the original tensor was complex.
+    """
+    is_complex = images.dtype.is_complex
+    if is_complex:
+        images = torch.stack([images.real, images.imag], dim=1)
+    else:
+        images = images.unsqueeze(1)
+    return images, is_complex
+
+
+def _unpack_rescale_channels(images: Tensor, is_complex: bool) -> Tensor:
+    """Convert channel-packed images back to their original dtype.
+
+    Parameters
+    ----------
+    images : Tensor
+        A real tensor of shape ``(n_images, n_channels, h, w)``.
+    is_complex : bool
+        Whether to reconstruct a complex output.
+
+    Returns
+    -------
+    Tensor
+        A tensor of shape ``(n_images, h, w)``.
+    """
+    if is_complex:
+        return images[:, 0] + 1j * images[:, 1]
+    return images[:, 0]
+
+
+def rescale_images(
+    images: Tensor,
+    scales: float | Tensor,
+    *,
+    adjoint: bool = False,
+    mode: Literal["bilinear"] = "bilinear",
+) -> Tensor:
+    """Rescale a batch of images while keeping the same output size.
+
+    Parameters
+    ----------
+    images : Tensor
+        A real or complex tensor of shape ``(n_images, h, w)``.
+    scales : float | Tensor
+        Scalar zoom factor or a real tensor of shape ``(n_images,)``.
+    adjoint : bool
+        If True, apply the exact adjoint of the forward rescaling operator.
+    mode : Literal["bilinear"]
+        Interpolation mode for the forward operator.
+
+    Returns
+    -------
+    Tensor
+        A tensor with the same shape and dtype as ``images``, i.e.
+        ``(n_images, h, w)``.
+    """
+    if images.ndim != 3:
+        raise ValueError(f"`images` should be a (N, H, W) tensor, got shape {tuple(images.shape)}.")
+
+    scales = _prepare_rescale_factors(
+        scales, images.shape[0], device=images.device, dtype=images.real.dtype
+    )
+    if (not scales.requires_grad) and torch.allclose(scales, torch.ones_like(scales)):
+        return images
+
+    images_ch, is_complex = _pack_rescale_channels(images)
+    if not adjoint:
+        scaled = _rescale_images_channels(images_ch, scales, mode=mode)
+        return _unpack_rescale_channels(scaled, is_complex)
+
+    with torch.enable_grad():
+        basis = torch.zeros_like(images_ch, requires_grad=True)
+        forward = _rescale_images_channels(basis, scales, mode=mode)
+        adjoint_out = torch.autograd.grad(
+            forward,
+            basis,
+            grad_outputs=images_ch,
+            create_graph=False,
+            retain_graph=False,
+        )[0]
+    return _unpack_rescale_channels(adjoint_out, is_complex)
 
 
 @timer()
