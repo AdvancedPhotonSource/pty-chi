@@ -11,6 +11,7 @@ import ptychi.data_structures.object as object
 import ptychi.data_structures.opr_mode_weights as oprweights
 import ptychi.data_structures.probe as probe
 import ptychi.data_structures.probe_positions as probepos
+import ptychi.data_structures.real_space_scaling as rsscaling
 from ptychi.parallel import MultiprocessMixin
 
 
@@ -94,6 +95,8 @@ class PtychographyParameterGroup(ParameterGroup):
     probe: "probe.Probe"
 
     probe_positions: "probepos.ProbePositions"
+
+    real_space_scaling: "rsscaling.RealSpaceScaling"
 
     opr_mode_weights: "oprweights.OPRModeWeights"
 
