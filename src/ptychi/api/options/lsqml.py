@@ -85,6 +85,12 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
                     "`rescale_probe_intensity_in_first_epoch` and `ProbeOptions.power_constraint` "
                     "are both enabled, which may lead to unexpected results."
                 )
+        if self.batching_mode == enums.BatchingModes.COMPACT and self.momentum_acceleration_gain == 0:
+            logger.warning(
+                "`batching_mode` is set to COMPACT but `momentum_acceleration_gain` is 0. "
+                "Momentum acceleration is strongly recommended for compact batching mode. "
+                "Start with 0.5."
+            )
     
     def get_reconstructor_type(self) -> enums.Reconstructors:
         return enums.Reconstructors.LSQML
