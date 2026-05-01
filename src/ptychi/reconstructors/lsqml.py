@@ -784,16 +784,28 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_p_o = delta_p_hat * obj_patches[:, None, :, :]
         delta_o_patches_p = delta_o_i[:, None, :, :] * probe
 
-        # Shape of aij:               (batch_size,)
-        a11 = torch.sum((delta_o_patches_p.abs() ** 2 + lambda_0), dim=(-1, -2, -3))
-        a11 = a11 + lambda_lsq * torch.mean(a11, dim=0)
-        a12 = torch.sum((delta_o_patches_p * delta_p_o.conj()), dim=(-1, -2, -3))
-        a21 = a12.conj()
-        a22 = torch.sum((delta_p_o.abs() ** 2 + lambda_0), dim=(-1, -2, -3))
-        a22 = a22 + lambda_lsq * torch.mean(a22, dim=0)
+        # # Shape of aij:               (batch_size,)
+        # a11 = torch.sum((delta_o_patches_p.abs() ** 2 + lambda_0), dim=(-1, -2, -3))
+        # a11 = a11 + lambda_lsq * torch.mean(a11, dim=0)
+        # a12 = torch.sum((delta_o_patches_p * delta_p_o.conj()), dim=(-1, -2, -3))
+        # a21 = a12.conj()
+        # a22 = torch.sum((delta_p_o.abs() ** 2 + lambda_0), dim=(-1, -2, -3))
+        # a22 = a22 + lambda_lsq * torch.mean(a22, dim=0)
+        # b1 = torch.sum(torch.real(delta_o_patches_p.conj() * chi), dim=(-1, -2, -3))
+        # b2 = torch.sum(torch.real(delta_p_o.conj() * chi), dim=(-1, -2, -3))
+
+        # NOTE: FoldSlice does not use real() for off-diagonal terms, and it only computes this for the dominant mode (we use all incoherent modes here)
+        # sum over r (spatial pixel index), p (incoherent mode index)
+        gamma = 1e-6
+        a11 = torch.sum(delta_o_patches_p.abs() ** 2, dim=(-1, -2, -3)) + gamma
+        a11 += 0.5 * torch.mean(a11, dim=0)
+        a22 = torch.sum(delta_p_o.abs() ** 2, dim=(-1, -2, -3)) + gamma
+        a22 += 0.5 * torch.mean(a22, dim=0)
+        a12 = torch.sum(torch.real(delta_o_patches_p * delta_p_o.conj()), dim=(-1, -2, -3))
+        a21 = a12
         b1 = torch.sum(torch.real(delta_o_patches_p.conj() * chi), dim=(-1, -2, -3))
         b2 = torch.sum(torch.real(delta_p_o.conj() * chi), dim=(-1, -2, -3))
-
+        
         a_mat = torch.stack([a11, a12, a21, a22], dim=1).view(-1, 2, 2)
         b_vec = torch.stack([b1, b2], dim=1).view(-1, 2).type(a_mat.dtype)
         alpha_vec = torch.linalg.solve(a_mat, b_vec)

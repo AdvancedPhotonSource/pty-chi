@@ -421,6 +421,102 @@ class Probe(dsbase.ReconstructParameter):
         """
         Move the probe's center of mass to the center of the probe array.
         """
+        
+        
+        
+        
+        
+        
+        
+
+            
+            
+            
+            
+            
+        import torch.nn.functional as F
+        
+        def median_filter_2d(input_tensor, kernel_size):
+            """Custom 2D median filter implementation using PyTorch operations."""
+            # Store original shape
+            original_shape = input_tensor.shape
+            
+            # Add batch and channel dimensions if needed
+            if input_tensor.dim() == 2:
+                input_tensor = input_tensor.unsqueeze(0).unsqueeze(0)
+            elif input_tensor.dim() == 3:
+                input_tensor = input_tensor.unsqueeze(0)
+            
+            # Calculate padding
+            pad = kernel_size // 2
+            
+            # Pad the input tensor
+            padded = F.pad(input_tensor, (pad, pad, pad, pad), mode='reflect')
+            
+            # Unfold to get patches
+            patches = F.unfold(padded, kernel_size=kernel_size, stride=1)
+            
+            # Reshape patches for median calculation
+            # patches shape: [batch_size, channels * kernel_size^2, num_patches]
+            batch_size, channels_times_kernel_sq, num_patches = patches.shape
+            channels = input_tensor.shape[1]
+            patches = patches.view(batch_size, channels, kernel_size * kernel_size, num_patches)
+            
+            # Calculate median along the kernel dimension
+            median_patches = torch.median(patches, dim=2)[0]
+            
+            # Reshape back to spatial dimensions
+            h, w = input_tensor.shape[-2:]
+            median_filtered = median_patches.view(batch_size, channels, h, w)
+            
+            # Remove added dimensions and return to original shape
+            result = median_filtered.squeeze()
+            if len(original_shape) == 2:
+                return result
+            else:
+                return result.view(original_shape)
+
+
+        probe = self.data.clone()
+        
+        # kernel_size = 5
+        # Xabs = median_filter_2d(torch.abs(probe[0,...]), kernel_size=kernel_size)
+        # probe[0,...] = Xabs * torch.exp(1j * torch.angle(probe[0,...]))
+
+        # kernel_size = 3
+        # Xre = median_filter_2d(torch.real(probe[0,...]), kernel_size=kernel_size)
+        # Xim = median_filter_2d(torch.imag(probe[0,...]), kernel_size=kernel_size)
+        # probe[0,...] = Xre + 1j * Xim
+        
+        # from torchvision.transforms.functional import gaussian_blur
+        # Xabs = gaussian_blur( torch.abs(probe[0,...]), kernel_size=(3, 3)) 
+        # #Xabs = gaussian_blur( torch.abs(probe[0,...]), kernel_size=(5, 5), sigma=(4.0, 4.0)) 
+        # probe[0,...] = Xabs * torch.exp(1j * torch.angle(probe[0,...]))
+        
+        from torchvision.transforms.functional import gaussian_blur
+        Xre = gaussian_blur( torch.real(probe[0,...]), kernel_size=(3, 3)) 
+        Xim = gaussian_blur( torch.imag(probe[0,...]), kernel_size=(3, 3))
+        probe[0,...] = Xre + 1j * Xim
+            
+        self.set_data(probe)    
+            
+            
+            
+            
+            
+            
+            
+            
+            
+        
+        
+        
+        
+        
+        
+        
+        
+        
         center_constraint = self.options.center_constraint
         use_total_intensity_for_com = (
             center_constraint.use_total_intensity_for_com or center_constraint.use_intensity_for_com
