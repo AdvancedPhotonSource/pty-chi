@@ -81,8 +81,34 @@ class Object(dsbase.ReconstructParameter):
         if self.options.l1_norm_constraint.weight <= 0:
             return
         data = self.data
-        l1_grad = torch.sgn(data) / data.numel()
-        data = data - self.options.l1_norm_constraint.weight * l1_grad
+        # l1_grad = torch.sgn(data) / data.numel()
+        # data = data - self.options.l1_norm_constraint.weight * l1_grad
+        
+        
+        # l1_grad = torch.sgn(torch.real(data)) / data.numel()
+        # Xre = torch.real(data) - self.options.l1_norm_constraint.weight * l1_grad
+        # l1_grad = torch.sgn(torch.imag(data)) / data.numel()
+        # Xim = torch.imag(data) - self.options.l1_norm_constraint.weight * l1_grad
+        # data = Xre + 1j * Xim
+
+        # rows, cols = data.shape[-2:]
+        # center_r = rows // 2 + 0
+        # center_c = cols // 2 + 20
+        # len_r = rows * 0.1
+        # len_c = cols * 0.1
+        # fixed_support = torch.zeros(self.data.shape[-2:], device=data.device)
+        # fixed_support[int(center_r - len_r) : int(center_r + len_r), int(center_c - len_c) : int(center_c + len_c)] = 1
+        # #data = data * fixed_support
+        # data[ torch.logical_not( fixed_support[None,...]) ] = 0.01
+            
+        l1_grad = torch.sgn(torch.abs(data)) / data.numel()
+        Xabs = torch.abs(data) - 1e+2 * l1_grad
+        l1_grad = torch.sgn(torch.angle(data)) / data.numel()
+        Xphs = torch.angle(data) - 1e+2 * l1_grad
+        data = Xabs * torch.exp( 1j * Xphs )
+        
+        
+        
         self.set_data(data)
         logger.debug("L1 norm constraint applied to object.")
         
@@ -425,9 +451,46 @@ class PlanarObject(Object):
             return
         data = self.data
         for i_slice in range(self.n_slices):
-            data[i_slice] = ip.total_variation_2d_chambolle(
-                data[i_slice], lmbda=self.options.total_variation.weight, niter=2
+            # data[i_slice] = ip.total_variation_2d_chambolle(
+            #     data[i_slice], lmbda=self.options.total_variation.weight, niter=2
+            # )
+            
+            
+            
+            Xabs = ip.total_variation_2d_chambolle(
+                torch.abs(data[i_slice]), lmbda=self.options.total_variation.weight, niter=2
             )
+            data[i_slice] = Xabs * torch.exp( 1j * torch.angle(data[i_slice]))
+            
+            
+            # Xre = ip.total_variation_2d_chambolle(
+            #     torch.real(data[i_slice]), lmbda=1e-2, niter=2
+            # )
+            # Xim = ip.total_variation_2d_chambolle(
+            #     torch.imag(data[i_slice]), lmbda=1e-1, niter=2
+            # )
+            # data[i_slice] = Xre + 1j * Xim
+            
+
+            # Xabs = ip.total_variation_2d_chambolle(
+            #     torch.abs(data[i_slice]), lmbda=1e-2, niter=2
+            # )
+            # Xangle = ip.total_variation_2d_chambolle(
+            #     torch.angle(data[i_slice]), lmbda=1e-2, niter=2
+            # )
+            # data[i_slice] = Xabs * torch.exp( 1j * Xangle )
+              
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
         self.set_data(data)
 
     @timer()
