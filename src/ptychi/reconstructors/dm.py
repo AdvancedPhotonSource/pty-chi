@@ -144,6 +144,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         probe_numerator = torch.zeros_like(probe.get_opr_mode(0))
         probe_denominator = torch.zeros_like(probe.get_opr_mode(0).abs())
         delta_pos = torch.zeros_like(probe_positions.data)
+        delta_rsscale = torch.zeros_like(self.parameter_group.real_space_scaling.data)
         dm_error_squared = 0
         for i in range(n_chunks):
             obj_patches, dm_error_squared, new_psi = self.apply_dm_update_to_exit_wave_chunk(
@@ -163,6 +164,23 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
                     obj_patches=obj_patches,
                     chi=self.psi[start_pts[i] : end_pts[i]] - new_psi,
                 )
+            if self.parameter_group.real_space_scaling.optimization_enabled(self.current_epoch):
+                indices_chunk = torch.arange(
+                    start_pts[i], end_pts[i], device=obj_patches.device, dtype=torch.long
+                )
+                unique_probes = self.forward_model.get_unique_probes(
+                    indices_chunk,
+                    always_return_probe_batch=True,
+                )
+                if self.forward_model.apply_subpixel_shifts_on_probe:
+                    unique_probes = self.forward_model.shift_unique_probes(
+                        indices_chunk, unique_probes, first_mode_only=True
+                    )
+                delta_rsscale += self.parameter_group.real_space_scaling.get_update(
+                    self.psi[start_pts[i] : end_pts[i]] - new_psi,
+                    obj_patches,
+                    unique_probes,
+                )
 
         # Update the probe
         if probe.optimization_enabled(self.current_epoch):
@@ -177,6 +195,11 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         if probe_positions.optimization_enabled(self.current_epoch):
             probe_positions.set_grad(-delta_pos)
             probe_positions.step_optimizer()
+
+        if self.parameter_group.real_space_scaling.optimization_enabled(self.current_epoch):
+            self.parameter_group.real_space_scaling.set_grad(-delta_rsscale / n_chunks)
+            self.parameter_group.real_space_scaling.step_optimizer()
+            self.parameter_group.real_space_scaling.post_update_hook()
 
         return dm_error_squared
 
@@ -239,9 +262,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             start_pt, end_pt, return_obj_patches=True
         )
         # Propagate to detector plane
-        revised_psi = self.forward_model.free_space_propagator.propagate_forward(
-            2 * new_psi - self.psi[start_pt:end_pt]
-        )
+        revised_psi = self.propagate_exit_wave_to_detector(2 * new_psi - self.psi[start_pt:end_pt])
         # Replace intensities
         revised_psi = self.replace_propagated_exit_wave_magnitude(
             revised_psi,
@@ -249,7 +270,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             constrained_pixel_mask=self.get_constrained_pixel_mask(y_true[start_pt:end_pt]),
         )
         # Propagate back to sample plane
-        revised_psi = self.forward_model.free_space_propagator.propagate_backward(revised_psi)
+        revised_psi = self.propagate_detector_wave_to_exit_adjoint(revised_psi)
         # Update the exit wave
         psi_update = (revised_psi - new_psi) * self.options.exit_wave_update_relaxation
         self.psi[start_pt:end_pt] += psi_update
