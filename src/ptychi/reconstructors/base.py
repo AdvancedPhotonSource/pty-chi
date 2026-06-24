@@ -731,6 +731,43 @@ class AnalyticalIterativePtychographyReconstructor(
         if constrained_pixel_mask is not None:
             return torch.where(constrained_pixel_mask[:, None], psi_prime, psi)
         return psi_prime
+
+    @timer()
+    def propagate_exit_wave_to_detector(self, psi: Tensor) -> Tensor:
+        """Apply real-space scaling and propagate an exit wave to the detector.
+
+        Parameters
+        ----------
+        psi : Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``.
+
+        Returns
+        -------
+        Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``
+            at the detector plane.
+        """
+        psi = self.forward_model.apply_real_space_scaling(psi)
+        return self.forward_model.free_space_propagator.propagate_forward(psi)
+
+    @timer()
+    def propagate_detector_wave_to_exit_adjoint(self, psi_far: Tensor) -> Tensor:
+        """Apply the detector-to-exit-wave adjoint propagation.
+
+        Parameters
+        ----------
+        psi_far : Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``
+            at the detector plane.
+
+        Returns
+        -------
+        Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``
+            at the exit plane.
+        """
+        psi = self.forward_model.free_space_propagator.propagate_backward(psi_far)
+        return self.forward_model.apply_real_space_scaling_adjoint(psi)
         
     @timer()
     def adjoint_shift_probe_update_direction(self, indices, delta_p, first_mode_only=False):
@@ -772,3 +809,34 @@ class AnalyticalIterativePtychographyReconstructor(
         else:
             delta_p = delta_p_shifted.reshape(orig_shape)
         return delta_p
+
+    @timer()
+    def update_real_space_scaling(
+        self,
+        chi: Tensor,
+        obj_patches: Tensor,
+        unique_probes: Tensor,
+        apply_updates: bool = True,
+    ) -> None:
+        """Update the global real-space scaling parameter.
+
+        Parameters
+        ----------
+        chi : Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``
+            giving the current exit-wave update.
+        obj_patches : Tensor
+            A complex tensor of shape ``(batch_size, n_slices, h, w)``.
+        unique_probes : Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``
+            giving the incident wavefields used for the update.
+        apply_updates : bool
+            If True, apply the optimizer step immediately. Otherwise, only
+            populate the gradient tensor of shape ``(1,)``.
+        """
+        scaling = self.parameter_group.real_space_scaling
+        delta_scale = scaling.get_update(chi, obj_patches, unique_probes)
+        scaling.set_grad(-delta_scale)
+        if apply_updates:
+            scaling.step_optimizer()
+            scaling.post_update_hook()

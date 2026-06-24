@@ -18,6 +18,7 @@ import ptychi.data_structures.opr_mode_weights as oprweights
 import ptychi.data_structures.probe as probe
 import ptychi.data_structures.probe_positions as probepos
 import ptychi.data_structures.parameter_group as paramgrp
+import ptychi.data_structures.real_space_scaling as rsscaling
 import ptychi.maps as maps
 from ptychi.io_handles import PtychographyDataset
 from ptychi.reconstructors.base import Reconstructor
@@ -67,6 +68,7 @@ class PtychographyTask(Task):
         self.object_options = options.object_options
         self.probe_options = options.probe_options
         self.position_options = options.probe_position_options
+        self.real_space_scaling_options = options.real_space_scaling_options
         self.opr_mode_weight_options = options.opr_mode_weight_options
         self.reconstructor_options = options.reconstructor_options
 
@@ -74,6 +76,7 @@ class PtychographyTask(Task):
         self.object = None
         self.probe = None
         self.probe_positions = None
+        self.real_space_scaling = None
         self.opr_mode_weights = None
         self.reconstructor: Reconstructor | None = None
 
@@ -92,6 +95,7 @@ class PtychographyTask(Task):
         self.build_object()
         self.build_probe()
         self.build_probe_positions()
+        self.build_real_space_scaling()
         self.build_opr_mode_weights()
         self.build_reconstructor()
 
@@ -218,6 +222,20 @@ class PtychographyTask(Task):
         data = torch.stack([pos_y, pos_x], dim=1)
         self.probe_positions = probepos.ProbePositions(data=data, options=self.position_options)
 
+    def build_real_space_scaling(self):
+        """Build the global real-space scaling parameter.
+
+        The constructed parameter stores a real tensor of shape ``(1,)``.
+        """
+        data = torch.tensor(
+            [self.real_space_scaling_options.initial_guess],
+            device=torch.get_default_device(),
+            dtype=torch.get_default_dtype(),
+        )
+        self.real_space_scaling = rsscaling.RealSpaceScaling(
+            data=data, options=self.real_space_scaling_options
+        )
+
     def build_opr_mode_weights(self):
         if self.opr_mode_weight_options.initial_weights is None:
             initial_weights = torch.ones([self.data_options.data.shape[0], 1])
@@ -237,6 +255,7 @@ class PtychographyTask(Task):
             object=self.object,
             probe=self.probe,
             probe_positions=self.probe_positions,
+            real_space_scaling=self.real_space_scaling,
             opr_mode_weights=self.opr_mode_weights,
         )
 
@@ -280,13 +299,14 @@ class PtychographyTask(Task):
         self.reconstructor.run(n_epochs=n_epochs)
 
     def get_data(
-        self, name: Literal["object", "probe", "probe_positions", "opr_mode_weights"]
+        self,
+        name: Literal["object", "probe", "probe_positions", "real_space_scaling", "opr_mode_weights"],
     ) -> Tensor:
         """Get a detached copy of the data of the given name.
 
         Parameters
         ----------
-        name : Literal["object", "probe", "probe_positions", "opr_mode_weights"]
+        name : Literal["object", "probe", "probe_positions", "real_space_scaling", "opr_mode_weights"]
             The name of the data to get.
 
         Returns
@@ -304,7 +324,7 @@ class PtychographyTask(Task):
 
     def get_data_to_cpu(
         self,
-        name: Literal["object", "probe", "probe_positions", "opr_mode_weights"],
+        name: Literal["object", "probe", "probe_positions", "real_space_scaling", "opr_mode_weights"],
         as_numpy: bool = False,
     ) -> Union[Tensor, ndarray]:
         data = self.get_data(name).cpu()
@@ -327,7 +347,13 @@ class PtychographyTask(Task):
     def copy_data_from_task(
         self, 
         task: "PtychographyTask",
-        params_to_copy: tuple[str, ...] = ("object", "probe", "probe_positions", "opr_mode_weights")
+        params_to_copy: tuple[str, ...] = (
+            "object",
+            "probe",
+            "probe_positions",
+            "real_space_scaling",
+            "opr_mode_weights",
+        )
     ) -> None:
         """Copy data of reconstruction parameters from another task object.
 
@@ -351,6 +377,10 @@ class PtychographyTask(Task):
                 elif param == "probe_positions":
                     self.reconstructor.parameter_group.probe_positions.set_data(
                         task.get_data("probe_positions")
+                    )
+                elif param == "real_space_scaling":
+                    self.reconstructor.parameter_group.real_space_scaling.set_data(
+                        task.get_data("real_space_scaling")
                     )
                 elif param == "opr_mode_weights":
                     self.reconstructor.parameter_group.opr_mode_weights.set_data(

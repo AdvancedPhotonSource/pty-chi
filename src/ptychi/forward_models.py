@@ -208,6 +208,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         self.object = parameter_group.object
         self.probe = parameter_group.probe
         self.probe_positions = parameter_group.probe_positions
+        self.real_space_scaling = parameter_group.real_space_scaling
         self.opr_mode_weights = parameter_group.opr_mode_weights
 
         self.wavelength_m = wavelength_m
@@ -450,9 +451,54 @@ class PlanarPtychographyForwardModel(ForwardModel):
         Tensor
             A (batch_size, n_probe_modes, h, w) tensor of far field waves.
         """
+        psi = self.apply_real_space_scaling(psi)
         psi_far = self.free_space_propagator.propagate_forward(psi)
         self.record_intermediate_variable("psi_far", psi_far)
         return psi_far
+
+    @timer()
+    def apply_real_space_scaling(self, psi: Tensor) -> Tensor:
+        """Apply the global real-space scaling before detector propagation.
+
+        Parameters
+        ----------
+        psi : Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``.
+
+        Returns
+        -------
+        Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``.
+        """
+        scale = self.real_space_scaling.data[0]
+        if (not scale.requires_grad) and torch.allclose(scale, torch.ones_like(scale)):
+            return psi
+        orig_shape = psi.shape
+        psi = psi.reshape(-1, *orig_shape[-2:])
+        psi = ip.rescale_images(psi, scale)
+        return psi.reshape(orig_shape)
+
+    @timer()
+    def apply_real_space_scaling_adjoint(self, psi: Tensor) -> Tensor:
+        """Apply the adjoint of the global real-space scaling operator.
+
+        Parameters
+        ----------
+        psi : Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``.
+
+        Returns
+        -------
+        Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``.
+        """
+        scale = self.real_space_scaling.data[0]
+        if (not scale.requires_grad) and torch.allclose(scale, torch.ones_like(scale)):
+            return psi
+        orig_shape = psi.shape
+        psi = psi.reshape(-1, *orig_shape[-2:])
+        psi = ip.rescale_images(psi, scale, adjoint=True)
+        return psi.reshape(orig_shape)
 
     @timer()
     def propagate_to_next_slice(self, psi: Tensor, slice_index: int):
@@ -640,8 +686,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
                 probe[..., i_mode : i_mode + 1, :, :], obj_patches
             )
             
-            psi_far = self.free_space_propagator.propagate_forward(exit_psi)
-            self.record_intermediate_variable("psi_far", psi_far)
+            psi_far = self.forward_far_field(exit_psi)
             
             y = y + psi_far[..., 0, :, :].abs() ** 2
 

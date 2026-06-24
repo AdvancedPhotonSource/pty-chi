@@ -21,6 +21,8 @@ class PtychographyTaskOptions(base.TaskOptions):
 
     probe_position_options: base.ProbePositionOptions = field(default_factory=base.ProbePositionOptions)
 
+    real_space_scaling_options: base.RealSpaceScalingOptions = field(default_factory=base.RealSpaceScalingOptions)
+
     opr_mode_weight_options: base.OPRModeWeightsOptions = field(default_factory=base.OPRModeWeightsOptions)
 
     def check(self, *args, **kwargs):
@@ -31,6 +33,7 @@ class PtychographyTaskOptions(base.TaskOptions):
             self.object_options,
             self.probe_options,
             self.probe_position_options,
+            self.real_space_scaling_options,
             self.opr_mode_weight_options,
         ):
             options.check(self)

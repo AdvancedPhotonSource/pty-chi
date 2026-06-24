@@ -383,7 +383,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.alpha_psi_far = self.get_psi_far_step_size(y_pred, y_true, indices)
         psi_far = psi_far_0 - self.alpha_psi_far.view(-1, 1, 1, 1) * dl_dpsi_far  # Eq. 14
 
-        psi_opt = self.forward_model.free_space_propagator.propagate_backward(psi_far)
+        psi_opt = self.propagate_detector_wave_to_exit_adjoint(psi_far)
         return psi_opt
 
     @timer()
@@ -432,6 +432,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self._initialize_object_gradient()
         self.parameter_group.probe.initialize_grad()
         self.parameter_group.probe_positions.initialize_grad()
+        self.parameter_group.real_space_scaling.initialize_grad()
         self.parameter_group.opr_mode_weights.initialize_grad()
         self._initialize_object_step_size_buffer()
         self._initialize_probe_step_size_buffer()
@@ -519,6 +520,19 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                     apply_updates=False,
                 )
 
+            if (
+                self.parameter_group.real_space_scaling.optimization_enabled(self.current_epoch)
+                and i_slice == self.parameter_group.probe_positions.get_slice_for_correction(
+                    object_.n_slices
+                )
+            ):
+                self.update_real_space_scaling(
+                    chi,
+                    obj_patches[:, i_slice : i_slice + 1],
+                    self.forward_model.intermediate_variables.shifted_unique_probes[i_slice],
+                    apply_updates=False,
+                )
+
             # Set chi to conjugate-modulated wavefield.
             chi = delta_p_i_before_adj_shift
 
@@ -555,6 +569,14 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             self.parameter_group.probe_positions.step_optimizer(
                 clip_update=self.parameter_group.probe_positions.options.momentum_acceleration_gain <= 0
             )
+
+        real_space_scaling = getattr(self.parameter_group, "real_space_scaling", None)
+        if (
+            real_space_scaling is not None
+            and real_space_scaling.optimization_enabled(self.current_epoch)
+        ):
+            real_space_scaling.step_optimizer()
+            real_space_scaling.post_update_hook()
             
         # Update OPR modes and weights.
         if self.parameter_group.opr_mode_weights.optimization_enabled(self.current_epoch):
