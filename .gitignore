@@ -146,6 +146,8 @@ cython_debug/
 
 # Workspace stuff
 workspace/
+dev_notes/
+tools/
 
 # Binaries
 *.tiff
@@ -161,3 +163,5 @@ workspace/
 .idea/
 .vscode/
 .loglogin
+
+AGENTS.md
