@@ -86,6 +86,8 @@ class ReconstructParameter(Module):
     name = None
     optimizable: bool = True
     optimization_plan: "api.OptimizationPlan" = None
+    preconditioner: Optional[Tensor]
+    update_buffer: Optional[Tensor]
     optimizer = None
     step_size_scheduler = None
     is_dummy = False
@@ -151,8 +153,8 @@ class ReconstructParameter(Module):
         self.sub_modules = []
         self.optimizable_sub_modules = []
         self.is_complex = is_complex
-        self.preconditioner = None
-        self.update_buffer = None
+        self.register_buffer("preconditioner", None, persistent=False)
+        self.register_buffer("update_buffer", None, persistent=False)
 
         if is_complex:
             if data is not None:

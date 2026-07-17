@@ -28,7 +28,17 @@ class PtychographyDataOptions(base.Options):
     """The wavelength in meters."""
 
     fft_shift: bool = True
-    """Whether to FFT-shift the diffraction data."""
+    """Whether to FFT-shift the diffraction data when building the dataset. For far-field
+    ptychography, the forward model does not shift the image after FFT, meaning the
+    predicted intensity has its DC component at the top left corner. To match the prediction,
+    measured intensity should be pre-shifted if the DC component of the given diffraction
+    patterns is at the center. 
+    
+    However, if the given diffraction patterns are already shifted so that the DC compoenent
+    is at the top left, or if you are reconstructing near-field ptychography data where
+    the forward model does not involve Fraunhofer diffraction implemented with FFT, ensure
+    this option is set to `False` to avoid the erroneous shifting. 
+    """
 
     detector_pixel_size_m: float = 1e-8
     """The detector pixel size in meters."""

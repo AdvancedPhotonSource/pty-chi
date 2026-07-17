@@ -2,6 +2,7 @@
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
 from typing import Literal, Optional, Union, overload
+import dataclasses
 from dataclasses import dataclass
 from types import TracebackType
 import random
@@ -680,18 +681,18 @@ class PtychographyTask(Task):
         self,
         device: Literal["cpu", "cuda"] | torch.device | None = None,
     ) -> None:
-        """Move large task buffers between CPU and a target device.
+        """Move task tensors and reconstruction state between devices.
 
         This helper is aimed at multi-task workflows where only one task is
         active on the accelerator at a time. Call it with ``device="cpu"`` to
-        offload the heavy object/probe/diffraction buffers to system memory,
-        and call it again (without arguments, or with an explicit device string)
-        before resuming the task to bring the tensors back to the accelerator.
+        offload task tensors and optimizer/reconstructor state to system memory,
+        and call it again before resuming the task to restore that state to the
+        accelerator.
 
         Parameters
         ----------
         device : str | torch.device | None, optional
-            Target device for the large buffers. If None, tensors are moved back
+            Target device for task state. If None, tensors are moved back
             to the current default device. If a string is given, it must be either
             "cpu" or "cuda".
         """
@@ -700,21 +701,43 @@ class PtychographyTask(Task):
             device = torch.get_default_device()
         device = torch.device(device)
 
-        if self.reconstructor is None:
-            raise RuntimeError("Reconstructor is not built yet.")
+        if self.reconstructor is None or self.dataset is None:
+            raise RuntimeError("Task is not built yet.")
 
         parameter_group = self.reconstructor.parameter_group
         with torch.no_grad():
-            # Move object and probe buffers.
-            parameter_group.object.to(device)
-            parameter_group.probe.to(device)
+            for parameter in parameter_group.get_all_reconstruct_parameters():
+                parameter.to(device)
+                if parameter.optimizer is not None:
+                    for key, value in list(parameter.optimizer.state.items()):
+                        parameter.optimizer.state[key] = utils.move_nested_tensors_to_device(
+                            value, device
+                        )
 
-            # Move diffraction patterns.
             self.dataset.patterns = self.dataset.patterns.to(device)
-            # Keep dataset bookkeeping in sync with where patterns live.
+            self.dataset.move_attributes_to_device(device)
             self.dataset.save_data_on_device = device.type != "cpu"
 
-            # Move intermediate variables in forward model.
+            buffers = self.reconstructor.reconstructor_buffers
+            for name in buffers.get_all_names():
+                if not hasattr(buffers, name):
+                    continue
+                buffers.__setattr__(
+                    name,
+                    utils.move_nested_tensors_to_device(getattr(buffers, name), device),
+                    bypass_check=True,
+                )
+
+            for name, value in vars(self.reconstructor).items():
+                if not name.endswith("_momentum_params") or not dataclasses.is_dataclass(value):
+                    continue
+                for field in dataclasses.fields(value):
+                    setattr(
+                        value,
+                        field.name,
+                        utils.move_nested_tensors_to_device(getattr(value, field.name), device),
+                    )
+
             self.reconstructor.forward_model.move_intermediate_variables_to_device(device)
 
         if device.type == "cpu":

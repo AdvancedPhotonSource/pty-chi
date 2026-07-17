@@ -6,6 +6,7 @@ Using Pty-chi
 
    data_structures
    task
+   workflows
    options
    io
    initialization_recommendations
