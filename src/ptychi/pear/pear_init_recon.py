@@ -20,6 +20,7 @@ from .pear_aps_data_loaders import (
     load_data_12idc,
     load_data_bnp,
     load_data_lynx,
+    load_data_lynx_v2,
     load_data_velo
 )
 
@@ -85,7 +86,7 @@ def initialize_recon(params):
     params["det_pixel_size_m"] = (
         75e-6
         if instrument
-        in ["velo", "velociprobe", "bnp", "bionanoprobe", "2ide", "2xfm", "lynx", "simu"]
+        in ["velo", "velociprobe", "bnp", "bionanoprobe", "2ide", "2xfm", "lynx", "lynx_v2", "simu"]
         else 172e-6
     )
 
@@ -248,6 +249,7 @@ def _load_data_raw(instrument, base_path, scan_num, dp_Npix, dp_cen_x, dp_cen_y)
         "2xfm": load_data_2xfm,
         "2ide": load_data_2xfm,
         "lynx": load_data_lynx,
+        "lynx_v2": load_data_lynx_v2,
     }
     instrument = instrument.lower()
     if instrument not in instrument_loaders:

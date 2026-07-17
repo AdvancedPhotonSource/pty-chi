@@ -472,7 +472,7 @@ def save_reconstructions(task, recon_path, iter, params):
 
 def _get_ptychi_recons_dir(params):
     """Return the base ptychi_recons directory, inserting 'analysis/' for lynx."""
-    if params.get("instrument", "").lower() == "lynx":
+    if params.get("instrument", "").lower() in ("lynx", "lynx_v2"):
         return os.path.join(params["data_directory"], "analysis", "ptychi_recons", params["recon_parent_dir"])
     return os.path.join(params["data_directory"], "ptychi_recons", params["recon_parent_dir"])
 

@@ -606,6 +606,63 @@ def load_data_lynx(base_path, scan_num, det_Npixel, cen_x, cen_y, print_mode='de
     return dp, positions
 
 
+def load_data_lynx_v2(base_path, scan_num, det_Npixel, cen_x, cen_y, print_mode='debug'):
+    verbose_print("Loading scan positions and diffraction patterns measured by the LYNX instrument (new test detector).", print_mode)
+    # Same beamline as load_data_lynx but with the 2026 test detector:
+    #   1536 x 1024 pixels (vs 1614 x 1030)
+    #   filename: scan_{scan:05d}_000.h5 (vs run_{scan:05d}_000000000000.h5)
+    #   dataset key: entry/data/data (vs entry/data/eiger_4)
+    pos_file = f"{base_path}/data/scan_positions/scan_{scan_num:05d}.dat"
+    out_orch = _read_lynx_position_file(pos_file)
+
+    x_positions = -out_orch["Average_x_st_fzp"]
+    y_positions = -out_orch["Average_y_st_fzp"]
+
+    x_positions = x_positions * 1e-6
+    y_positions = y_positions * 1e-6
+
+    positions = np.column_stack((y_positions, x_positions))
+
+    subfolder_start = (scan_num // 1000) * 1000
+    subfolder_end = subfolder_start + 999
+    data_dir = os.path.join(
+        base_path, "data", "eiger_4",
+        f"S{subfolder_start:05d}-{subfolder_end:05d}",
+        f"S{scan_num:05d}",
+    )
+    file_path = os.path.join(data_dir, f"scan_{scan_num:05d}_000.h5")
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Data file not found: {file_path}")
+
+    N_det_x = 1536
+    N_det_y = 1024
+
+    N_dp_x_max = min(cen_x, N_det_x - cen_x) * 2
+    N_dp_y_max = min(cen_y, N_det_y - cen_y) * 2
+    N_dp_crop = min(N_dp_x_max, N_dp_y_max, det_Npixel)
+    if N_dp_crop < det_Npixel:
+        verbose_print(f"The maximum size can be cropped from raw diffraction patterns is {N_dp_crop}", print_mode)
+
+    index_x_lb = int(cen_x - N_dp_crop // 2)
+    index_x_ub = int(cen_x + (N_dp_crop + 1) // 2)
+    index_y_lb = int(cen_y - N_dp_crop // 2)
+    index_y_ub = int(cen_y + (N_dp_crop + 1) // 2)
+
+    with h5py.File(file_path, "r") as h5_data:
+        dp_temp = h5_data["entry/data/data"][:]
+        N_scan_dp = dp_temp.shape[0]
+        verbose_print(f"Number of diffraction patterns: {N_scan_dp}", print_mode)
+
+        dp = np.zeros((N_scan_dp, N_dp_crop, N_dp_crop))
+        for j in range(N_scan_dp):
+            dp[j] = dp_temp[j, index_y_lb:index_y_ub, index_x_lb:index_x_ub]
+
+    dp[dp < 0] = 0
+    dp[dp > 1e7] = 0
+
+    return dp, positions
+
+
 def load_data_velo(base_path, scan_num, det_Npixel, cen_x, cen_y, print_mode='debug'):
     verbose_print("Loading scan positions and diffraction patterns measured by the Velociprobe instrument.", print_mode)
 
