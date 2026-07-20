@@ -36,6 +36,17 @@ class _WorkflowData:
     valid_pixel_mask: Optional[TaskArray]
 
 
+@dataclass(frozen=True)
+class _WorkflowTensorData:
+    diffraction_data: Tensor
+    object_data: Tensor
+    probe_data: Tensor
+    probe_position_x_px: Tensor
+    probe_position_y_px: Tensor
+    opr_mode_weights_data: Optional[Tensor]
+    valid_pixel_mask: Optional[Tensor]
+
+
 class BaseWorkflow(ABC):
     """Base class for workflows composed of one or more ptychography tasks."""
 
@@ -74,20 +85,20 @@ class BaseWorkflow(ABC):
             valid_pixel_mask=valid_pixel_mask,
         )
         self._warn_for_gpu_data(data)
-        self.diffraction_data = self._copy_tensor_to_cpu(data.diffraction_data)
-        self.object_data = self._copy_tensor_to_cpu(data.object_data)
-        self.probe_data = self._copy_tensor_to_cpu(data.probe_data)
-        self.probe_position_x_px = self._copy_tensor_to_cpu(data.probe_position_x_px)
-        self.probe_position_y_px = self._copy_tensor_to_cpu(data.probe_position_y_px)
-        self.opr_mode_weights_data = self._copy_optional_tensor_to_cpu(
-            data.opr_mode_weights_data
-        )
-        self.valid_pixel_mask = self._copy_optional_tensor_to_cpu(data.valid_pixel_mask)
+        cpu_data = self._copy_workflow_data_to_cpu(data)
+        self.diffraction_data = cpu_data.diffraction_data
+        self.object_data = cpu_data.object_data
+        self.probe_data = cpu_data.probe_data
+        self.probe_position_x_px = cpu_data.probe_position_x_px
+        self.probe_position_y_px = cpu_data.probe_position_y_px
+        self.opr_mode_weights_data = cpu_data.opr_mode_weights_data
+        self.valid_pixel_mask = cpu_data.valid_pixel_mask
         self.task_options = self._copy_task_options()
 
     def _resolve_workflow_data(
         self,
         *,
+        task_options: Optional[PtychographyTaskOptions] = None,
         diffraction_data: Optional[TaskArray] | _UnsetWorkflowData,
         object_data: Optional[TaskArray] | _UnsetWorkflowData,
         probe_data: Optional[TaskArray] | _UnsetWorkflowData,
@@ -96,10 +107,11 @@ class BaseWorkflow(ABC):
         opr_mode_weights_data: Optional[TaskArray] | _UnsetWorkflowData,
         valid_pixel_mask: Optional[TaskArray] | _UnsetWorkflowData,
     ) -> _WorkflowData:
+        task_options = self.task_options if task_options is None else task_options
         return _WorkflowData(
             diffraction_data=self._resolve_data_field(
                 value=diffraction_data,
-                option_owner=self.task_options.data_options,
+                option_owner=task_options.data_options,
                 option_field_name="data",
                 option_path="task_options.data_options.data",
                 kwarg_name="diffraction_data",
@@ -107,7 +119,7 @@ class BaseWorkflow(ABC):
             ),
             object_data=self._resolve_data_field(
                 value=object_data,
-                option_owner=self.task_options.object_options,
+                option_owner=task_options.object_options,
                 option_field_name="initial_guess",
                 option_path="task_options.object_options.initial_guess",
                 kwarg_name="object_data",
@@ -115,7 +127,7 @@ class BaseWorkflow(ABC):
             ),
             probe_data=self._resolve_data_field(
                 value=probe_data,
-                option_owner=self.task_options.probe_options,
+                option_owner=task_options.probe_options,
                 option_field_name="initial_guess",
                 option_path="task_options.probe_options.initial_guess",
                 kwarg_name="probe_data",
@@ -123,7 +135,7 @@ class BaseWorkflow(ABC):
             ),
             probe_position_x_px=self._resolve_data_field(
                 value=probe_position_x_px,
-                option_owner=self.task_options.probe_position_options,
+                option_owner=task_options.probe_position_options,
                 option_field_name="position_x_px",
                 option_path="task_options.probe_position_options.position_x_px",
                 kwarg_name="probe_position_x_px",
@@ -131,7 +143,7 @@ class BaseWorkflow(ABC):
             ),
             probe_position_y_px=self._resolve_data_field(
                 value=probe_position_y_px,
-                option_owner=self.task_options.probe_position_options,
+                option_owner=task_options.probe_position_options,
                 option_field_name="position_y_px",
                 option_path="task_options.probe_position_options.position_y_px",
                 kwarg_name="probe_position_y_px",
@@ -139,7 +151,7 @@ class BaseWorkflow(ABC):
             ),
             opr_mode_weights_data=self._resolve_data_field(
                 value=opr_mode_weights_data,
-                option_owner=self.task_options.opr_mode_weight_options,
+                option_owner=task_options.opr_mode_weight_options,
                 option_field_name="initial_weights",
                 option_path="task_options.opr_mode_weight_options.initial_weights",
                 kwarg_name="opr_mode_weights_data",
@@ -147,7 +159,7 @@ class BaseWorkflow(ABC):
             ),
             valid_pixel_mask=self._resolve_data_field(
                 value=valid_pixel_mask,
-                option_owner=self.task_options.data_options,
+                option_owner=task_options.data_options,
                 option_field_name="valid_pixel_mask",
                 option_path="task_options.data_options.valid_pixel_mask",
                 kwarg_name="valid_pixel_mask",
@@ -224,18 +236,35 @@ class BaseWorkflow(ABC):
             return None
         return cls._copy_tensor_to_cpu(data)
 
-    def _copy_task_options(self) -> PtychographyTaskOptions:
+    @classmethod
+    def _copy_workflow_data_to_cpu(cls, data: _WorkflowData) -> _WorkflowTensorData:
+        return _WorkflowTensorData(
+            diffraction_data=cls._copy_tensor_to_cpu(data.diffraction_data),
+            object_data=cls._copy_tensor_to_cpu(data.object_data),
+            probe_data=cls._copy_tensor_to_cpu(data.probe_data),
+            probe_position_x_px=cls._copy_tensor_to_cpu(data.probe_position_x_px),
+            probe_position_y_px=cls._copy_tensor_to_cpu(data.probe_position_y_px),
+            opr_mode_weights_data=cls._copy_optional_tensor_to_cpu(
+                data.opr_mode_weights_data
+            ),
+            valid_pixel_mask=cls._copy_optional_tensor_to_cpu(data.valid_pixel_mask),
+        )
+
+    def _copy_task_options(
+        self, task_options: Optional[PtychographyTaskOptions] = None
+    ) -> PtychographyTaskOptions:
+        task_options = self.task_options if task_options is None else task_options
         data_fields = (
-            self.task_options.data_options.data,
-            self.task_options.data_options.valid_pixel_mask,
-            self.task_options.object_options.initial_guess,
-            self.task_options.probe_options.initial_guess,
-            self.task_options.probe_position_options.position_x_px,
-            self.task_options.probe_position_options.position_y_px,
-            self.task_options.opr_mode_weight_options.initial_weights,
+            task_options.data_options.data,
+            task_options.data_options.valid_pixel_mask,
+            task_options.object_options.initial_guess,
+            task_options.probe_options.initial_guess,
+            task_options.probe_position_options.position_x_px,
+            task_options.probe_position_options.position_y_px,
+            task_options.opr_mode_weight_options.initial_weights,
         )
         memo = {id(value): None for value in data_fields if value is not None}
-        options = copy.deepcopy(self.task_options, memo)
+        options = copy.deepcopy(task_options, memo)
         options.data_options.data = None
         options.data_options.valid_pixel_mask = None
         options.object_options.initial_guess = None

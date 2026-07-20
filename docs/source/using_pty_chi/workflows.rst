@@ -7,6 +7,58 @@ carrying reconstructed parameters from one task to the next to implement a
 larger reconstruction strategy.
 
 
+Multiscan shared-object reconstruction
+--------------------------------------
+
+:class:`~ptychi.workflows.MultiscanSharedObjectWorkflow` reconstructs several
+datasets collected from sub-regions of one object. It creates one task per
+dataset so that every scan retains its own probe, positions, OPR weights, and
+optimizer state. After each task runs, only its reconstructed object tensor is
+copied to the next task in a cyclic sequence.
+
+Supply one options object and one data array per scan. Every supplied list must
+have the same length, and at least one scan is required:
+
+.. code-block:: python
+
+    import ptychi.api as api
+    from ptychi.workflows import MultiscanSharedObjectWorkflow
+
+    workflow = MultiscanSharedObjectWorkflow(
+        [task_options_1, task_options_2],
+        diffraction_data=[diffraction_data_1, diffraction_data_2],
+        object_data=[object_guess_1, object_guess_2],
+        probe_data=[probe_guess_1, probe_guess_2],
+        probe_position_x_px=[position_x_1, position_x_2],
+        probe_position_y_px=[position_y_1, position_y_2],
+        opr_mode_weights_data=[opr_weights_1, None],
+        valid_pixel_mask=None,
+        workflow_options=api.MultiscanSharedObjectWorkflowOptions(
+            num_outer_epochs=20,
+            num_inner_epochs=1,
+        ),
+    )
+    workflow.run()
+
+``opr_mode_weights_data`` and ``valid_pixel_mask`` may each be ``None`` for all
+scans, or a list containing an array or ``None`` for each scan. The workflow
+sets every task's progress total to ``num_outer_epochs * num_inner_epochs``;
+the values originally stored in the caller's task options are not modified.
+
+All scans must use the same object tensor shape, pixel geometry, and multislice
+spacing. They must also use
+``object_options.determine_position_origin_coords_by = ObjectPosOriginCoordsMethods.SUPPORT``.
+The supplied positions must therefore already be expressed in a common,
+SUPPORT-centered coordinate frame. The workflow does not align or stitch scan
+coordinates.
+
+Tasks are available in input order through ``workflow.tasks``. At completion,
+the final object is copied to every task, while each task's probe, positions,
+OPR weights, preconditioners, and optimizer state remain independent. Inactive
+tasks are offloaded to CPU, and all tasks are on CPU when the workflow returns.
+A workflow instance cannot be run a second time.
+
+
 Progressive-resolution reconstruction
 --------------------------------------
 
@@ -144,6 +196,14 @@ level resident on the GPU.
 
 API reference
 -------------
+
+.. autoclass:: ptychi.workflows.MultiscanSharedObjectWorkflow
+   :members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.workflow.MultiscanSharedObjectWorkflowOptions
+   :members:
+   :show-inheritance:
 
 .. autoclass:: ptychi.workflows.ProgressiveResolutionWorkflow
    :members:
