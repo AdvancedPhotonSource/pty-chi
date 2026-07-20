@@ -22,19 +22,33 @@ def _task_options(n_tasks=3):
 def _workflow_data(n_tasks=3):
     return {
         "diffraction_data": [
-            torch.full((2, 5, 5), i_task + 1, dtype=torch.float32)
+            torch.full((2, 5, 5), i_task + 1, dtype=torch.float32, device="cpu")
             for i_task in range(n_tasks)
         ],
         "object_data": [
-            torch.full((1, 11, 11), i_task * 10 + 1, dtype=torch.complex64)
+            torch.full(
+                (1, 11, 11),
+                i_task * 10 + 1,
+                dtype=torch.complex64,
+                device="cpu",
+            )
             for i_task in range(n_tasks)
         ],
         "probe_data": [
-            torch.full((1, 1, 5, 5), i_task + 1, dtype=torch.complex64)
+            torch.full(
+                (1, 1, 5, 5),
+                i_task + 1,
+                dtype=torch.complex64,
+                device="cpu",
+            )
             for i_task in range(n_tasks)
         ],
-        "probe_position_x_px": [torch.tensor([-1.0, 1.0]) for _ in range(n_tasks)],
-        "probe_position_y_px": [torch.tensor([-1.0, 1.0]) for _ in range(n_tasks)],
+        "probe_position_x_px": [
+            torch.tensor([-1.0, 1.0], device="cpu") for _ in range(n_tasks)
+        ],
+        "probe_position_y_px": [
+            torch.tensor([-1.0, 1.0], device="cpu") for _ in range(n_tasks)
+        ],
     }
 
 
@@ -146,7 +160,10 @@ def test_multiscan_requires_nonempty_options_list_and_equal_data_lists():
 def test_multiscan_accepts_optional_whole_none_and_mixed_none_lists():
     data = _workflow_data(2)
     data["opr_mode_weights_data"] = None
-    data["valid_pixel_mask"] = [None, torch.ones((5, 5), dtype=torch.bool)]
+    data["valid_pixel_mask"] = [
+        None,
+        torch.ones((5, 5), dtype=torch.bool, device="cpu"),
+    ]
     workflow = MultiscanSharedObjectWorkflow(
         _task_options(2),
         workflow_options=_workflow_options(),
@@ -171,7 +188,9 @@ def test_multiscan_validates_shared_object_geometry_and_support_origin():
         )
 
     data = _workflow_data(2)
-    data["object_data"][1] = torch.ones((1, 13, 11), dtype=torch.complex64)
+    data["object_data"][1] = torch.ones(
+        (1, 13, 11), dtype=torch.complex64, device="cpu"
+    )
     with pytest.raises(ValueError, match="same shape"):
         MultiscanSharedObjectWorkflow(
             _task_options(2),
