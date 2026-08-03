@@ -6,6 +6,7 @@ from .ad_ptychography import AutodiffPtychographyReconstructor
 from .lsqml import LSQMLReconstructor, MultiprocessLSQMLReconstructor
 from .pie import PIEReconstructor, EPIEReconstructor, RPIEReconstructor
 from .dm import DMReconstructor
+from .raar import RAARReconstructor
 from .bh import BHReconstructor
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "EPIEReconstructor",
     "RPIEReconstructor",
     "DMReconstructor",
+    "RAARReconstructor",
     "BHReconstructor"
 ]

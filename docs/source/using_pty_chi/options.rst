@@ -39,8 +39,8 @@ types of the nested options objects. For example:
     # Uses autodiff-specific nested options
 
 In other words, choosing ``api.LSQMLOptions()``, ``api.PIEOptions()``,
-``api.DMOptions()``, or another top-level options class is how you choose the
-engine to run.
+``api.DMOptions()``, ``api.RAAROptions()``, or another top-level options class
+is how you choose the engine to run.
 
 
 Constructing an Options Object

@@ -6,17 +6,19 @@ The table below compares their merits and limitations.
 
 .. list-table::
    :stub-columns: 1
-   :widths: 40 40 40 40 40 40
+   :widths: 40 40 40 40 40 40 40
 
    * - Engine
      - **LSQML**
      - **PIE (incl. ePIE, rPIE)**
      - **Difference map**
+     - **RAAR**
      - **Bilinear Hessian**
      - **Autodiff**
    * - Minibatching allowed
      - Yes
      - Yes  
+     - No
      - No
      - Yes
      - Yes
@@ -25,14 +27,17 @@ The table below compares their merits and limitations.
      - Single
      - Single
      - Single
+     - Single
      - Multiple
    * - Memory usage
      - Moderate
      - Moderate
      - High
+     - High
      - Moderate
      - Low
    * - Mixed-state probe support
+     - Yes
      - Yes
      - Yes
      - Yes
@@ -43,11 +48,12 @@ The table below compares their merits and limitations.
      - Yes
      - No
      - No
+     - No
      - Yes
    * - Multislice support
      - Yes
      - Yes
      - No
      - No
+     - No
      - Yes
-

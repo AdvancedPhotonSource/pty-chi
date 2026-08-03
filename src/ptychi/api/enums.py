@@ -39,6 +39,7 @@ class Reconstructors(StrEnum):
     EPIE = auto()
     RPIE = auto()
     DM = auto()
+    RAAR = auto()
     BH = auto()
 
 

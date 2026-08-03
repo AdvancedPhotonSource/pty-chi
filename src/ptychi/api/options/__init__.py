@@ -8,5 +8,6 @@ from .ad_ptychography import *
 from .lsqml import *
 from .pie import *
 from .dm import *
+from .raar import *
 from .bh import *
 from .workflow import *

@@ -51,6 +51,10 @@ def test_documented_ranges_are_validated():
     with pytest.raises(ValidationError):
         dm_options.object_options.inertia = 1.5
 
+    raar_options = api.RAAROptions()
+    with pytest.raises(ValidationError):
+        raar_options.reconstructor_options.beta = 0.5
+
 
 def test_probe_center_deprecated_alias_is_promoted_by_validation():
     with warnings.catch_warnings(record=True) as warnings_record:
