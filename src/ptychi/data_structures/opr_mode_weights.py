@@ -94,6 +94,19 @@ class OPRModeWeights(dsbase.ReconstructParameter):
         enabled = super().optimization_enabled(epoch)
         return enabled and self.optimize_intensity_variation
 
+    @torch.no_grad()
+    def apply_primary_mode_weight_floor(self):
+        floor = self.options.primary_mode_weight_floor
+        if floor is None:
+            return
+        weights = self.data
+        weights[:, 0].clamp_(min=floor)
+        self.set_data(weights)
+
+    def step_optimizer(self, *args, **kwargs):
+        super().step_optimizer(*args, **kwargs)
+        self.apply_primary_mode_weight_floor()
+
     @timer()
     def update_variable_probe(
         self,
@@ -150,6 +163,9 @@ class OPRModeWeights(dsbase.ReconstructParameter):
                 self.set_data(self.data + 0.1 * delta_weights_int)
             else:
                 self.set_grad(-0.1 * delta_weights_int, op="add")
+
+        if apply_updates:
+            self.apply_primary_mode_weight_floor()
 
     @timer()
     def update_opr_probe_modes_and_weights(

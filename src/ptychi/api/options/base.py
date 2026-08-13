@@ -1008,6 +1008,12 @@ class OPRModeWeightsOptions(ParameterOptions):
     should be set to `True` if `optimizable` is `True`.
     """
 
+    primary_mode_weight_floor: Optional[float] = PydanticField(default=None, ge=0)
+    """
+    Lower bound for the weight of the primary (0th) OPR mode. If `None`, no
+    lower bound is applied.
+    """
+
     smoothing: OPRModeWeightsSmoothingOptions = dataclasses.field(
         default_factory=OPRModeWeightsSmoothingOptions
     )

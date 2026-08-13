@@ -88,6 +88,14 @@ def test_opr_mode_weight_optimization_requires_at_least_one_enabled_component():
     assert options.optimize_eigenmode_weights is True
 
 
+def test_opr_primary_mode_weight_floor_must_be_nonnegative():
+    options = base.OPRModeWeightsOptions()
+
+    assert options.primary_mode_weight_floor is None
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        options.primary_mode_weight_floor = -0.1
+
+
 def test_lsqml_position_momentum_memory_is_positive():
     options = api.LSQMLOptions()
 
