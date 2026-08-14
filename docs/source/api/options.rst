@@ -172,6 +172,49 @@ Difference Map (DM) Options
    :undoc-members:
    :show-inheritance:
 
+Relaxed Averaged Alternating Reflections (RAAR) Options
+-------------------------------------------------------
+
+.. autoclass:: ptychi.api.options.raar.RAAROptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Reconstructor Options
+~~~~~~~~~~~~~~~~~~~~~
+.. autoclass:: ptychi.api.options.raar.RAARReconstructorOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Object Options
+~~~~~~~~~~~~~~
+.. autoclass:: ptychi.api.options.raar.RAARObjectOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Probe Options
+~~~~~~~~~~~~~
+.. autoclass:: ptychi.api.options.raar.RAARProbeOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Probe Position Options
+~~~~~~~~~~~~~~~~~~~~~~
+.. autoclass:: ptychi.api.options.raar.RAARProbePositionOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+OPR Mode Weight Options
+~~~~~~~~~~~~~~~~~~~~~~~
+.. autoclass:: ptychi.api.options.raar.RAAROPRModeWeightsOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 PIE Options
 -----------
 
@@ -269,4 +312,4 @@ Autodiff Ptychography Options
 .. autoclass:: ptychi.api.options.ad_ptychography.AutodiffPtychographyOPRModeWeightsOptions
    :members:
    :undoc-members:
-   :show-inheritance: 
+   :show-inheritance:
