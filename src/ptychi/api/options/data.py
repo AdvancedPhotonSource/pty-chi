@@ -40,9 +40,6 @@ class PtychographyDataOptions(base.Options):
     this option is set to `False` to avoid the erroneous shifting. 
     """
 
-    detector_pixel_size_m: float = 1e-8
-    """The detector pixel size in meters."""
-
     valid_pixel_mask: Optional[base.DataArray] = None
     """A 2D boolean mask where valid pixels are True."""
     
