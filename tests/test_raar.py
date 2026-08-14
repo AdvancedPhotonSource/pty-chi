@@ -58,12 +58,13 @@ def test_raar_exit_wave_update_matches_paper_equation():
         lambda projected_object, start_pt, end_pt: projected_object[start_pt:end_pt]
     )
 
-    error_squared = reconstructor.apply_raar_exit_wave_update(
+    error_squared, exit_wave_update = reconstructor.apply_raar_exit_wave_update(
         y_true=torch.zeros((2, 1, 1)),
         q_object=q_exit_wave,
         pa_object=q_pa_exit_wave,
         start_pts=[0],
         end_pts=[2],
+        return_exit_wave_update=True,
     )
 
     beta = reconstructor.options.beta
@@ -74,6 +75,7 @@ def test_raar_exit_wave_update_matches_paper_equation():
     )
     assert torch.allclose(reconstructor.psi, expected)
     assert torch.allclose(error_squared, ((expected - previous_exit_wave).abs() ** 2).sum())
+    assert torch.allclose(exit_wave_update, expected - previous_exit_wave)
 
 
 def test_raar_updates_object_and_probe():
@@ -110,5 +112,52 @@ def test_raar_updates_object_and_probe():
         assert torch.isfinite(task.object.data).all()
         assert torch.isfinite(task.probe.data).all()
         assert torch.isfinite(task.reconstructor.psi).all()
+    finally:
+        torch.set_default_device(previous_device)
+
+
+def test_raar_updates_opr_probe_mode_and_weights():
+    previous_device = torch.get_default_device()
+    torch.set_default_device("cpu")
+    try:
+        diffraction_data, true_probe, positions = make_synthetic_data()
+        initial_object = torch.ones((1, 10, 10), dtype=torch.complex64)
+        shared_probe = true_probe * torch.exp(0.2j * true_probe.real)
+        eigenmode = torch.roll(true_probe, 1, 0) - torch.roll(true_probe, -1, 1)
+        eigenmode = eigenmode * (1 + 0.3j)
+        initial_probe = torch.stack([shared_probe, eigenmode])[:, None]
+        initial_weights = torch.tensor([[1.0, 0.04], [1.0, -0.03], [1.0, 0.02], [1.0, -0.01]])
+
+        options = api.RAAROptions()
+        options.reconstructor_options.default_device = api.Devices.CPU
+        options.reconstructor_options.num_epochs = 1
+        options.reconstructor_options.chunk_length = 1
+        options.reconstructor_options.allow_nondeterministic_algorithms = False
+        options.object_options.remove_object_probe_ambiguity.enabled = False
+        options.probe_options.orthogonalize_opr_modes.enabled = False
+        options.probe_position_options.optimizable = False
+        options.opr_mode_weight_options.optimizable = True
+        options.opr_mode_weight_options.update_relaxation = 0.1
+
+        task = PtychographyTask(
+            options,
+            diffraction_data=diffraction_data,
+            object_data=initial_object,
+            probe_data=initial_probe,
+            probe_position_x_px=positions[:, 1],
+            probe_position_y_px=positions[:, 0],
+            opr_mode_weights_data=initial_weights,
+        )
+        shared_probe_before = task.probe.data[0].detach().clone()
+        eigenmode_before = task.probe.data[1].detach().clone()
+        weights_before = task.opr_mode_weights.data.detach().clone()
+
+        task.run()
+
+        assert not torch.allclose(task.probe.data[0], shared_probe_before)
+        assert not torch.allclose(task.probe.data[1], eigenmode_before)
+        assert not torch.allclose(task.opr_mode_weights.data[:, 1], weights_before[:, 1])
+        assert torch.isfinite(task.probe.data).all()
+        assert torch.isfinite(task.opr_mode_weights.data).all()
     finally:
         torch.set_default_device(previous_device)

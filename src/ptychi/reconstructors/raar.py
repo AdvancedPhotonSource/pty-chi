@@ -28,10 +28,13 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     The exit-wave update follows equation (16) of Marchesini et al.,
     J. Appl. Cryst. 49, 1245–1252 (2016). Object and probe retrieval follow
-    equations (14) and (15), respectively.
+    equations (14) and (15), respectively. OPR eigenmodes and weights are
+    updated from the RAAR exit-wave increment using the shared OPR routine.
 
     The complete exit-wave stack is retained between epochs. ``batch_size`` is
     therefore unused; ``chunk_length`` controls the temporary working-set size.
+    When an OPR update is enabled, its full exit-wave increment is also retained
+    for the duration of that update.
     """
 
     parameter_group: "pg.PlanarPtychographyParameterGroup"
@@ -57,12 +60,6 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
     def check_inputs(self, *args, **kwargs):
         if self.parameter_group.object.is_multislice:
             raise NotImplementedError("RAARReconstructor only supports 2D objects.")
-        if self.parameter_group.probe.has_multiple_opr_modes:
-            raise NotImplementedError("RAARReconstructor does not support multiple OPR modes yet.")
-        if self.parameter_group.opr_mode_weights.options.optimizable:
-            raise NotImplementedError(
-                "RAARReconstructor does not support OPR mode weight optimization."
-            )
         if (
             self.parameter_group.probe_positions.position_correction.options.correction_type
             is not api.enums.PositionCorrectionTypes.GRADIENT
@@ -109,10 +106,18 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
         object_ = self.parameter_group.object
         probe = self.parameter_group.probe
         probe_positions = self.parameter_group.probe_positions
+        opr_mode_weights = self.parameter_group.opr_mode_weights
         start_pts, end_pts = self.get_chunk_bounds()
         object_update_enabled = object_.optimization_enabled(self.current_epoch)
         probe_update_enabled = probe.optimization_enabled(self.current_epoch)
         position_update_enabled = probe_positions.optimization_enabled(self.current_epoch)
+        variable_probe_update_enabled = (
+            probe.has_multiple_opr_modes
+            and (
+                probe_update_enabled
+                or opr_mode_weights.eigenmode_weight_optimization_enabled(self.current_epoch)
+            )
+        ) or opr_mode_weights.intensity_variation_optimization_enabled(self.current_epoch)
 
         if self.current_epoch == 0:
             self.initialize_exit_wave(start_pts, end_pts)
@@ -125,21 +130,28 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
             q_object = object_.get_slice(0)
             pa_object = q_object
 
-        raar_error_squared = self.apply_raar_exit_wave_update(
+        raar_error_squared, exit_wave_update = self.apply_raar_exit_wave_update(
             y_true,
             q_object,
             pa_object,
             start_pts,
             end_pts,
+            return_exit_wave_update=variable_probe_update_enabled,
         )
 
+        object_update = None
         if object_update_enabled:
             object_update = self.calculate_object_projection(self.psi, start_pts, end_pts)
+
+        if variable_probe_update_enabled:
+            self.update_variable_probe(exit_wave_update)
+
+        if object_update is not None:
             self.update_object(object_update)
 
         if probe_update_enabled:
             probe_update = self.calculate_probe_update(start_pts, end_pts)
-            probe.set_data(probe_update)
+            probe.set_data(probe_update, slicer=0)
 
         if position_update_enabled:
             self.update_probe_positions(start_pts, end_pts)
@@ -306,10 +318,12 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
         pa_object: Tensor,
         start_pts: list[int],
         end_pts: list[int],
-    ) -> Tensor:
+        return_exit_wave_update: bool = False,
+    ) -> Tuple[Tensor, Optional[Tensor]]:
         """Apply equation (16) of Marchesini et al. (2016)."""
         beta = self.options.beta
         error_squared = torch.zeros((), device=self.psi.device)
+        exit_wave_update_all = torch.zeros_like(self.psi) if return_exit_wave_update else None
         for start_pt, end_pt in zip(start_pts, end_pts):
             previous_exit_wave = self.psi[start_pt:end_pt].clone()
             pa_exit_wave = self.apply_data_projection(previous_exit_wave, y_true[start_pt:end_pt])
@@ -323,7 +337,41 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
             exit_wave_update = updated_exit_wave - previous_exit_wave
             self.psi[start_pt:end_pt] = updated_exit_wave
             error_squared += (exit_wave_update.abs() ** 2).sum()
-        return error_squared
+            if exit_wave_update_all is not None:
+                exit_wave_update_all[start_pt:end_pt] = exit_wave_update
+        return error_squared, exit_wave_update_all
+
+    @timer()
+    def update_variable_probe(self, exit_wave_update: Tensor) -> None:
+        """Update OPR eigenmodes and weights from the RAAR exit-wave update."""
+        object_ = self.parameter_group.object
+        probe = self.parameter_group.probe
+        probe_positions = self.parameter_group.probe_positions
+        opr_mode_weights = self.parameter_group.opr_mode_weights
+        indices = torch.arange(
+            probe_positions.n_scan_points, device=probe_positions.data.device
+        ).long()
+        obj_patches = object_.extract_patches(
+            probe_positions.tensor.round().int(),
+            probe.get_spatial_shape(),
+            integer_mode=True,
+        )
+
+        delta_p_i = obj_patches.conj() * exit_wave_update
+        delta_p_i = self.adjoint_shift_probe_update_direction(
+            indices, delta_p_i, first_mode_only=True
+        )
+        delta_p_hat = delta_p_i.mean(0)
+        opr_mode_weights.update_variable_probe(
+            probe,
+            indices,
+            exit_wave_update,
+            delta_p_i,
+            delta_p_hat,
+            obj_patches,
+            self.current_epoch,
+            probe_mode_index=0,
+        )
 
     @timer()
     def update_object(self, projected_object: Tensor) -> None:
