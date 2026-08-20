@@ -104,12 +104,13 @@ class PositionCorrection:
         self, chi: torch.Tensor, obj_patches: torch.Tensor, probe: torch.Tensor
     ):
         """
-        Calculate the update direction for probe positions. This routine calculates the gradient with regards
-        to probe positions themselves, in contrast to the delta of probe caused by a 1-pixel shift as in
-        Odstrcil (2018). However, this is the method implemented in both PtychoShelves and Tike.
+        Calculate a diagonal least-squares update for the probe positions.
 
-        Denote probe positions as s. Given dL/dP = -chi * O.conj() (Eq. 24a), dL/ds = dL/dO * dO/ds =
-        real(-chi * P.conj() * grad_O.conj()), where grad_O is the spatial gradient of the probe in x or y.
+        For each axis, the object derivative multiplied by the probe gives the change in the
+        exit wave caused by a unit position shift. The returned update is the real projection
+        of ``chi`` onto this exit-wave derivative, divided by the derivative's squared norm.
+        This is the diagonal Gauss-Newton form used by PtychoShelves. A zero derivative norm
+        produces a zero update for that coordinate.
         """
         # Just take the first slice.
         obj_patches = obj_patches[:, 0]

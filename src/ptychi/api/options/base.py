@@ -908,7 +908,7 @@ class ProbePositionOptions(ParameterOptions):
     optimizable: bool = False
     
     step_size: float = 1.0
-    """The step size for probe position update."""
+    """The step size for probe position update. The default is 1."""
     
     position_x_px: Optional[DataArray] = None
     """The x position in pixel."""

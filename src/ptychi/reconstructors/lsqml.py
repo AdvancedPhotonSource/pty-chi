@@ -1033,7 +1033,10 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
     @timer()
     def _clip_probe_position_update(self, delta_pos: torch.Tensor) -> torch.Tensor:
         """
-        Clip the probe-position update by the configured limits.
+        Clip the raw probe-position update by the configured limits.
+
+        This is applied to the active minibatch before the update is stored in
+        momentum history or modified by momentum acceleration.
 
         Parameters
         ----------
@@ -1492,6 +1495,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             If True, the data of the probe positions are modified with the
             update vectors. Otherwise, the update vectors will be saved in the
             ``grad`` attribute of the probe positions object.
+
+        Notes
+        -----
+        The raw update is clipped before optional momentum acceleration. The
+        accelerated update is not clipped again before the optimizer step.
         """
         delta_pos = self.parameter_group.probe_positions.position_correction.get_update(
             chi,
