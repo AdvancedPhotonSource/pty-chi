@@ -101,7 +101,7 @@ class PositionCorrection:
 
     @timer()
     def get_gradient_update(
-        self, chi: torch.Tensor, obj_patches: torch.Tensor, probe: torch.Tensor, eps=1e-6
+        self, chi: torch.Tensor, obj_patches: torch.Tensor, probe: torch.Tensor
     ):
         """
         Calculate the update direction for probe positions. This routine calculates the gradient with regards
@@ -129,12 +129,14 @@ class PositionCorrection:
         pdodx = dodx * probe
         dldx = (torch.real(pdodx.conj() * chi_m0)).sum(-1).sum(-1)
         denom_x = (pdodx.abs() ** 2).sum(-1).sum(-1)
-        dldx = dldx / (denom_x + max(denom_x.max(), eps))
+        safe_denom_x = torch.where(denom_x > 0, denom_x, torch.ones_like(denom_x))
+        dldx = torch.where(denom_x > 0, dldx / safe_denom_x, torch.zeros_like(dldx))
 
         pdody = dody * probe
         dldy = (torch.real(pdody.conj() * chi_m0)).sum(-1).sum(-1)
         denom_y = (pdody.abs() ** 2).sum(-1).sum(-1)
-        dldy = dldy / (denom_y + max(denom_y.max(), eps))
+        safe_denom_y = torch.where(denom_y > 0, denom_y, torch.ones_like(denom_y))
+        dldy = torch.where(denom_y > 0, dldy / safe_denom_y, torch.zeros_like(dldy))
 
         delta_pos = torch.stack([dldy, dldx], dim=1)
 
