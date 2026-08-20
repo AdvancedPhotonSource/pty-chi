@@ -907,7 +907,7 @@ class PositionAffineTransformConstraintOptions(FeatureOptions):
 class ProbePositionOptions(ParameterOptions):
     optimizable: bool = False
     
-    step_size: float = 0.3
+    step_size: float = 1.0
     """The step size for probe position update."""
     
     position_x_px: Optional[DataArray] = None

@@ -107,6 +107,23 @@ def test_lsqml_position_momentum_memory_is_positive():
         options.probe_position_options.momentum_acceleration_memory = 0
 
 
+@pytest.mark.parametrize(
+    "options_class",
+    [
+        api.LSQMLOptions,
+        api.PIEOptions,
+        api.EPIEOptions,
+        api.RPIEOptions,
+        api.DMOptions,
+        api.RAAROptions,
+        api.BHOptions,
+        api.AutodiffPtychographyOptions,
+    ],
+)
+def test_default_probe_position_step_size_is_one_for_all_reconstructors(options_class):
+    assert options_class().probe_position_options.step_size == 1.0
+
+
 def test_task_data_option_fields_preserve_array_objects():
     options = api.LSQMLOptions()
     diffraction_data = torch.ones((2, 2, 2))
