@@ -78,7 +78,7 @@ def test_update_probe_positions_uses_position_momentum_math_when_enabled():
 
     probe_positions = DummyProbePositions(
         tensor=torch.zeros((4, 2), dtype=torch.float32),
-        momentum_acceleration_gain=0.5,
+        momentum_acceleration_gain=0.25,
         momentum_acceleration_gradient_mixing_factor=1.0,
     )
     expected_delta_pos = torch.tensor([[0.05, -0.04], [0.02, -0.01]], dtype=torch.float32)
@@ -132,15 +132,94 @@ def test_update_probe_positions_uses_position_momentum_math_when_enabled():
     assert get_update_calls[0][-1] == 0.25
 
     expected_update = torch.zeros((4, 2), dtype=torch.float32)
-    expected_update[indices] = expected_delta_pos * 1.5
+    expected_update[indices] = expected_delta_pos * 1.25
     assert torch.equal(probe_positions.last_grad, -expected_update)
     assert probe_positions.step_calls == 1
     assert probe_positions.step_clip_update_args == [False]
     assert len(probe_positions.set_data_calls) == 0
 
     expected_grad = torch.zeros((4, 2), dtype=torch.float32)
-    expected_grad[indices] = expected_delta_pos * 0.25 * 1.5
+    expected_grad[indices] = expected_delta_pos * 0.25 * 1.25
     assert torch.equal(probe_positions.data, expected_grad)
+
+
+def test_update_probe_positions_clips_active_batch_without_momentum():
+    reconstructor = object.__new__(LSQMLReconstructor)
+    probe_positions = DummyProbePositions(
+        tensor=torch.zeros((4, 2), dtype=torch.float32),
+        momentum_acceleration_gain=0.0,
+        step_size=1.0,
+    )
+    probe_positions.options.correction_options.update_magnitude_limit = 0.1
+    probe_positions.options.correction_options.clip_update_magnitude_by_mad = True
+    raw_delta_pos = torch.tensor([[0.2, 0.2], [0.2, -0.2]], dtype=torch.float32)
+    probe_positions.position_correction = SimpleNamespace(
+        get_update=lambda *args: raw_delta_pos.clone()
+    )
+    reconstructor.parameter_group = SimpleNamespace(
+        object=SimpleNamespace(step_size=0.25),
+        probe_positions=probe_positions,
+    )
+
+    indices = torch.tensor([1, 3])
+    wavefield = torch.ones((2, 1, 2, 2), dtype=torch.complex64)
+    reconstructor.update_probe_positions(
+        wavefield,
+        indices,
+        wavefield,
+        wavefield,
+        wavefield,
+        apply_updates=True,
+    )
+
+    expected_delta_pos = torch.tensor([[0.0, 0.1], [0.0, -0.1]])
+    expected_positions = torch.zeros((4, 2), dtype=torch.float32)
+    expected_positions[indices] = expected_delta_pos
+    torch.testing.assert_close(probe_positions.data, expected_positions)
+    assert probe_positions.step_clip_update_args == [False]
+
+
+def test_update_probe_positions_does_not_reclip_after_momentum(monkeypatch):
+    reconstructor = object.__new__(LSQMLReconstructor)
+    probe_positions = DummyProbePositions(
+        tensor=torch.zeros((4, 2), dtype=torch.float32),
+        momentum_acceleration_gain=0.75,
+        step_size=1.0,
+    )
+    probe_positions.options.correction_options.update_magnitude_limit = 0.1
+    raw_delta_pos = torch.tensor([[0.2, 0.04], [-0.2, -0.04]], dtype=torch.float32)
+    probe_positions.position_correction = SimpleNamespace(
+        get_update=lambda *args: raw_delta_pos.clone()
+    )
+    reconstructor.parameter_group = SimpleNamespace(
+        object=SimpleNamespace(step_size=0.25),
+        probe_positions=probe_positions,
+    )
+    clipped_updates = []
+
+    def apply_momentum(indices, delta_pos):
+        clipped_updates.append(delta_pos.clone())
+        return 2 * delta_pos
+
+    monkeypatch.setattr(reconstructor, "_apply_probe_position_momentum", apply_momentum)
+
+    indices = torch.tensor([1, 3])
+    wavefield = torch.ones((2, 1, 2, 2), dtype=torch.complex64)
+    reconstructor.update_probe_positions(
+        wavefield,
+        indices,
+        wavefield,
+        wavefield,
+        wavefield,
+        apply_updates=True,
+    )
+
+    expected_clipped = torch.tensor([[0.1, 0.04], [-0.1, -0.04]])
+    torch.testing.assert_close(clipped_updates[0], expected_clipped)
+    expected_positions = torch.zeros((4, 2), dtype=torch.float32)
+    expected_positions[indices] = 2 * expected_clipped
+    torch.testing.assert_close(probe_positions.data, expected_positions)
+    assert probe_positions.step_clip_update_args == [False]
 
 
 def test_probe_position_momentum_history_is_stored_once_per_epoch():
@@ -274,11 +353,11 @@ def test_probe_position_momentum_non_far_field_keeps_history_but_skips_velocity_
     assert torch.equal(delta_pos_out, delta_pos)
 
 
-def test_apply_reconstruction_parameter_updates_uses_optimizer_for_positions_with_momentum():
+def test_apply_reconstruction_parameter_updates_skips_position_post_clipping():
     reconstructor = object.__new__(LSQMLReconstructor)
     probe_positions = DummyProbePositions(
         tensor=torch.zeros((4, 2), dtype=torch.float32),
-        momentum_acceleration_gain=0.5,
+        momentum_acceleration_gain=0.0,
         momentum_acceleration_gradient_mixing_factor=1.0,
     )
     grad = torch.zeros((4, 2), dtype=torch.float32)

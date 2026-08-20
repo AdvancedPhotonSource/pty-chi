@@ -552,9 +552,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             
         # Update probe positions.
         if self.parameter_group.probe_positions.optimization_enabled(self.current_epoch):
-            self.parameter_group.probe_positions.step_optimizer(
-                clip_update=self.parameter_group.probe_positions.options.momentum_acceleration_gain <= 0
-            )
+            self.parameter_group.probe_positions.step_optimizer(clip_update=False)
             
         # Update OPR modes and weights.
         if self.parameter_group.opr_mode_weights.optimization_enabled(self.current_epoch):
@@ -1502,16 +1500,14 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             unique_probes,
             self.parameter_group.object.step_size,
         )
+        delta_pos = self._clip_probe_position_update(delta_pos)
         if self.parameter_group.probe_positions.options.momentum_acceleration_gain > 0:
-            delta_pos = self._clip_probe_position_update(delta_pos)
             delta_pos = self._apply_probe_position_momentum(indices, delta_pos)
         delta_pos_full = torch.zeros_like(self.parameter_group.probe_positions.tensor)
         delta_pos_full[indices] = delta_pos
         self.parameter_group.probe_positions.set_grad(-delta_pos_full)
         if apply_updates:
-            self.parameter_group.probe_positions.step_optimizer(
-                clip_update=self.parameter_group.probe_positions.options.momentum_acceleration_gain <= 0
-            )
+            self.parameter_group.probe_positions.step_optimizer(clip_update=False)
 
     @timer()
     def _calculate_final_object_update_step_size(self):
