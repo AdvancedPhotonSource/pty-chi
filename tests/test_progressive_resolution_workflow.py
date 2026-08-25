@@ -162,6 +162,8 @@ def test_workflow_runs_rounded_levels_and_transfers_results(monkeypatch):
     monkeypatch.setattr(progressive_resolution_module, "PtychographyTask", _FakeTask)
     data = _workflow_data()
     original_options = _task_options()
+    original_options.probe_options.pixel_size_m = 1.25
+    original_options.probe_options.pixel_size_aspect_ratio = 1.4
     workflow = ProgressiveResolutionWorkflow(
         original_options,
         workflow_options=api.ProgressiveResolutionWorkflowOptions(
@@ -192,6 +194,16 @@ def test_workflow_runs_rounded_levels_and_transfers_results(monkeypatch):
     ]
     assert original_options.reconstructor_options.num_epochs == 100
     assert original_options.object_options.pixel_size_m == 2.5
+    assert [task.options.probe_options.pixel_size_m for task in workflow.tasks] == [
+        5.0,
+        2.5,
+        1.25,
+    ]
+    assert all(
+        task.options.probe_options.pixel_size_aspect_ratio == 1.4
+        for task in workflow.tasks
+    )
+    assert original_options.probe_options.pixel_size_m == 1.25
 
     assert [tuple(task.input_data["diffraction_data"].shape[-2:]) for task in workflow.tasks] == [
         (2, 3),

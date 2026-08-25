@@ -12,7 +12,6 @@ from ptychi.reconstructors.base import (
 )
 from ptychi.metrics import MSELossOfSqrt
 from ptychi.timing.timer_utils import timer
-import ptychi.image_proc as ip
 
 if TYPE_CHECKING:
     import ptychi.api as api
@@ -108,14 +107,14 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                 step_weight = self.calculate_object_step_weight(unique_probes[i_slice])
                 delta_o_patches = step_weight * delta_exwv_i
                 delta_o_patches = delta_o_patches.sum(1, keepdim=True)
-                delta_o_i = ip.place_patches_integer(
-                    torch.zeros_like(object_.get_slice(0)),
-                    positions.round().int() + object_.pos_origin_coords,
+                delta_o_i = self.forward_model.place_object_patches_on_probe_grid(
+                    positions,
                     delta_o_patches[:, 0],
-                    op="add",
+                    integer_mode=True,
                 )
-                
-                delta_o[i_slice, ...] = delta_o_i
+                delta_o[i_slice, ...] = self.forward_model.object_update_to_native_grid(
+                    delta_o_i
+                )
 
             delta_pos = None
             if (probe_positions.optimization_enabled(self.current_epoch) 
@@ -123,12 +122,15 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                 and i_slice == self.parameter_group.probe_positions.get_slice_for_correction(object_.n_slices)
             ):
                 delta_pos = torch.zeros_like(probe_positions.data)
-                delta_pos[indices] = probe_positions.position_correction.get_update(
+                delta_pos_i = probe_positions.position_correction.get_update(
                     delta_exwv_i,
                     obj_patches[:, i_slice : i_slice + 1, ...],    
                     delta_o_patches,
                     self.forward_model.intermediate_variables.shifted_unique_probes[i_slice],
                     object_.step_size,
+                )
+                delta_pos[indices] = self.forward_model.probe_displacements_to_object_pixels(
+                    delta_pos_i
                 )
 
             delta_p_i = None

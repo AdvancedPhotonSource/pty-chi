@@ -18,7 +18,6 @@ import ptychi.forward_models as fm
 import ptychi.maths as pmath
 import ptychi.api.enums as enums
 from ptychi.timing.timer_utils import timer
-import ptychi.image_proc as ip
 from ptychi.parallel import MultiprocessMixin
 
 if TYPE_CHECKING:
@@ -1233,14 +1232,19 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         # Stitch all delta O patches on the object buffer
         # Shape of delta_o_hat:  (h_whole, w_whole)
-        delta_o_hat = self.parameter_group.object.place_patches_on_empty_buffer(
-            positions.round().int(), delta_o_patches, integer_mode=True
+        delta_o_hat = self.forward_model.place_object_patches_on_probe_grid(
+            positions, delta_o_patches, integer_mode=True
         )
         delta_o_hat = delta_o_hat[None, ...]
         if onto_accumulated:
-            delta_o_hat = delta_o_hat + (
-                -self.parameter_group.object.get_grad()[slice_index : slice_index + 1]
-            )
+            if self.forward_model.resampling_enabled:
+                delta_o_hat = delta_o_hat + self._object_gradient_probe_grid[
+                    slice_index : slice_index + 1
+                ]
+            else:
+                delta_o_hat = delta_o_hat + (
+                    -self.parameter_group.object.get_grad()[slice_index : slice_index + 1]
+                )
         return delta_o_hat
 
     @timer()
@@ -1260,17 +1264,18 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         delta_o_hat = delta_o_hat[slice_index]
 
-        preconditioner = self.parameter_group.object.preconditioner
+        preconditioner = self.forward_model.get_probe_grid_preconditioner()
         delta_o_hat = delta_o_hat / torch.sqrt(
             preconditioner**2 + (preconditioner.max() * alpha_mix) ** 2
         )
 
         # Re-extract delta O patches
         if positions is not None:
-            delta_o_patches = ip.extract_patches_integer(
+            delta_o_patches = self.forward_model.extract_probe_grid_patches(
                 delta_o_hat,
-                positions.round().int() + self.parameter_group.object.pos_origin_coords,
+                positions,
                 self.parameter_group.probe.shape[-2:],
+                integer_mode=True,
             )
 
             return delta_o_hat[None, ...], delta_o_patches[:, None, :, :]
@@ -1285,11 +1290,17 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         delta_o_hat_full = []
         for i_slice in range(self.parameter_group.object.n_slices):
+            accumulated = (
+                self._object_gradient_probe_grid[i_slice : i_slice + 1]
+                if self.forward_model.resampling_enabled
+                else -self.parameter_group.object.get_grad()[i_slice : i_slice + 1]
+            )
             delta_o_hat = self._precondition_object_update_direction(
-                -self.parameter_group.object.get_grad()[i_slice : i_slice + 1], 
+                accumulated,
                 positions=None,
                 alpha_mix=self.options.preconditioning_damping_factor
             )
+            delta_o_hat = self.forward_model.object_update_to_native_grid(delta_o_hat)
             delta_o_hat_full.append(delta_o_hat)
         delta_o_hat_full = torch.cat(delta_o_hat_full, dim=0)
         return delta_o_hat_full
@@ -1304,9 +1315,21 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         if self.options.batching_mode in [enums.BatchingModes.RANDOM, enums.BatchingModes.UNIFORM]:
             self.parameter_group.object.initialize_grad()
+            if self.forward_model.resampling_enabled:
+                self._object_gradient_probe_grid = torch.zeros(
+                    (self.parameter_group.object.n_slices, *self.forward_model.probe_grid_object_shape),
+                    dtype=self.parameter_group.object.data.dtype,
+                    device=self.parameter_group.object.data.device,
+                )
         else:
             if self.current_minibatch == 0:
                 self.parameter_group.object.initialize_grad()
+                if self.forward_model.resampling_enabled:
+                    self._object_gradient_probe_grid = torch.zeros(
+                        (self.parameter_group.object.n_slices, *self.forward_model.probe_grid_object_shape),
+                        dtype=self.parameter_group.object.data.dtype,
+                        device=self.parameter_group.object.data.device,
+                    )
 
     def _initialize_object_step_size_buffer(self):
         if self.current_minibatch == 0:
@@ -1347,7 +1370,15 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         Record the gradient of one slice of a multislice object.
         """
-        if not add_to_existing:
+        if self.forward_model.resampling_enabled:
+            if not add_to_existing:
+                self._object_gradient_probe_grid[i_slice].copy_(delta_o_hat[0])
+            else:
+                self._object_gradient_probe_grid[i_slice].add_(delta_o_hat[0])
+            if self.options.batching_mode != enums.BatchingModes.COMPACT:
+                native_delta = self.forward_model.object_update_to_native_grid(delta_o_hat)[0]
+                self.parameter_group.object.set_grad(-native_delta, slicer=i_slice)
+        elif not add_to_existing:
             self.parameter_group.object.set_grad(-delta_o_hat[0], slicer=i_slice)
         else:
             self.parameter_group.object.set_grad(
@@ -1502,6 +1533,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             unique_probes,
             self.parameter_group.object.step_size,
         )
+        if getattr(self.forward_model, "resampling_enabled", False):
+            delta_pos = self.forward_model.probe_displacements_to_object_pixels(delta_pos)
         if self.parameter_group.probe_positions.options.momentum_acceleration_gain > 0:
             delta_pos = self._clip_probe_position_update(delta_pos)
             delta_pos = self._apply_probe_position_momentum(indices, delta_pos)
@@ -1697,21 +1730,34 @@ class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
 
         # Stitch all delta O patches on the object buffer
         # Shape of delta_o_hat:  (h_whole, w_whole)
-        delta_o_hat = self.parameter_group.object.place_patches_on_empty_buffer(
-            positions.round().int(), delta_o_patches, integer_mode=True
+        delta_o_hat = self.forward_model.place_object_patches_on_probe_grid(
+            positions, delta_o_patches, integer_mode=True
         )
         
-        # Synchronize buffer across ranks.
-        delta_o_hat = self.sync_buffer(
-            delta_o_hat,
-            op=dist.ReduceOp.SUM,
-        )
+        # Compact mode keeps a rank-local probe-grid accumulator. Its smaller
+        # native-grid adjoint is synchronized once at epoch end.
+        if self.options.batching_mode != enums.BatchingModes.COMPACT:
+            delta_o_hat = self.sync_buffer(
+                delta_o_hat,
+                op=dist.ReduceOp.SUM,
+            )
         
         delta_o_hat = delta_o_hat[None, ...]
         if onto_accumulated:
-            delta_o_hat = delta_o_hat + (
-                -self.parameter_group.object.get_grad()[slice_index : slice_index + 1]
-            )
+            if self.forward_model.resampling_enabled:
+                delta_o_hat = delta_o_hat + self._object_gradient_probe_grid[
+                    slice_index : slice_index + 1
+                ]
+            else:
+                delta_o_hat = delta_o_hat + (
+                    -self.parameter_group.object.get_grad()[slice_index : slice_index + 1]
+                )
+        return delta_o_hat
+
+    def _precondition_accumulated_object_update_direction(self):
+        delta_o_hat = super()._precondition_accumulated_object_update_direction()
+        if self.forward_model.resampling_enabled:
+            delta_o_hat = self.sync_buffer(delta_o_hat, op=dist.ReduceOp.SUM)
         return delta_o_hat
     
     

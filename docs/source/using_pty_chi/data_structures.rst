@@ -37,6 +37,9 @@ parameters.
      - (1) Probe positions should follow row-major order, i.e., y-coordinates come first. 
        (2) The aforementioned shape is of the internally stored position tensor.
        ``PtychographyTask`` takes x- and y-positions as separate data arguments.
+       (3) Positions are always expressed in object-pixel units, including when
+       the probe and object pixel sizes differ. Probe-grid coordinates are
+       temporary internal copies.
    * - Diffraction data
      - ``(n_positions, height, width)``
      -

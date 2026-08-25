@@ -716,6 +716,16 @@ class ProbeOptions(ParameterOptions):
     initial_guess: Optional[DataArray] = None
     """A (n_opr_modes, n_modes, h, w) complex tensor of the probe initial guess."""
 
+    pixel_size_m: Optional[float] = PydanticField(default=None, gt=0)
+    """Probe pixel width in meters. If ``None``, inherit the object pixel width."""
+
+    pixel_size_aspect_ratio: Optional[float] = PydanticField(default=None, gt=0)
+    """Probe pixel width/height ratio. If ``None``, inherit the object ratio.
+
+    The width and aspect ratio are inherited independently, so either value may be
+    overridden without specifying the other one.
+    """
+
     power_constraint: ProbePowerConstraintOptions = field(
         default_factory=ProbePowerConstraintOptions
     )

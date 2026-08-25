@@ -39,6 +39,10 @@ class ProgressiveResolutionWorkflow(BaseWorkflow):
             level_options.object_options.pixel_size_m = (
                 self.task_options.object_options.pixel_size_m * factor
             )
+            if self.task_options.probe_options.pixel_size_m is not None:
+                level_options.probe_options.pixel_size_m = (
+                    self.task_options.probe_options.pixel_size_m * factor
+                )
 
             task = PtychographyTask(
                 level_options,

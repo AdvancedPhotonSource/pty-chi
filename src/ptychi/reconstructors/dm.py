@@ -17,7 +17,6 @@ from ptychi.reconstructors.base import (
 )
 from ptychi.api.options.dm import DMReconstructorOptions
 from ptychi.timing.timer_utils import timer
-import ptychi.image_proc as ip
 
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
@@ -200,15 +199,12 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
     def calculate_exit_wave_chunk(
         self, start_pt: int, end_pt: int, return_obj_patches: bool = False
     ) -> Union[Tensor, Tuple[Tensor, Tensor]]:
-        object_ = self.parameter_group.object
-        probe = self.parameter_group.probe
-        positions = self.parameter_group.probe_positions.tensor
-
-        obj_patches = object_.extract_patches(
-            positions[start_pt:end_pt].round().int(), probe.get_spatial_shape(), integer_mode=True
-        )
+        indices = torch.arange(
+            start_pt, end_pt, device=self.parameter_group.object.data.device
+        ).long()
+        obj_patches = self.forward_model.extract_object_patches(indices)
         psi = self.forward_model.forward_real_space(
-            indices=torch.arange(start_pt, end_pt, device=obj_patches.device).long(),
+            indices=indices,
             obj_patches=obj_patches,
         )
 
@@ -293,30 +289,40 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         # Calculate object update
         # Iterating over the object numerator calculation is more memory efficient
-        object_numerator = torch.zeros_like(object_.get_slice(0))
-        object_denominator = torch.zeros_like(object_.get_slice(0), dtype=positions.dtype)
+        object_numerator = torch.zeros(
+            self.forward_model.probe_grid_object_shape,
+            dtype=object_.data.dtype,
+            device=object_.data.device,
+        )
+        object_denominator = torch.zeros(
+            self.forward_model.probe_grid_object_shape,
+            dtype=positions.dtype,
+            device=positions.device,
+        )
         for i in range(len(start_pts)):
             indices = torch.arange(start_pts[i], end_pts[i], device=object_numerator.device).long()
             p = self.forward_model.get_unique_probes(indices, always_return_probe_batch=True)
             p = self.forward_model.shift_unique_probes(indices, p, first_mode_only=True)
 
-            object_numerator = ip.place_patches_integer(
-                object_numerator,
-                positions[start_pts[i] : end_pts[i]].round().int() + object_.pos_origin_coords,
-                patches=(p.conj() * self.psi[start_pts[i] : end_pts[i]]).sum(1),
-                op="add",
+            batch_positions = positions[start_pts[i] : end_pts[i]]
+            object_numerator += self.forward_model.place_object_patches_on_probe_grid(
+                batch_positions,
+                (p.conj() * self.psi[start_pts[i] : end_pts[i]]).sum(1),
+                integer_mode=True,
             )
 
-            object_denominator = ip.place_patches_integer(
-                object_denominator,
-                positions[start_pts[i] : end_pts[i]].round().int() + object_.pos_origin_coords,
-                patches=(p.abs() ** 2).sum(1),
-                op="add",
+            object_denominator += self.forward_model.place_object_patches_on_probe_grid(
+                batch_positions,
+                (p.abs() ** 2).sum(1),
+                integer_mode=True,
             )
 
         # Calculate DM object update
         object_update = object_numerator / torch.sqrt(
             object_denominator**2 + (0.05 * object_denominator.max()) ** 2
+        )
+        object_update = self.forward_model.object_update_to_native_grid(
+            object_update, normalized=True
         )
         # Apply inertia
         object_update = object_.get_slice(0) * object_.options.inertia + object_update * (
@@ -352,5 +358,4 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             probe,
             None,
         )
-
-        return delta_pos
+        return self.forward_model.probe_displacements_to_object_pixels(delta_pos)

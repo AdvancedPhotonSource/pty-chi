@@ -357,26 +357,49 @@ class PtychographyTask(Task):
         pos_x = self._as_numpy(position_x_px)
         obj_lateral_shape = object_shape[-2:]
         probe_lateral_shape = probe_shape[-2:]
+        object_pixel_width = self.object_options.pixel_size_m
+        object_pixel_height = (
+            object_pixel_width / self.object_options.pixel_size_aspect_ratio
+        )
+        probe_pixel_width = (
+            object_pixel_width
+            if self.probe_options.pixel_size_m is None
+            else self.probe_options.pixel_size_m
+        )
+        probe_aspect_ratio = (
+            self.object_options.pixel_size_aspect_ratio
+            if self.probe_options.pixel_size_aspect_ratio is None
+            else self.probe_options.pixel_size_aspect_ratio
+        )
+        probe_pixel_height = probe_pixel_width / probe_aspect_ratio
+        probe_grid_shape = (
+            max(1, round(obj_lateral_shape[0] * object_pixel_height / probe_pixel_height)),
+            max(1, round(obj_lateral_shape[1] * object_pixel_width / probe_pixel_width)),
+        )
+        scale = np.asarray(probe_grid_shape) / np.asarray(obj_lateral_shape)
+        pos_y_probe = pos_y * scale[0]
+        pos_x_probe = pos_x * scale[1]
         min_size = [
-            int(np.ceil(pos_y.max() - pos_y.min() + probe_lateral_shape[-2])) + 2,
-            int(np.ceil(pos_x.max() - pos_x.min() + probe_lateral_shape[-1])) + 2,
+            int(np.ceil(pos_y_probe.max() - pos_y_probe.min() + probe_lateral_shape[-2])) + 2,
+            int(np.ceil(pos_x_probe.max() - pos_x_probe.min() + probe_lateral_shape[-1])) + 2,
         ]
-        if any(min_size[i] > obj_lateral_shape[i] for i in range(2)):
+        if any(min_size[i] > probe_grid_shape[i] for i in range(2)):
             logging.warning(
-                f"An object tensor with a lateral size of at least {min_size} is "
+                f"A probe-grid object tensor with a lateral size of at least {min_size} is "
                 "required to avoid padding when extracting/placing patches, but the provided "
-                f"object size is {list(obj_lateral_shape)}."
+                f"object maps to {list(probe_grid_shape)} probe-grid pixels."
             )
         if (
             self.object_options.determine_position_origin_coords_by
             == api.ObjectPosOriginCoordsMethods.SUPPORT
         ):
-            buffer_center = np.array([np.round(x / 2) + 0.5 for x in obj_lateral_shape])
+            native_center = np.array([np.round(x / 2) + 0.5 for x in obj_lateral_shape])
+            buffer_center = native_center * scale
             if (
-                pos_y.max() + buffer_center[0] + probe_lateral_shape[-2] // 2 > obj_lateral_shape[-2]
-                or pos_y.min() + buffer_center[0] - probe_lateral_shape[-2] // 2 < 0
-                or pos_x.max() + buffer_center[1] + probe_lateral_shape[-1] // 2 > obj_lateral_shape[-1]
-                or pos_x.min() + buffer_center[1] - probe_lateral_shape[-1] // 2 < 0
+                pos_y_probe.max() + buffer_center[0] + probe_lateral_shape[-2] // 2 > probe_grid_shape[-2]
+                or pos_y_probe.min() + buffer_center[0] - probe_lateral_shape[-2] // 2 < 0
+                or pos_x_probe.max() + buffer_center[1] + probe_lateral_shape[-1] // 2 > probe_grid_shape[-1]
+                or pos_x_probe.min() + buffer_center[1] - probe_lateral_shape[-1] // 2 < 0
             ):
                 logging.warning(
                     "`object_options.determine_center_coords_by` is set to `SUPPORT`. This assumes "
@@ -739,6 +762,7 @@ class PtychographyTask(Task):
                     )
 
             self.reconstructor.forward_model.move_intermediate_variables_to_device(device)
+            self.reconstructor.forward_model.clear_resampling_caches()
 
         if device.type == "cpu":
             AcceleratorModuleWrapper.get_module().empty_cache()
