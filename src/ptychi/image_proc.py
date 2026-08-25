@@ -1844,3 +1844,72 @@ def central_crop_or_pad(img: Tensor, target_size: tuple[int, int]) -> Tensor:
         elif img.shape[-2 + i] < target_size[-2 + i]:
             img = central_pad(img, target_size_current_dim)
     return img
+
+
+def fourier_resize(
+    image: Tensor,
+    target_shape: tuple[int, int],
+    *,
+    adjoint: bool = False,
+    normalized_adjoint: bool = False,
+) -> Tensor:
+    """Resize the last two dimensions by centered Fourier cropping/padding.
+
+    The forward operation preserves the amplitude of a constant input.  With
+    ``adjoint=True`` this returns its exact Hermitian adjoint.  Setting
+    ``normalized_adjoint=True`` additionally applies the normalization that
+    makes the reverse operation a pseudoinverse on retained Fourier modes.
+
+    Parameters
+    ----------
+    image : Tensor
+        A real or complex tensor with at least two dimensions.
+    target_shape : tuple[int, int]
+        Requested height and width.
+    adjoint : bool
+        Apply the Hermitian adjoint of a forward resize from ``target_shape``
+        to ``image.shape[-2:]``.
+    normalized_adjoint : bool
+        Return the constant-amplitude reverse resize rather than the raw
+        Hermitian adjoint. This is only valid when ``adjoint`` is true.
+    """
+    target_shape = tuple(int(v) for v in target_shape)
+    if len(target_shape) != 2 or any(v < 1 for v in target_shape):
+        raise ValueError("`target_shape` must contain two positive integers.")
+    if normalized_adjoint and not adjoint:
+        raise ValueError("`normalized_adjoint` requires `adjoint=True`.")
+    source_shape = tuple(image.shape[-2:])
+    if source_shape == target_shape:
+        return image
+
+    spectrum = torch.fft.fftshift(torch.fft.fft2(image, dim=(-2, -1)), dim=(-2, -1))
+    # Align the zero-frequency samples explicitly.  Symmetric ``F.pad`` puts
+    # the extra sample on the wrong side for some odd/even transitions.
+    source_slices = []
+    target_slices = []
+    for source_size, target_size in zip(source_shape, target_shape):
+        overlap = min(source_size, target_size)
+        source_start = source_size // 2 - overlap // 2
+        target_start = target_size // 2 - overlap // 2
+        source_slices.append(slice(source_start, source_start + overlap))
+        target_slices.append(slice(target_start, target_start + overlap))
+    resized_spectrum = torch.zeros(
+        (*spectrum.shape[:-2], *target_shape), dtype=spectrum.dtype, device=spectrum.device
+    )
+    resized_spectrum[..., target_slices[0], target_slices[1]] = spectrum[
+        ..., source_slices[0], source_slices[1]
+    ]
+    resized = torch.fft.ifft2(
+        torch.fft.ifftshift(resized_spectrum, dim=(-2, -1)), dim=(-2, -1)
+    )
+    if not adjoint:
+        resized = resized * (
+            (target_shape[0] * target_shape[1]) / (source_shape[0] * source_shape[1])
+        )
+    elif normalized_adjoint:
+        resized = resized * (
+            (target_shape[0] * target_shape[1]) / (source_shape[0] * source_shape[1])
+        )
+    if not image.is_complex():
+        resized = resized.real
+    return resized

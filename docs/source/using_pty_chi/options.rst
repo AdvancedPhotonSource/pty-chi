@@ -130,6 +130,37 @@ delay probe updates until later:
     options.probe_options.optimization_plan.start = 5
 
 
+Independent object and probe pixel sizes
+----------------------------------------
+
+The object and probe may use different real-space sampling.  Object pixels are
+configured by ``object_options.pixel_size_m`` (the x/width dimension) and
+``object_options.pixel_size_aspect_ratio`` (width divided by height).  The
+corresponding optional probe settings are
+``probe_options.pixel_size_m`` and
+``probe_options.pixel_size_aspect_ratio``.  Each omitted probe value inherits
+the matching object value independently.  For example, this changes only the
+probe's y sampling:
+
+.. code-block:: python
+
+    options.probe_options.pixel_size_m = None
+    options.probe_options.pixel_size_aspect_ratio = 1.25
+
+Pixel height is ``pixel_size_m / pixel_size_aspect_ratio``.  For each axis, a
+native object dimension ``n`` is represented internally on the probe grid with
+
+.. math::
+
+    n_{probe} = \max(1, \operatorname{round}(n\,\Delta_{object}/\Delta_{probe})).
+
+Pty-Chi resamples the complete multislice object by centered Fourier
+padding/cropping, using constant-amplitude normalization.  Analytical object
+gradients are mapped back with the matching Hermitian adjoint; direct object
+projections use its normalized pseudoinverse.  The equal-pixel-size case keeps
+the original no-resampling path.
+
+
 OptimizationPlan
 ----------------
 

@@ -279,6 +279,7 @@ class PlanarObject(Object):
         patch_shape: Tuple[int, int], 
         integer_mode: bool = False,
         pad_for_shift: Optional[int] = 1,
+        object_array: Optional[Tensor] = None,
     ):
         """
         Extract (n_patches, n_slices, h', w') patches from the object.
@@ -296,6 +297,11 @@ class PlanarObject(Object):
         pad_for_shift : int, optional
             If given, patches larger than the intended size by this amount are cropped
             out from the object before shifting.
+        object_array : Tensor, optional
+            Explicit ``(n_slices, height, width)`` object array from which to extract
+            patches. If omitted, patches are extracted from ``self.data``. Positions
+            retain the same coordinate convention in either case: their origin is
+            ``self.pos_origin_coords``.
 
         Returns
         -------
@@ -304,16 +310,24 @@ class PlanarObject(Object):
         """
         # Positions are provided with the origin in the center of the object support.
         # We shift the positions so that the origin is in the upper left corner.
+        if object_array is None:
+            object_array = self.data
+        if object_array.ndim != 3 or object_array.shape[0] != self.n_slices:
+            raise ValueError(
+                "`object_array` must have shape (n_slices, height, width) with "
+                f"n_slices={self.n_slices}."
+            )
+
         positions = positions + self.pos_origin_coords
         patches_all_slices = []
         for i_slice in range(self.n_slices):
             if integer_mode:
                 patches = ip.extract_patches_integer(
-                    self.get_slice(i_slice), positions, patch_shape
+                    object_array[i_slice], positions, patch_shape
                 )
             else:
                 patches = self.extract_patches_function(
-                    self.get_slice(i_slice), positions, patch_shape, pad=pad_for_shift
+                    object_array[i_slice], positions, patch_shape, pad=pad_for_shift
                 )
             patches_all_slices.append(patches)
         patches_all_slices = torch.stack(patches_all_slices, dim=1)
@@ -626,6 +640,25 @@ class PlanarObject(Object):
             probe_int = probe.get_all_mode_intensity(opr_mode=0)[None, :, :]
         else:
             probe_int = probe.get_mode_and_opr_mode(mode=0, opr_mode=0)[None, ...].abs() ** 2
+
+        probe_pixel_width = (
+            self.pixel_size_m
+            if probe.options.pixel_size_m is None
+            else probe.options.pixel_size_m
+        )
+        probe_aspect_ratio = (
+            self.options.pixel_size_aspect_ratio
+            if probe.options.pixel_size_aspect_ratio is None
+            else probe.options.pixel_size_aspect_ratio
+        )
+        probe_pixel_height = probe_pixel_width / probe_aspect_ratio
+        object_pixel_height = self.pixel_size_m / self.options.pixel_size_aspect_ratio
+        physical_footprint_shape = (
+            max(1, round(probe_int.shape[-2] * probe_pixel_height / object_pixel_height)),
+            max(1, round(probe_int.shape[-1] * probe_pixel_width / self.pixel_size_m)),
+        )
+        if physical_footprint_shape != tuple(probe_int.shape[-2:]):
+            probe_int = ip.fourier_resize(probe_int, physical_footprint_shape).real.clamp_min_(0)
 
         # Stitch probes of all positions on the object buffer
         # TODO: allow setting chunk size externally

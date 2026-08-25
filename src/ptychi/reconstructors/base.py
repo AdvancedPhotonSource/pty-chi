@@ -751,9 +751,8 @@ class AnalyticalIterativePtychographyReconstructor(
         Tensor
             A (batch_size, n_probe_modes, h, w) tensor giving the shifted probe update direction.
         """
-        pos = self.parameter_group.probe_positions.data[indices]
         orig_shape = delta_p.shape
-        fractional_shifts = pos - pos.round()
+        fractional_shifts = self.forward_model.get_probe_grid_position_data()[2][indices]
         
         if first_mode_only:
             delta_p_to_shift = delta_p[..., 0, :, :]

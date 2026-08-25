@@ -109,10 +109,31 @@ class ProbePositions(dsbase.ReconstructParameter):
             is done in batches to avoid memory issues. This can, but does not have to
             be the same as the batch size used for reconstruction.
         """
-        half_probe_shape = [x // 2 for x in probe.shape[-2:]]
-        probe_intensity = ip.central_crop_or_pad(
-            probe.data[0, 0].abs() ** 2, half_probe_shape
+        probe_pixel_width = (
+            object_.pixel_size_m
+            if probe.options.pixel_size_m is None
+            else probe.options.pixel_size_m
         )
+        probe_aspect_ratio = (
+            object_.options.pixel_size_aspect_ratio
+            if probe.options.pixel_size_aspect_ratio is None
+            else probe.options.pixel_size_aspect_ratio
+        )
+        probe_pixel_height = probe_pixel_width / probe_aspect_ratio
+        object_pixel_height = (
+            object_.pixel_size_m / object_.options.pixel_size_aspect_ratio
+        )
+        probe_shape_on_object_grid = (
+            max(1, round(probe.shape[-2] * probe_pixel_height / object_pixel_height)),
+            max(1, round(probe.shape[-1] * probe_pixel_width / object_.pixel_size_m)),
+        )
+        half_probe_shape = [max(1, x // 2) for x in probe_shape_on_object_grid]
+        probe_intensity = probe.data[0, 0].abs() ** 2
+        if probe_shape_on_object_grid != tuple(probe.shape[-2:]):
+            probe_intensity = ip.fourier_resize(
+                probe_intensity, probe_shape_on_object_grid
+            ).real.clamp_min_(0)
+        probe_intensity = ip.central_crop_or_pad(probe_intensity, half_probe_shape)
         total_variations = torch.zeros_like(self.data)
         
         obj_slice = object_.get_slice(self.get_slice_for_correction(object_.n_slices))

@@ -81,6 +81,10 @@ class ForwardModel(torch.nn.Module):
     def post_differentiation_hook(self, *args, **kwargs):
         pass
 
+    def clear_resampling_caches(self):
+        """Clear derived grid caches, if the forward model defines any."""
+        return None
+
     def record_intermediate_variable(self, name, var):
         if self.retain_intermediates:
             if isinstance(self.intermediate_variables[name], list):
@@ -210,6 +214,17 @@ class PlanarPtychographyForwardModel(ForwardModel):
         self.probe_positions = parameter_group.probe_positions
         self.opr_mode_weights = parameter_group.opr_mode_weights
 
+        # Resampling caches are ordinary Python attributes on purpose: they are
+        # read-only derived values and must not appear in state_dict().  Each
+        # cache keeps only its newest entry on a given device.
+        self._resampling_caches = {
+            "object": {},
+            "preconditioner": {},
+            "positions": {},
+        }
+        self._resampling_geometry_key = None
+        self._resampling_geometry = None
+
         self.wavelength_m = wavelength_m
         self.free_space_propagation_distance_m = free_space_propagation_distance_m
         
@@ -231,6 +246,286 @@ class PlanarPtychographyForwardModel(ForwardModel):
         self.diffraction_pattern_blur_sigma = diffraction_pattern_blur_sigma
         
         self.check_inputs()
+
+    @property
+    def probe_pixel_size_m(self) -> float:
+        value = self.probe.options.pixel_size_m
+        return self.object.pixel_size_m if value is None else value
+
+    @property
+    def probe_pixel_size_aspect_ratio(self) -> float:
+        value = self.probe.options.pixel_size_aspect_ratio
+        return self.object.options.pixel_size_aspect_ratio if value is None else value
+
+    @property
+    def probe_pixel_height_m(self) -> float:
+        return self.probe_pixel_size_m / self.probe_pixel_size_aspect_ratio
+
+    @property
+    def object_pixel_height_m(self) -> float:
+        return self.object.pixel_size_m / self.object.options.pixel_size_aspect_ratio
+
+    @property
+    def probe_grid_object_shape(self) -> tuple[int, int]:
+        native_h, native_w = self.object.lateral_shape
+        return (
+            max(1, round(native_h * self.object_pixel_height_m / self.probe_pixel_height_m)),
+            max(1, round(native_w * self.object.pixel_size_m / self.probe_pixel_size_m)),
+        )
+
+    @property
+    def probe_grid_scale(self) -> tuple[float, float]:
+        target_h, target_w = self.probe_grid_object_shape
+        native_h, native_w = self.object.lateral_shape
+        return target_h / native_h, target_w / native_w
+
+    @property
+    def resampling_enabled(self) -> bool:
+        # Pixel geometry, rather than rounded shape alone, defines the identity
+        # fast path. This preserves exact legacy behavior for inherited grids.
+        return not (
+            self.probe_pixel_size_m == self.object.pixel_size_m
+            and self.probe_pixel_height_m == self.object_pixel_height_m
+        )
+
+    def _current_geometry_key(self):
+        return (
+            tuple(self.object.lateral_shape),
+            self.probe_grid_object_shape,
+            self.object.pixel_size_m,
+            self.object.options.pixel_size_aspect_ratio,
+            self.probe_pixel_size_m,
+            self.probe_pixel_size_aspect_ratio,
+            tuple(self.probe.get_spatial_shape()),
+        )
+
+    def clear_resampling_caches(self):
+        if hasattr(self, "_resampling_caches"):
+            for cache in self._resampling_caches.values():
+                cache.clear()
+        self._resampling_geometry_key = self._current_geometry_key()
+        native_shape = tuple(self.object.lateral_shape)
+        target_shape = self.probe_grid_object_shape
+        source_slices = []
+        target_slices = []
+        for source_size, target_size in zip(native_shape, target_shape):
+            overlap = min(source_size, target_size)
+            source_start = source_size // 2 - overlap // 2
+            target_start = target_size // 2 - overlap // 2
+            source_slices.append(slice(source_start, source_start + overlap))
+            target_slices.append(slice(target_start, target_start + overlap))
+        native_numel = native_shape[0] * native_shape[1]
+        target_numel = target_shape[0] * target_shape[1]
+        self._resampling_geometry = {
+            "native_shape": native_shape,
+            "target_shape": target_shape,
+            "axis_scales": self.probe_grid_scale,
+            "forward_normalization": target_numel / native_numel,
+            "normalized_adjoint_normalization": native_numel / target_numel,
+            "source_slices": tuple(source_slices),
+            "target_slices": tuple(target_slices),
+        }
+
+    @property
+    def resampling_geometry(self) -> dict:
+        """Read-only static geometry used by the probe-grid transforms."""
+        self._ensure_current_geometry()
+        return self._resampling_geometry
+
+    def _ensure_current_geometry(self):
+        geometry_key = self._current_geometry_key()
+        if self._resampling_geometry_key != geometry_key:
+            self.clear_resampling_caches()
+            # Propagators contain pixel-geometry-dependent state.
+            if hasattr(self, "free_space_propagator"):
+                self.build_free_space_propagator()
+            if hasattr(self, "in_object_propagator"):
+                self.build_in_object_propagator()
+
+    def _apply(self, fn):
+        result = super()._apply(fn)
+        self.clear_resampling_caches()
+        return result
+
+    @staticmethod
+    def _tensor_version_key(tensor: Tensor):
+        try:
+            storage_identity = tensor.untyped_storage().data_ptr()
+        except AttributeError:
+            storage_identity = tensor.storage().data_ptr()
+        return storage_identity, tensor._version
+
+    def _cache_value(self, kind, source_tensors, value_factory, *, dtype, device):
+        """Return a version-keyed cached value, respecting autograd graph lifetime.
+
+        Parameters
+        ----------
+        kind : str
+            Cache namespace in ``self._resampling_caches``, such as ``"object"``,
+            ``"preconditioner"``, or ``"positions"``.
+        source_tensors : Iterable[Tensor]
+            Backing tensors on which the derived value depends. Their storage
+            identities and PyTorch mutation versions are included in the cache key.
+        value_factory : Callable[[], Any]
+            Zero-argument callable that computes the derived value after a cache miss.
+        dtype : torch.dtype
+            Data type of the derived value, included in the cache key.
+        device : torch.device or str
+            Device on which the derived value resides. Each cache namespace retains
+            only its latest entry for a given device.
+
+        Returns
+        -------
+        Any
+            The cached value, or the newly computed value after a cache miss.
+
+        Notes
+        -----
+        If gradient tracking is enabled and any source tensor requires gradients,
+        the value is recomputed and not cached so an earlier autograd graph is never
+        reused.
+        """
+        self._ensure_current_geometry()
+        device = torch.device(device)
+        sources = tuple(source_tensors)
+        key = (
+            tuple(self._tensor_version_key(source) for source in sources),
+            str(device),
+            dtype,
+            self._current_geometry_key(),
+        )
+        graph_must_be_fresh = torch.is_grad_enabled() and any(
+            source.requires_grad for source in sources
+        )
+        device_cache = self._resampling_caches[kind]
+        if not graph_must_be_fresh:
+            cached = device_cache.get(str(device))
+            if cached is not None and cached[0] == key:
+                return cached[1]
+        value = value_factory()
+        if not graph_must_be_fresh:
+            device_cache[str(device)] = (key, value)
+        return value
+
+    def get_probe_grid_object(self) -> Tensor:
+        """Return the complete multislice object represented on the probe grid."""
+        self._ensure_current_geometry()
+        data = self.object.data
+        if not self.resampling_enabled:
+            return data
+        backing = self.object.tensor.data
+        return self._cache_value(
+            "object",
+            (backing,),
+            lambda: ip.fourier_resize(data, self.probe_grid_object_shape),
+            dtype=data.dtype,
+            device=data.device,
+        )
+
+    def get_probe_grid_preconditioner(self) -> Optional[Tensor]:
+        """Return a cached real, nonnegative copy of the native preconditioner."""
+        preconditioner = self.object.preconditioner
+        if preconditioner is None or not self.resampling_enabled:
+            return preconditioner
+        return self._cache_value(
+            "preconditioner",
+            (preconditioner,),
+            lambda: ip.fourier_resize(
+                preconditioner, self.probe_grid_object_shape
+            ).real.clamp_min_(0),
+            dtype=preconditioner.dtype,
+            device=preconditioner.device,
+        )
+
+    def get_probe_grid_position_data(self):
+        """Return full transformed centers, snapped centers, and shift residuals."""
+        positions = self.probe_positions.tensor
+        origin = self.object.pos_origin_coords
+        if not self.resampling_enabled:
+            absolute = positions + origin
+            snapped = positions.round() + origin
+            residual = positions - positions.round()
+            return absolute, snapped, residual
+
+        def transform():
+            scale = positions.new_tensor(self.probe_grid_scale)
+            absolute = (positions + origin) * scale
+            parity = positions.new_tensor(
+                [((size - 1) / 2) % 1 for size in self.probe.get_spatial_shape()]
+            )
+            snapped = (absolute - parity).round() + parity
+            return absolute, snapped, absolute - snapped
+
+        return self._cache_value(
+            "positions",
+            (positions, origin),
+            transform,
+            dtype=positions.dtype,
+            device=positions.device,
+        )
+
+    def transform_positions(self, positions: Tensor, *, absolute: bool = False) -> Tensor:
+        """Map object-pixel positions to probe-grid pixels without modifying inputs."""
+        if not self.resampling_enabled:
+            return positions + self.object.pos_origin_coords if absolute else positions
+        scale = positions.new_tensor(self.probe_grid_scale)
+        if absolute:
+            return (positions + self.object.pos_origin_coords) * scale
+        return positions * scale
+
+    def probe_displacements_to_object_pixels(self, displacements: Tensor) -> Tensor:
+        if not self.resampling_enabled:
+            return displacements
+        return displacements / displacements.new_tensor(self.probe_grid_scale)
+
+    def _snap_probe_grid_centers(self, positions: Tensor, patch_shape) -> Tensor:
+        if not self.resampling_enabled:
+            return positions.round() + self.object.pos_origin_coords
+        centers = self.transform_positions(positions, absolute=True)
+        parity = centers.new_tensor([((size - 1) / 2) % 1 for size in patch_shape])
+        return (centers - parity).round() + parity
+
+    def place_object_patches_on_probe_grid(
+        self, positions: Tensor, patches: Tensor, *, integer_mode: bool = True
+    ) -> Tensor:
+        """Place patches on an empty probe-grid object buffer."""
+        if integer_mode:
+            centers = self._snap_probe_grid_centers(positions, patches.shape[-2:])
+        else:
+            centers = self.transform_positions(positions, absolute=True)
+        image = torch.zeros(
+            self.probe_grid_object_shape, dtype=patches.dtype, device=patches.device
+        )
+        if integer_mode:
+            return ip.place_patches_integer(image, centers, patches, op="add")
+        return self.object.place_patches_function(
+            image, centers, patches, op="add", pad=self.pad_for_shift
+        )
+
+    def extract_probe_grid_patches(
+        self, image: Tensor, positions: Tensor, patch_shape=None, *, integer_mode: bool = True
+    ) -> Tensor:
+        """Extract patches from a probe-grid buffer at object-domain positions."""
+        if patch_shape is None:
+            patch_shape = self.probe.get_spatial_shape()
+        if integer_mode:
+            centers = self._snap_probe_grid_centers(positions, patch_shape)
+            return ip.extract_patches_integer(image, centers, patch_shape)
+        centers = self.transform_positions(positions, absolute=True)
+        return self.object.extract_patches_function(
+            image, centers, patch_shape, pad=self.pad_for_shift
+        )
+
+    def object_update_to_native_grid(self, update: Tensor, *, normalized: bool = False) -> Tensor:
+        """Apply the resize adjoint (or normalized pseudoinverse) to an update."""
+        if not self.resampling_enabled:
+            return update
+        return ip.fourier_resize(
+            update,
+            tuple(self.object.lateral_shape),
+            adjoint=True,
+            normalized_adjoint=normalized,
+        )
 
     def check_inputs(self):
         if self.probe.has_multiple_opr_modes:
@@ -264,8 +559,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
             wavelength_m=self.wavelength_m,
             width_px=self.probe.shape[-1],
             height_px=self.probe.shape[-2],
-            pixel_width_m=self.object.pixel_size_m,
-            pixel_height_m=self.object.pixel_size_m / self.object.options.pixel_size_aspect_ratio,
+            pixel_width_m=self.probe_pixel_size_m,
+            pixel_height_m=self.probe_pixel_height_m,
             propagation_distance_m=self.object.slice_spacings.data[0],
         )
         self.in_object_propagator = AngularSpectrumPropagator(self.in_object_prop_params)
@@ -278,8 +573,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
                 wavelength_m=self.wavelength_m,
                 width_px=self.probe.shape[-1],
                 height_px=self.probe.shape[-2],
-                pixel_width_m=self.object.pixel_size_m,
-                pixel_height_m=self.object.pixel_size_m,
+                pixel_width_m=self.probe_pixel_size_m,
+                pixel_height_m=self.probe_pixel_height_m,
                 propagation_distance_m=self.free_space_propagation_distance_m,
             )
             # TODO: AngularSpectrumPropagator uses analytical transfer function. Using the FFT
@@ -290,19 +585,22 @@ class PlanarPtychographyForwardModel(ForwardModel):
                 self.free_space_propagator = AngularSpectrumPropagator(params)
                 
     def extract_object_patches(self, indices: Tensor) -> Tensor:
-        positions = self.probe_positions.data[indices]
-        if self.apply_subpixel_shifts_on_probe:
-            obj_patches = self.object.extract_patches(
-                positions.round().int(), self.probe.get_spatial_shape(),
-                integer_mode=True
-            )
-        else:
-            obj_patches = self.object.extract_patches(
-                positions, self.probe.get_spatial_shape(),
-                pad_for_shift=self.pad_for_shift,
-                integer_mode=False
-            )
-        return obj_patches
+        object_on_probe_grid = self.get_probe_grid_object()
+        absolute, snapped, _ = self.get_probe_grid_position_data()
+        absolute_positions = (
+            snapped[indices] if self.apply_subpixel_shifts_on_probe else absolute[indices]
+        )
+        # PlanarObject.extract_patches expects positions relative to its configured
+        # origin. Offset the probe-grid absolute centers so adding that origin in
+        # the object method recovers the intended centers in object_on_probe_grid.
+        positions = absolute_positions - self.object.pos_origin_coords
+        return self.object.extract_patches(
+            positions,
+            self.probe.get_spatial_shape(),
+            integer_mode=self.apply_subpixel_shifts_on_probe,
+            pad_for_shift=self.pad_for_shift,
+            object_array=object_on_probe_grid,
+        )
 
     def get_unique_probes(self, indices: Tensor, always_return_probe_batch: bool = True) -> Tensor:
         """Get the unique probes for all positions in the batch. 
@@ -349,7 +647,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
             If True, only the first mode is shifted.
         """
         orig_shape = unique_probes.shape
-        fractional_shifts = self.probe_positions.data[indices] - self.probe_positions.data[indices].round()
+        fractional_shifts = self.get_probe_grid_position_data()[2][indices]
         
         if first_mode_only:
             unique_probe_to_shift = unique_probes[..., 0, :, :]
@@ -477,8 +775,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
             wavelength_m=self.wavelength_m,
             width_px=self.probe.shape[-1],
             height_px=self.probe.shape[-2],
-            pixel_width_m=self.object.pixel_size_m,
-            pixel_height_m=self.object.pixel_size_m / self.object.options.pixel_size_aspect_ratio,
+            pixel_width_m=self.probe_pixel_size_m,
+            pixel_height_m=self.probe_pixel_height_m,
             propagation_distance_m=self.object.slice_spacings.data[slice_index],
         )
         self.in_object_propagator.update(self.in_object_prop_params)
@@ -510,8 +808,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
             wavelength_m=self.wavelength_m,
             width_px=self.probe.shape[-1],
             height_px=self.probe.shape[-2],
-            pixel_width_m=self.object.pixel_size_m,
-            pixel_height_m=self.object.pixel_size_m / self.object.options.pixel_size_aspect_ratio,
+            pixel_width_m=self.probe_pixel_size_m,
+            pixel_height_m=self.probe_pixel_height_m,
             propagation_distance_m=self.object.slice_spacings.data[slice_index - 1],
         )
         self.in_object_propagator.update(self.in_object_prop_params)

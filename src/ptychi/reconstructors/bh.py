@@ -160,7 +160,9 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
             delta_o = delta_o.unsqueeze(0)
             delta_p_all_modes = delta_p[None, :, :]
             delta_pos = torch.zeros_like(probe_positions.data)
-            delta_pos[indices] = delta_pos0
+            delta_pos[indices] = self.forward_model.probe_displacements_to_object_pixels(
+                delta_pos0
+            )
 
         elif o_opt and p_opt and (not pos_opt):
             (delta_o, delta_p) = self.compute_updates_object_probe(op, p, psi_far, gradF, d)
@@ -321,19 +323,19 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         tmp = torch.conj(p) * gradF
 
-        obj = self.parameter_group.object
-        o = obj.place_patches_on_empty_buffer(
-            self.positions, 
-            tmp[:, 0], 
-            pad_for_shift=self.options.forward_model_options.pad_for_shift
+        o_probe_grid = self.forward_model.place_object_patches_on_probe_grid(
+            self.positions,
+            tmp[:, 0],
+            integer_mode=False,
         )
-        patches = obj.extract_patches_function(
-            o, self.positions + obj.pos_origin_coords, 
-            self.parameter_group.probe.get_spatial_shape(), 
-            pad=self.options.forward_model_options.pad_for_shift
+        patches = self.forward_model.extract_probe_grid_patches(
+            o_probe_grid,
+            self.positions,
+            self.parameter_group.probe.get_spatial_shape(),
+            integer_mode=False,
         )
         patches = patches[:, None]
-        return o, patches
+        return self.forward_model.object_update_to_native_grid(o_probe_grid), patches
 
     def gradient_p(self, op, gradF):
         """Gradient with respect to the probe"""
