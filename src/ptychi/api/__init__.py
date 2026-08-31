@@ -5,3 +5,4 @@
 
 from .options import *
 from .enums import *
+from .registry import *
