@@ -393,7 +393,7 @@ class PtychographyTask(Task):
             self.object_options.determine_position_origin_coords_by
             == api.ObjectPosOriginCoordsMethods.SUPPORT
         ):
-            native_center = np.array([np.round(x / 2) + 0.5 for x in obj_lateral_shape])
+            native_center = np.array([np.round(x / 2) - 0.5 for x in obj_lateral_shape])
             buffer_center = native_center * scale
             if (
                 pos_y_probe.max() + buffer_center[0] + probe_lateral_shape[-2] // 2 > probe_grid_shape[-2]
