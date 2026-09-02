@@ -54,7 +54,7 @@ class BaseTester:
         self.generate_data = generate_data
         self.generate_gold = generate_gold
         # self.save_timing = save_timing
-        self.debug = debug
+        self.debug = debug and not generate_gold
         
         if pytestconfig is not None:
             self.high_tol = pytestconfig.getoption("high_tol")
