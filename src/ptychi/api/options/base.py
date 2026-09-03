@@ -81,14 +81,47 @@ class Options:
                 d[k] = v.get_dict()
             else:
                 d[k] = utils.jsonize(v)
+        d["options_class_name"] = self.__class__.__name__
         return d
     
-    def load_from_dict(self, d: dict) -> "Options":
-        """Load options from a dictionary."""
+    def load_from_dict(self, d: dict, strict: bool = False) -> "Options":
+        """Load option values from a dictionary.
+
+        Parameters
+        ----------
+        d : dict
+            Dictionary containing serialized option values.
+        strict : bool, optional
+            If True, validate any ``options_class_name`` metadata against the
+            corresponding options class, including for nested options.
+
+        Returns
+        -------
+        Options
+            This options object with the loaded values applied.
+
+        Raises
+        ------
+        ValueError
+            If ``strict`` is True and an ``options_class_name`` value does not
+            match the corresponding options class.
+        """
+        options_class_name = d.get("options_class_name")
+        if strict and options_class_name is not None and options_class_name != self.__class__.__name__:
+            raise ValueError(
+                f"Options class name {options_class_name!r} does not match "
+                f"{self.__class__.__name__!r}."
+            )
+
         for k, v in d.items():
+            if k == "options_class_name":
+                continue
             field_type = self.resolve_type(self.get_field_type(k))
             if isinstance(field_type, type) and issubclass(field_type, Options):
-                self.__setattr__(k, self.resolve_type(self.get_field_type(k))().load_from_dict(v))
+                self.__setattr__(
+                    k,
+                    self.resolve_type(self.get_field_type(k))().load_from_dict(v, strict=strict),
+                )
             elif isinstance(field_type, type) and issubclass(field_type, enum.StrEnum) and isinstance(v, str):
                 self.__setattr__(k, field_type(v))
             else:

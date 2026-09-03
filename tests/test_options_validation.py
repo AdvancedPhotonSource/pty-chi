@@ -22,6 +22,27 @@ def test_unknown_option_fields_are_forbidden():
         options.not_a_real_field = True
 
 
+def test_options_dict_includes_and_validates_class_names():
+    options_dict = api.LSQMLOptions().get_dict()
+
+    assert options_dict["options_class_name"] == "LSQMLOptions"
+    assert options_dict["object_options"]["options_class_name"] == "LSQMLObjectOptions"
+    api.LSQMLOptions().load_from_dict(options_dict, strict=True)
+
+    options_dict["object_options"]["options_class_name"] = "ProbeOptions"
+    with pytest.raises(ValueError, match="ProbeOptions.*LSQMLObjectOptions"):
+        api.LSQMLOptions().load_from_dict(options_dict, strict=True)
+
+    api.LSQMLOptions().load_from_dict(options_dict)
+
+
+def test_strict_options_loading_accepts_legacy_dict_without_class_name():
+    options = base.OptimizationPlan()
+    options.load_from_dict({"start": 2}, strict=True)
+
+    assert options.start == 2
+
+
 def test_assignment_validation_rejects_bad_types_and_enum_values():
     options = api.LSQMLOptions()
 
