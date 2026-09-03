@@ -790,7 +790,8 @@ class ProbeOptions(ParameterOptions):
         if self.power_constraint.enabled and options.object_options.remove_object_probe_ambiguity.enabled:
             logger.warning(
                 "`ObjectOptions.remove_object_probe_ambiguity` and `ProbeOptions.power_constraint` "
-                "are both enabled, which may lead to unexpected results."
+                "are both enabled, which may lead to unexpected results. Ambiguity removal is executed "
+                "after power constraint; as such, it may deviate the probe power from the desired value."
             )
         if self.optimizer == enums.Optimizers.LBFGS and "Autodiff" not in options.__class__.__name__:
             raise ValueError("LBFGS optimizer is currently only supported for Autodiff reconstructors.")
