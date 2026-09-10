@@ -3,6 +3,12 @@
    :align: center
    :width: 200px
 
+.. epigraph::
+    Pty-Chi is actively maintained, and we welcome feature requests, bug reports, and contributions from the community.
+
+    If you need a new capability, or have implemented useful extensions in your own branch or derivative codebase, we strongly encourage you to consider contributing those changes back to Pty-Chi through an issue or pull request whenever practical, rather than maintaining a separate repository with overlapping functionality.
+
+    Keeping broadly useful improvements in the shared upstream project helps reduce fragmentation, preserves a clear development history, and makes new capabilities easier for the wider community to discover, maintain, and build upon.
 
 Welcome to the repository of Pty-chi, a PyTorch-based ptychography reconstruction library!
 
