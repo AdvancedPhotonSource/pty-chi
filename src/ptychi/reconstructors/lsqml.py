@@ -1554,7 +1554,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         This routine follows the same logic as in PtychoSheleves. With the `(n_pos, n_slices)`
         tensor that sotres the step sizes for all object patches and all slices, we take the
-        10-th percentile trimmed mean of the step sizes for each minibatch. We then take the
+        10% trimmed mean (5% from each tail) of the step sizes for each minibatch. We then take the
         minimum of the step sizes across all minibatches for each slice to use as the step size
         for updating the object.
 

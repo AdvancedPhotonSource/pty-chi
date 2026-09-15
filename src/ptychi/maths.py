@@ -20,60 +20,77 @@ def trim_mean(
     keepdim: bool = False
 ) -> torch.Tensor:
     """
-    Calculate the mean of a tensor after removing a certain percentage of the
-    lowest and highest values.
+    Calculate a trimmed mean using MATLAB ``trimmean`` rounding semantics.
 
     Parameters
     ----------
     x : Tensor
         Input tensor.
     fraction : float, optional
-        The fraction of trim, between 0 and 1. Default is 0.1.
+        The total fraction to trim, split equally between the lowest and highest
+        values. Must be between 0 and 1. Default is 0.1.
     dim : int or tuple of int, optional
         The axis/axes along which to calculate the mean.
 
     Returns
     -------
     trimmed_mean : tensor
-        The trimmed mean.
+        The trimmed mean. NaN values are omitted; a slice with no remaining values
+        returns NaN.
     """
-    lb = torch.quantile(x, fraction, dim=dim, keepdim=True)
-    ub = torch.quantile(x, 1 - fraction, dim=dim, keepdim=True)
-    mask = (x >= lb) & (x <= ub)
+    if not 0 <= fraction <= 1:
+        raise ValueError("fraction must be between 0 and 1")
 
-    if dim is None:
-        mask_count = torch.sum(mask)
+    if dim is None or dim == ():
+        dims = tuple(range(x.ndim))
     else:
-        mask_count = torch.sum(mask, dim=dim, keepdim=True)
-    mask_check = torch.all(mask_count > 0)
-    if mask_check:
-        if dim is None:
-            trimmed_mean = (
-                torch.sum(torch.where(mask, x, torch.zeros((), device=x.device, dtype=x.dtype)))
-                / mask_count
-            )
-            if keepdim:
-                trimmed_mean = trimmed_mean.reshape((1,) * x.ndim)
-            return trimmed_mean
+        requested_dims = (dim,) if isinstance(dim, int) else tuple(dim)
+        if x.ndim == 0:
+            if any(d not in (-1, 0) for d in requested_dims):
+                raise IndexError(f"Dimension out of range for scalar tensor: {requested_dims}")
+            dims = ()
+        else:
+            if any(d < -x.ndim or d >= x.ndim for d in requested_dims):
+                raise IndexError(
+                    f"Dimension out of range for tensor with {x.ndim} dimensions: {requested_dims}"
+                )
+            dims = tuple(d % x.ndim for d in requested_dims)
+    if len(set(dims)) != len(dims):
+        raise ValueError("dim must not contain duplicate dimensions")
 
-        trimmed_sum = torch.sum(
-            torch.where(mask, x, torch.zeros((), device=x.device, dtype=x.dtype)),
-            dim=dim,
-            keepdim=True,
+    remaining_dims = tuple(d for d in range(x.ndim) if d not in dims)
+    remaining_shape = tuple(x.shape[d] for d in remaining_dims)
+    flattened = x.permute(remaining_dims + dims).reshape(*remaining_shape, -1)
+
+    nan_mask = torch.isnan(flattened)
+    if x.is_floating_point():
+        values = torch.where(
+            nan_mask,
+            torch.full((), torch.inf, device=x.device, dtype=x.dtype),
+            flattened,
         )
-        trimmed_mean = trimmed_sum / mask_count
-        if keepdim:
-            return trimmed_mean
-
-        try:
-            dims = tuple(a % x.ndim for a in dim)
-        except TypeError:
-            dims = (dim % x.ndim,)
-        for d in sorted(dims, reverse=True):
-            trimmed_mean = trimmed_mean.squeeze(d)
-        return trimmed_mean
     else:
-        return torch.mean(x, dim=dim, keepdim=keepdim)
+        values = flattened
+    values = torch.sort(values, dim=-1).values
+
+    valid_count = torch.sum(~nan_mask, dim=-1, keepdim=True)
+    # MATLAB's default round(k - eps(k)) is round-half-down for nonnegative k.
+    trim_count = torch.ceil(
+        valid_count.to(torch.float64) * fraction / 2 - 0.5
+    ).to(torch.int64)
+    ranks = torch.arange(values.shape[-1], device=x.device)
+    keep = (ranks >= trim_count) & (ranks < valid_count - trim_count)
+
+    trimmed_sum = torch.sum(
+        torch.where(keep, values, torch.zeros((), device=x.device, dtype=x.dtype)),
+        dim=-1,
+    )
+    trimmed_mean = trimmed_sum / (valid_count.squeeze(-1) - 2 * trim_count.squeeze(-1))
+
+    if keepdim:
+        output_shape = tuple(1 if d in dims else x.shape[d] for d in range(x.ndim))
+        return trimmed_mean.reshape(output_shape)
+    return trimmed_mean
     
     
 def get_use_double_precision_for_fft():
