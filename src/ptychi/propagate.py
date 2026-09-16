@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TypeAlias
 import cmath
-import math
 
 import torch
 from torch.fft import fftfreq
@@ -80,6 +79,21 @@ class WavefieldPropagatorParameters:
 
     @property
     def fresnel_number(self) -> float:
+        """Signed *per-pixel* Fresnel number, ``dx^2 / (lambda z)``.
+
+        Not the full-aperture Fresnel number ``W H / (lambda z)``; the two differ by a
+        factor of ``width_px * height_px * (dy / dx)``. Width-only, because the propagator
+        algebra carries the y-axis separately through :attr:`pixel_aspect_ratio`.
+
+        Signed, because the propagator phase terms must conjugate when the propagation
+        direction reverses. Take :func:`abs` wherever only the magnitude is meant.
+
+        Raises
+        ------
+        ZeroDivisionError
+            When the propagation distance is zero, where the conjugate-plane pixel size
+            ``lambda |z| / (N dx)`` vanishes and the single-FFT propagators are undefined.
+        """
         pixel_width_wlu_sq = self.pixel_width_wlu * self.pixel_width_wlu
         return pixel_width_wlu_sq / self.propagation_distance_wlu
     
@@ -114,8 +128,22 @@ class WavefieldPropagatorParameters:
         return FY.detach(), FX.detach()
     
     def is_fresnel_transform_preferrable(self) -> bool:
-        n_eff = math.sqrt(float(self.height_px) * float(self.width_px))
-        return self.fresnel_number < 1 / (2 * n_eff)
+        """Whether the Fresnel transform samples this geometry better than angular spectrum.
+
+        Angular spectrum keeps the source pixel pitch, so it is correctly sampled only
+        while the conjugate-plane pitch ``lambda |z| / (N dx)`` is no coarser than the
+        source pitch. Tested per axis and resolved conservatively, so an anisotropic
+        geometry is never aliased on its narrow axis. For square pixels this reduces to
+        ``abs(fresnel_number) < 1 / N``.
+
+        Uses the magnitude of the distance: the sampling requirement does not depend on
+        which way the wavefield travels.
+        """
+        distance_wlu = abs(self.propagation_distance_wlu)
+        return (
+            self.pixel_width_wlu**2 / distance_wlu < 1 / self.width_px
+            or self.pixel_height_wlu**2 / distance_wlu < 1 / self.height_px
+        )
 
 
 class WavefieldPropagator(ABC, torch.nn.Module):
@@ -149,9 +177,10 @@ class AngularSpectrumPropagator(WavefieldPropagator):
         super().__init__()
 
         _transfer_function = self.get_transfer_function(parameters)
-        
-        # Separate registered buffer into real and imaginary parts to prevent it
-        # from breaking in DataParallel.
+
+        # Stored as separate real and imaginary parts, and as plain attributes rather than
+        # registered buffers, so that `update` can rebind them without an in-place write
+        # (which would need `retain_graph` when the distance is optimizable).
         self._transfer_function_real = _transfer_function.real
         self._transfer_function_imag = _transfer_function.imag
 
@@ -168,11 +197,16 @@ class AngularSpectrumPropagator(WavefieldPropagator):
         FY, FX = parameters.get_frequency_coordinates()
         FY, FX = FY.double(), FX.double()
         F2 = torch.square(FX) + torch.square(ar * FY)
-        self.register_buffer('F2', F2)
 
-        ratio = self.F2 / (parameters.pixel_width_wlu**2)
-        tf = torch.exp(i2piz * torch.sqrt(1 - ratio))
-        tf = torch.where(ratio < 1, tf, 1)
+        ratio = F2 / (parameters.pixel_width_wlu**2)
+        # Clamp before the square root: `sqrt` of a negative gives NaN, and `torch.where`
+        # discards the NaN *value* but not the NaN gradient it contributes through `exp`,
+        # which poisons d(loss)/d(distance) when slice spacings are optimizable.
+        tf = torch.exp(i2piz * torch.sqrt(torch.clamp(1 - ratio, min=0.0)))
+        # Evanescent modes decay; blocking them is what makes the transfer function
+        # physical, and it keeps `propagate_backward` a projector rather than a division
+        # by a vanishing number.
+        tf = torch.where(ratio < 1, tf, 0)
         tf = tf.to(utils.get_default_complex_dtype())
         return tf
 
@@ -182,10 +216,19 @@ class AngularSpectrumPropagator(WavefieldPropagator):
 
     def propagate_backward(self, wavefield: ComplexTensor) -> ComplexTensor:
         tf = self._transfer_function_real + 1j * self._transfer_function_imag
-        return pmath.ifft2_precise(pmath.fft2_precise(wavefield) / tf)
+        # Conjugate rather than divide: identical where |tf| == 1, but well defined on the
+        # evanescent band where tf is 0.
+        return pmath.ifft2_precise(torch.conj(tf) * pmath.fft2_precise(wavefield))
 
 
 class FresnelTransformPropagator(WavefieldPropagator):
+    """Direct Fresnel transform; centered in, centered out.
+
+    The output plane has pixel pitch ``lambda |z| / (N dx)`` rather than the source pitch,
+    unlike :class:`AngularSpectrumPropagator`, which preserves it. Callers that care about
+    the physical scale of the output must account for that themselves; it is not reported.
+    """
+
     def __init__(self, parameters: WavefieldPropagatorParameters) -> None:
         super().__init__()
 
@@ -216,34 +259,64 @@ class FresnelTransformPropagator(WavefieldPropagator):
         B = B.to(utils.get_default_complex_dtype())
         return C0, C1C2, B
 
+    @timer()
     def propagate_forward(self, wavefield: ComplexTensor) -> ComplexTensor:
+        # The kernels live on a centered grid (`XX = II - width // 2`), so the transform
+        # must be centered too; a bare `fft2` would return the result in corner order.
         A = self._C1C2 * self._C0
-        return (A * pmath.fft2_precise(wavefield * self._B)).to(utils.get_default_complex_dtype())
+        g = torch.fft.ifftshift(wavefield * self._B, dim=(-2, -1))
+        out = A * torch.fft.fftshift(pmath.fft2_precise(g), dim=(-2, -1))
+        return out.to(utils.get_default_complex_dtype())
 
+    @timer()
     def propagate_backward(self, wavefield: ComplexTensor) -> ComplexTensor:
-        A = self._C1C2 / self._C0
-        return (self._B * pmath.ifft2_precise(wavefield * A)).to(utils.get_default_complex_dtype())
+        # Divide out the same A the forward multiplied in, and conjugate B. Using
+        # `C1C2 / C0` and `B` here would apply both phase screens twice in the forward
+        # direction instead of undoing them.
+        A = self._C1C2 * self._C0
+        g = torch.fft.ifftshift(wavefield / A, dim=(-2, -1))
+        out = torch.conj(self._B) * torch.fft.fftshift(pmath.ifft2_precise(g), dim=(-2, -1))
+        return out.to(utils.get_default_complex_dtype())
 
 
 class FraunhoferPropagator(WavefieldPropagator):
+    """Far-field propagator: :class:`FresnelTransformPropagator` without the input
+    quadratic phase ``exp(i pi Fr (X^2 + Y^2))``.
+
+    Shares that class's pitch and centering conventions. The dropped term is evaluated at
+    ``X_max = N / 2``, so the condition for it to be negligible is ``N^2 Fr << 1``, not
+    ``Fr << 1``.
+    """
+
     def __init__(self, parameters: WavefieldPropagatorParameters) -> None:
         super().__init__()
         ipi = 1j * torch.pi
 
-        Fr = parameters.fresnel_number
-        ar = parameters.pixel_aspect_ratio
-        N = parameters.width_px
-        M = parameters.height_px
+        Fr = float(parameters.fresnel_number)
+        ar = float(parameters.pixel_aspect_ratio)
+        N = float(parameters.width_px)
+        M = float(parameters.height_px)
         YY, XX = parameters.get_spatial_coordinates()
+        # Double precision: the phase argument is of order 1 / Fr, which loses all
+        # significance in float32 for a far-field geometry.
+        YY, XX = YY.double(), XX.double()
+
+        C2 = torch.exp((torch.square(XX / N) + torch.square(ar * YY / M)) * ipi / Fr)
 
         self._C0 = Fr / (1j * ar)
         self._C1 = cmath.exp(2j * cmath.pi * parameters.propagation_distance_wlu)
-        self._C2 = torch.exp((torch.square(XX / N) + torch.square(ar * YY / M)) * ipi / Fr)
+        self.register_buffer("_C2", C2.to(utils.get_default_complex_dtype()))
 
+    @timer()
     def propagate_forward(self, wavefield: ComplexTensor) -> ComplexTensor:
         A = self._C2 * self._C1 * self._C0
-        return A * pmath.fft2_precise(wavefield)
+        g = torch.fft.ifftshift(wavefield, dim=(-2, -1))
+        out = A * torch.fft.fftshift(pmath.fft2_precise(g), dim=(-2, -1))
+        return out.to(utils.get_default_complex_dtype())
 
+    @timer()
     def propagate_backward(self, wavefield: ComplexTensor) -> ComplexTensor:
-        A = self._C2 * self._C1 / self._C0
-        return pmath.ifft2_precise(wavefield * A)
+        A = self._C2 * self._C1 * self._C0
+        g = torch.fft.ifftshift(wavefield / A, dim=(-2, -1))
+        out = torch.fft.fftshift(pmath.ifft2_precise(g), dim=(-2, -1))
+        return out.to(utils.get_default_complex_dtype())
