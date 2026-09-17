@@ -227,12 +227,14 @@ class FresnelTransformPropagator(WavefieldPropagator):
     The output plane has pixel pitch ``lambda |z| / (N dx)`` rather than the source pitch,
     unlike :class:`AngularSpectrumPropagator`, which preserves it. Callers that care about
     the physical scale of the output must account for that themselves; it is not reported.
+    Output coordinates increase along both axes for either sign of the distance.
     """
 
     def __init__(self, parameters: WavefieldPropagatorParameters) -> None:
         super().__init__()
 
         _C0, _C1C2, _B = self.get_kernels(parameters)
+        self._negative_distance = parameters.propagation_distance_wlu < 0
         self._C0 = _C0
         self.register_buffer('_C1C2', _C1C2)
         self.register_buffer('_B', _B)
@@ -265,7 +267,13 @@ class FresnelTransformPropagator(WavefieldPropagator):
         # must be centered too; a bare `fft2` would return the result in corner order.
         A = self._C1C2 * self._C0
         g = torch.fft.ifftshift(wavefield * self._B, dim=(-2, -1))
-        out = A * torch.fft.fftshift(pmath.fft2_precise(g), dim=(-2, -1))
+        # Negative distance reverses the Fourier exponent. norm="forward" makes the
+        # inverse FFT unnormalized, preserving the diffraction amplitude prefactor.
+        transformed = (
+            pmath.ifft2_precise(g, norm="forward") if self._negative_distance
+            else pmath.fft2_precise(g)
+        )
+        out = A * torch.fft.fftshift(transformed, dim=(-2, -1))
         return out.to(utils.get_default_complex_dtype())
 
     @timer()
@@ -275,7 +283,11 @@ class FresnelTransformPropagator(WavefieldPropagator):
         # direction instead of undoing them.
         A = self._C1C2 * self._C0
         g = torch.fft.ifftshift(wavefield / A, dim=(-2, -1))
-        out = torch.conj(self._B) * torch.fft.fftshift(pmath.ifft2_precise(g), dim=(-2, -1))
+        transformed = (
+            pmath.fft2_precise(g, norm="forward") if self._negative_distance
+            else pmath.ifft2_precise(g)
+        )
+        out = torch.conj(self._B) * torch.fft.fftshift(transformed, dim=(-2, -1))
         return out.to(utils.get_default_complex_dtype())
 
 
@@ -304,6 +316,7 @@ class FraunhoferPropagator(WavefieldPropagator):
         C2 = torch.exp((torch.square(XX / N) + torch.square(ar * YY / M)) * ipi / Fr)
 
         self._C0 = Fr / (1j * ar)
+        self._negative_distance = parameters.propagation_distance_wlu < 0
         self._C1 = cmath.exp(2j * cmath.pi * parameters.propagation_distance_wlu)
         self.register_buffer("_C2", C2.to(utils.get_default_complex_dtype()))
 
@@ -311,12 +324,21 @@ class FraunhoferPropagator(WavefieldPropagator):
     def propagate_forward(self, wavefield: ComplexTensor) -> ComplexTensor:
         A = self._C2 * self._C1 * self._C0
         g = torch.fft.ifftshift(wavefield, dim=(-2, -1))
-        out = A * torch.fft.fftshift(pmath.fft2_precise(g), dim=(-2, -1))
+        # Use the unnormalized inverse FFT for increasing output coordinates at z < 0.
+        transformed = (
+            pmath.ifft2_precise(g, norm="forward") if self._negative_distance
+            else pmath.fft2_precise(g)
+        )
+        out = A * torch.fft.fftshift(transformed, dim=(-2, -1))
         return out.to(utils.get_default_complex_dtype())
 
     @timer()
     def propagate_backward(self, wavefield: ComplexTensor) -> ComplexTensor:
         A = self._C2 * self._C1 * self._C0
         g = torch.fft.ifftshift(wavefield / A, dim=(-2, -1))
-        out = torch.fft.fftshift(pmath.ifft2_precise(g), dim=(-2, -1))
+        transformed = (
+            pmath.fft2_precise(g, norm="forward") if self._negative_distance
+            else pmath.ifft2_precise(g)
+        )
+        out = torch.fft.fftshift(transformed, dim=(-2, -1))
         return out.to(utils.get_default_complex_dtype())

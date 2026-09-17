@@ -567,21 +567,48 @@ def test_fraunhofer_of_a_rect_aperture_matches_the_dirichlet_kernel():
     )
 
 
-def test_fresnel_transform_agrees_with_angular_spectrum_at_critical_sampling():
-    """At Fr == 1 / N the conjugate-plane pitch equals the source pitch, so the two
+@pytest.mark.parametrize("propagation_distance_m", [0.64, -0.64])
+def test_fresnel_transform_agrees_with_angular_spectrum_at_critical_sampling(
+    propagation_distance_m,
+):
+    """At |Fr| == 1 / N the conjugate-plane pitch equals the source pitch, so the two
     methods live on the same grid and are directly comparable. Cross-validates the shift
     convention, the prefactor and the crossover point at once."""
     num_px = 64
-    parameters = _params(0.64, wavelength_m=1e-10, width_px=num_px, height_px=num_px,
+    parameters = _params(propagation_distance_m, wavelength_m=1e-10,
+                         width_px=num_px, height_px=num_px,
                          pixel_width_m=1e-6)
     coordinates = _centered_grid(num_px)
     yy, xx = torch.meshgrid(coordinates, coordinates, indexing="ij")
-    wavefield = torch.exp(-(xx**2 + yy**2) / 36.0).to(torch.complex128)
+    wavefield = torch.exp(-((xx - 8)**2 + (yy - 4)**2) / 36.0).to(torch.complex128)
 
     angular_spectrum = AngularSpectrumPropagator(parameters).propagate_forward(wavefield)
     fresnel_transform = FresnelTransformPropagator(parameters).propagate_forward(wavefield)
 
     assert _relative_error(fresnel_transform, angular_spectrum) < 1e-5
+
+
+@pytest.mark.parametrize("propagator_class", _SINGLE_FFT_PROPAGATORS)
+@pytest.mark.parametrize(("width_px", "height_px"), [(64, 48), (63, 65)])
+def test_single_fft_negative_distance_obeys_conjugation_symmetry(
+    propagator_class, width_px, height_px,
+):
+    """Reversing distance conjugates the diffraction kernel on the same oriented grid."""
+    positive = propagator_class(_params(
+        1.0, width_px=width_px, height_px=height_px,
+        pixel_width_m=50e-6, pixel_height_m=40e-6,
+    ))
+    negative = propagator_class(_params(
+        -1.0, width_px=width_px, height_px=height_px,
+        pixel_width_m=50e-6, pixel_height_m=40e-6,
+    ))
+    wavefield = _random_wavefield((2, 3, height_px, width_px))
+
+    torch.testing.assert_close(
+        negative.propagate_forward(wavefield.conj()),
+        positive.propagate_forward(wavefield).conj(),
+        rtol=1e-11, atol=1e-11,
+    )
 
 
 @pytest.mark.parametrize("propagator_class", _SINGLE_FFT_PROPAGATORS)
