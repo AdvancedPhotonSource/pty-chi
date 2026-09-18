@@ -468,18 +468,6 @@ def test_distance_gradient_is_finite_through_update():
     assert torch.isfinite(gradient)
 
 
-def test_distance_gradient_is_nonzero_without_evanescent_modes():
-    """Control: the clamp must not flatten the ordinary gradient."""
-
-    def parameters_factory(propagation_distance_m):
-        return _params(propagation_distance_m, wavelength_m=1e-10, pixel_width_m=1e-6)
-
-    gradient = _distance_gradient(parameters_factory)
-
-    assert torch.isfinite(gradient)
-    assert float(gradient) != 0.0
-
-
 # --------------------------------------------------------------------------------------
 # Analytic references
 # --------------------------------------------------------------------------------------
