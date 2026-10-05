@@ -138,7 +138,8 @@ def orthogonalize_gs(
     x: torch.Tensor,
     dim: Union[int, Tuple[int, ...]] = -1,
     group_dim: Union[int, None] = None,
-) -> torch.Tensor:
+    return_transform: bool = False,
+) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
     """
     Gram-schmidt orthogonalization for complex arrays. Adapted from
     Tike (https://github.com/AdvancedPhotonSource/tike).
@@ -154,6 +155,9 @@ def orthogonalize_gs(
         other dimensions are broadcast.
     group_dim : int, optional
         The axis along which to orthogonalize. Other dimensions are broadcast.
+    return_transform : bool, optional
+        Also return the matrix acting on the mode axis, with shape
+        ``(*batch_shape, n_modes, n_modes)``.
 
     Returns
     -------
@@ -162,8 +166,21 @@ def orthogonalize_gs(
     """
     x, dim, group_dim = _prepare_data_for_orthogonalization(x, dim, group_dim, move_group_dim_to=0)
     u = x.clone()
+    if return_transform:
+        transform = torch.eye(len(x), dtype=x.dtype, device=x.device)
+        transform = transform.reshape(len(x), *([1] * (x.ndim - 1)), len(x))
+        shape = [1 if d in dim else x.shape[d] for d in range(1, x.ndim)]
+        transform = transform.expand(len(x), *shape, len(x)).clone()
     for i in range(1, len(x)):
-        u[i:] -= project(x[i:], u[i - 1 : i], dim=dim)
+        basis = u[i - 1 : i]
+        denominator = inner(basis, basis, dim=dim, keepdims=True)
+        denominator = torch.where(denominator == 0, torch.full_like(denominator, 1e-5), denominator)
+        coefficient = inner(x[i:], basis, dim=dim, keepdims=True) / denominator
+        u[i:] -= coefficient * basis
+        if return_transform:
+            transform[i:] -= coefficient[..., None] * transform[i - 1 : i]
+    if return_transform:
+        return torch.moveaxis(u, 0, group_dim), transform.squeeze(dim).movedim(0, -2)
     return torch.moveaxis(u, 0, group_dim)
 
 
@@ -173,7 +190,8 @@ def orthogonalize_svd(
     dim: Union[int, Tuple[int, ...]] = -1,
     group_dim: Union[int, None] = None,
     preserve_norm: bool = False,
-) -> torch.Tensor:
+    return_transform: bool = False,
+) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
     """
     SVD orthogonalization for complex arrays. Adapted from PtychoShelves (probe_modes_ortho.m).
 
@@ -188,6 +206,9 @@ def orthogonalize_svd(
         other dimensions are broadcast.
     group_dim : int, optional
         The axis along which to orthogonalize. Other dimensions are broadcast.
+    return_transform : bool, optional
+        Also return the matrix acting on the mode axis, with shape
+        ``(*batch_shape, n_modes, n_modes)``.
 
     Returns
     -------
@@ -249,6 +270,12 @@ def orthogonalize_svd(
         new_norm = norm(x, dim=list(dim) + [group_dim], keepdims=True)
         x = x * (orig_norm / new_norm)
 
+    if return_transform:
+        transform = evecs.mH
+        if preserve_norm:
+            scale = (orig_norm / new_norm).squeeze(tuple(dim) + (group_dim,))
+            transform = transform * scale[..., None, None]
+        return x.type(orig_dtype), transform.type(orig_dtype)
     return x.type(orig_dtype)
 
 

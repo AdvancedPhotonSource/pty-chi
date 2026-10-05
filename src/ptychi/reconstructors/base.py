@@ -459,6 +459,9 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             self.update_preconditioners()
             
 
+    def orthogonalize_incoherent_probe_modes(self) -> None:
+        self.parameter_group.probe.constrain_incoherent_modes_orthogonality()
+
     def run_post_epoch_hooks(self) -> None:
         with torch.no_grad():
             probe = self.parameter_group.probe
@@ -475,7 +478,7 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             if probe.options.orthogonalize_incoherent_modes.is_enabled_on_this_epoch(
                 self.current_epoch
             ):
-                probe.constrain_incoherent_modes_orthogonality()
+                self.orthogonalize_incoherent_probe_modes()
 
             # Apply OPR orthogonality constraint.
             if probe.options.orthogonalize_opr_modes.is_enabled_on_this_epoch(self.current_epoch):

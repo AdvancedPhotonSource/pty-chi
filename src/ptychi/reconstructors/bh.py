@@ -88,6 +88,16 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.apply_updates(delta_o, delta_p, delta_pos)
         self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
 
+    def orthogonalize_incoherent_probe_modes(self) -> None:
+        probe = self.parameter_group.probe
+        if self.options.method == "CG" and hasattr(self, "eta_p"):
+            transform = probe.constrain_incoherent_modes_orthogonality(return_transform=True)
+            if transform is not None:
+                # Keep the previous search direction in the probe's current mode basis.
+                self.eta_p = (transform @ self.eta_p.flatten(1)).reshape_as(self.eta_p)
+        else:
+            super().orthogonalize_incoherent_probe_modes()
+
     def apply_updates(self, delta_o, delta_p, delta_pos, *args, **kwargs):
         """
         Apply updates to optimizable parameters given the updates calculated by self.compute_updates.

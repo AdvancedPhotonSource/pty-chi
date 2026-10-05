@@ -215,8 +215,8 @@ class Probe(dsbase.ReconstructParameter):
         else:
             return slice(mode_index, mode_index + 1)
 
-    def constrain_incoherent_modes_orthogonality(self):
-        """Orthogonalize the incoherent probe modes for the first OPR mode."""
+    def constrain_incoherent_modes_orthogonality(self, return_transform: bool = False):
+        """Orthogonalize the first OPR mode, optionally returning its mode transformation."""
         if not self.has_multiple_incoherent_modes:
             return
 
@@ -238,18 +238,29 @@ class Probe(dsbase.ReconstructParameter):
                 f"Orthogonalization method {self.orthogonalize_incoherent_modes_method} "
                 "is not supported."
             )
-        probe[0] = func(
+        result = func(
             probe[0],
             dim=(-2, -1),
             group_dim=0,
+            return_transform=return_transform,
         )
+        if return_transform:
+            probe[0], transform = result
+            if self.options.orthogonalize_incoherent_modes.sort_by_occupancy:
+                transform = transform[:, torch.argsort(sorted_idx)]
+        else:
+            probe[0] = result
 
         # Restore norm.
         if self.orthogonalize_incoherent_modes_method != "svd":
             norm_first_mode_new = pmath.norm(probe[0, 0], dim=(-2, -1))
             probe = probe * norm_first_mode_orig / norm_first_mode_new
+            if return_transform:
+                transform = transform * (norm_first_mode_orig / norm_first_mode_new)
 
         self.set_data(probe)
+        if return_transform:
+            return transform
 
     def constrain_opr_mode_orthogonality(
         self, weights: "oprweights.OPRModeWeights", eps=1e-5, *, update_weights_in_place: bool
