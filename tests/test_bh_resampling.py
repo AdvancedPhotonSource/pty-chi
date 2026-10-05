@@ -89,3 +89,43 @@ def test_bh_resampled_step_matches_autograd_curvature(task):
             )
         with torch.no_grad():
             reconstructor.apply_updates(*updates)
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        (pixel_size, aspect_ratio, n_modes, True)
+        for pixel_size, aspect_ratio in [(1.0, 1.0), (0.8, 1.0), (1.2, 1.0), (1.0, 1.3)]
+        for n_modes in [1, 4]
+    ],
+    indirect=True,
+)
+def test_bh_object_and_probe_gradients_match_autograd(task):
+    reconstructor = task.reconstructor
+    reconstructor.eps = 0.0
+    indices = torch.arange(2)
+    data = reconstructor.dataset.patterns
+    reconstructor.positions = task.probe_positions.tensor[indices]
+    mask = reconstructor.get_constrained_pixel_mask(data).clone()
+    mask[:, ::2, ::2] = False
+    reconstructor.current_constrained_pixel_mask = mask[:, None]
+
+    prediction = reconstructor.forward_model(indices)
+    loss = (mask * (prediction.sqrt() - data.sqrt()).square()).sum()
+    expected_object, expected_probe = torch.autograd.grad(
+        loss, (task.object.tensor.data, task.probe.tensor.data)
+    )
+    intermediates = reconstructor.forward_model.intermediate_variables
+    with torch.no_grad():
+        gradF = reconstructor.gradientF(intermediates["psi_far"], data.sqrt()[:, None])
+        object_gradient, _ = reconstructor.gradient_o(task.probe.get_opr_mode(0), gradF)
+        probe_gradient = reconstructor.gradient_p(intermediates["obj_patches"], gradF)
+
+    torch.testing.assert_close(
+        object_gradient, torch.view_as_complex(expected_object.contiguous())[0],
+        rtol=1e-11, atol=1e-11,
+    )
+    torch.testing.assert_close(
+        probe_gradient, torch.view_as_complex(expected_probe.contiguous())[0],
+        rtol=1e-11, atol=1e-11,
+    )
