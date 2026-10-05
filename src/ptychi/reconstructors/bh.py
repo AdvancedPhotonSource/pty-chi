@@ -24,8 +24,8 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
     Bilinear Hessian Reconstruction Method:
     Implements Gradient Descent and Conjugate Gradient algorithms (Carlsson & Nikitin, 2025, in prep).
 
-    So far this implementation supports the reconstruction of the object, probe, and position parameters.
-    Probe multi modes need to be implemented.
+    So far this implementation supports the reconstruction of the object, probe, and position parameters,
+    including multiple mutually incoherent probe modes. Multiple OPR modes are not yet supported.
 
     The algorithm accepts a parameter `rho`, which controls the optimization of the probe and position updates.
     The value of `rho` is adjusted based on data size and the initial guess.
@@ -135,7 +135,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         op = self.forward_model.intermediate_variables["obj_patches"]
 
         psi_far = self.forward_model.intermediate_variables["psi_far"]
-        p = probe.get_opr_mode(0)  # to do for multi modes
+        p = probe.get_opr_mode(0)  # shape (n_modes, h, w); all incoherent probe modes
         pos = self.positions
         self.current_constrained_pixel_mask = self.get_constrained_pixel_mask(y_true)[:, None]
 
@@ -293,9 +293,18 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         return (delta_o, delta_p, delta_pos)
 
     def gradientF(self, psi_far, d):
-        """Gradient for the Guassian model"""
+        """
+        Gradient for the Gaussian model.
 
-        td = d * (psi_far / (torch.abs(psi_far) + self.eps))
+        `psi_far` carries a probe-mode axis (dim=1) of N_mu mutually incoherent
+        modes; the measured intensity is their incoherent sum, so the amplitude
+        entering the cost function is the joint norm A = sqrt(sum_mu |psi_far_mu|^2)
+        rather than the per-mode modulus. This reduces to the single-mode formula
+        when N_mu == 1.
+        """
+
+        A = torch.sqrt(torch.sum(torch.abs(psi_far) ** 2, dim=1, keepdim=True)) + self.eps
+        td = d * (psi_far / A)
         td = psi_far - td
         td = td * self.current_constrained_pixel_mask
         # Compensate FFT normalization only for the far-field Fourier propagator.
@@ -305,27 +314,44 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         return res
 
     def hessianF(self, psi_far, psi_far1, psi_far2, data):
-        """Hessian for the Guassian model"""
+        """
+        Hessian for the Gaussian model.
 
-        l0 = psi_far / (torch.abs(psi_far) + self.eps)
-        d0 = data / (torch.abs(psi_far) + self.eps)
+        As in `gradientF`, the amplitude is the joint norm A across probe modes
+        (dim=1). The diagonal term is a plain per-mode sum, but the data term
+        couples all modes through the shared amplitude: the mode axis must be
+        summed *before* the two factors are multiplied together.
+        """
+
+        A = torch.sqrt(torch.sum(torch.abs(psi_far) ** 2, dim=1, keepdim=True)) + self.eps
+        l0 = psi_far / A
+        d0 = data / A
         v1 = torch.sum(self.current_constrained_pixel_mask * (1 - d0) * reprod(psi_far1, psi_far2))
+        c1 = torch.sum(reprod(l0, psi_far1), dim=1, keepdim=True)
+        c2 = torch.sum(reprod(l0, psi_far2), dim=1, keepdim=True)
         v2 = torch.sum(
             self.current_constrained_pixel_mask
             * d0
-            * reprod(l0, psi_far1)
-            * reprod(l0, psi_far2)
+            * c1
+            * c2
         )
         return 2 * (v1 + v2)
 
     def gradient_o(self, p, gradF):
-        """Gradient with respect to the object"""
+        """
+        Gradient with respect to the object.
+
+        Summed over probe modes (dim=1), since the object is illuminated by
+        every mutually incoherent mode. Contrast with `gradient_p`, where each
+        probe mode keeps its own, unsummed gradient.
+        """
 
         tmp = torch.conj(p) * gradF
+        tmp = torch.sum(tmp, dim=1)
 
         o_probe_grid = self.forward_model.place_object_patches_on_probe_grid(
             self.positions,
-            tmp[:, 0],
+            tmp,
             integer_mode=False,
         )
         patches = self.forward_model.extract_probe_grid_patches(
