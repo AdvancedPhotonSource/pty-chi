@@ -13,6 +13,7 @@ from ptychi.metrics import MSELossOfSqrt
 from ptychi.maths import reprod, redot
 from ptychi.utils import get_default_complex_dtype
 import ptychi.forward_models as fm
+import ptychi.image_proc as ip
 
 if TYPE_CHECKING:
     import ptychi.api as api
@@ -359,19 +360,26 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         tmp = torch.conj(p) * gradF
         tmp = torch.sum(tmp, dim=1)
 
-        o_probe_grid = self.forward_model.place_object_patches_on_probe_grid(
+        grad_probe_grid = self.forward_model.place_object_patches_on_probe_grid(
             self.positions,
             tmp,
             integer_mode=False,
         )
+        grad_o = self.forward_model.object_update_to_native_grid(grad_probe_grid)
+        grad_o_on_probe_grid = grad_probe_grid
+        if self.forward_model.resampling_enabled:
+            # Evaluate curvature along the gradient applied on the native object grid.
+            grad_o_on_probe_grid = ip.fourier_resize(
+                grad_o, self.forward_model.probe_grid_object_shape
+            )
         patches = self.forward_model.extract_probe_grid_patches(
-            o_probe_grid,
+            grad_o_on_probe_grid,
             self.positions,
             self.parameter_group.probe.get_spatial_shape(),
             integer_mode=False,
         )
         patches = patches[:, None]
-        return self.forward_model.object_update_to_native_grid(o_probe_grid), patches
+        return grad_o, patches
 
     def gradient_p(self, op, gradF):
         """Gradient with respect to the probe"""
