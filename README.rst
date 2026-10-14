@@ -59,8 +59,8 @@ If you are not using uv, install the default build from PyPI with::
 CUDA patch accumulation uses Triton when it is available in the PyTorch
 environment. Pty-Chi adds no mandatory Triton dependency or installation-time
 kernel build. Kernels are compiled on first use. Supported float32 and complex64
-operations use either deterministic reduction or atomic addition according to
-the reconstructor's ``allow_nondeterministic_algorithms`` setting.
+operations use deterministic Triton reduction. The reconstructor's
+``allow_nondeterministic_algorithms`` setting controls the native PyTorch fallback.
 
 Other devices, unsupported inputs, and operations requiring autograd use PyTorch.
 Recoverable Triton import, compilation, or execution failures disable the Triton

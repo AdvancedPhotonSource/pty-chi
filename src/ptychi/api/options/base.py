@@ -1178,7 +1178,8 @@ class ReconstructorOptions(Options):
     allow_nondeterministic_algorithms: bool = True
     """If True, allow nondeterministic algorithms to be used. Non-deterministic algorithms
     include `scatter_add_` and `scatter_`. They can be faster, but may produce larger
-    run-to-run variations.
+    run-to-run variations. This setting controls native PyTorch patch placement;
+    Triton patch accumulation always uses deterministic reduction.
     """
 
     random_seed: Optional[int] = None

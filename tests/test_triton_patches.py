@@ -50,12 +50,12 @@ def _inputs(device, dtype=torch.float32, layout="ordinary"):
 @CUDA
 @pytest.mark.parametrize("dtype", [torch.float32, torch.complex64])
 @pytest.mark.parametrize("layout", ["ordinary", "strided", "broadcast"])
-@pytest.mark.parametrize("deterministic", [False, True])
-def test_triton_accumulation_matches_reference(dtype, layout, deterministic, monkeypatch):
+@pytest.mark.parametrize("allow_nondeterministic", [False, True])
+def test_triton_accumulation_matches_reference(dtype, layout, allow_nondeterministic, monkeypatch):
     pytest.importorskip("triton")
     image, patches, sy, sx, expected = _inputs("cuda", dtype, layout)
     original = image.clone()
-    pmath.set_allow_nondeterministic_algorithms(not deterministic)
+    pmath.set_allow_nondeterministic_algorithms(allow_nondeterministic)
 
     def unexpected_native(*args, **kwargs):
         raise AssertionError("The supported case should execute the Triton kernel")
@@ -64,15 +64,30 @@ def test_triton_accumulation_matches_reference(dtype, layout, deterministic, mon
     actual = ip.batch_put(image, patches, sy, sx)
     assert actual.data_ptr() == image.data_ptr()
     torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-5)
-    if deterministic:
-        repeated = ip.batch_put(original, patches, sy, sx)
-        assert torch.equal(actual, repeated)
+    repeated = ip.batch_put(original, patches, sy, sx)
+    assert torch.equal(actual, repeated)
     assert not backend._disabled
 
 
 @CUDA
+@pytest.mark.parametrize("dtype", [torch.float32, torch.complex64])
+def test_atomic_kernel_matches_reference(dtype):
+    pytest.importorskip("triton")
+    from ptychi.triton.patch_kernels import accumulate_patches
+
+    image, patches, sy, sx, expected = _inputs("cuda", dtype, "strided")
+    original = image.clone()
+    actual = accumulate_patches(image, patches, sy, sx, deterministic=False)
+    torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-5)
+    assert torch.equal(image, original)
+
+
+@CUDA
 @pytest.mark.parametrize("failure", ["import", "compile", "execution"])
-def test_triton_failure_retries_without_double_accumulation(failure, monkeypatch, caplog):
+@pytest.mark.parametrize("allow_nondeterministic", [False, True])
+def test_triton_failure_retries_without_double_accumulation(
+    failure, allow_nondeterministic, monkeypatch, caplog
+):
     image, patches, sy, sx, expected = _inputs("cuda")
     original = image.clone()
     calls = []
@@ -104,7 +119,13 @@ def test_triton_failure_retries_without_double_accumulation(failure, monkeypatch
             return real_synchronize(*args, **kwargs)
 
         monkeypatch.setattr(torch.cuda, "synchronize", fail_once)
-    pmath.set_allow_nondeterministic_algorithms(False)
+
+    def unexpected_native(*args, **kwargs):
+        raise AssertionError("Native fallback must respect allow_nondeterministic_algorithms")
+
+    wrong_method = "index_put_" if allow_nondeterministic else "scatter_add_"
+    monkeypatch.setattr(torch.Tensor, wrong_method, unexpected_native)
+    pmath.set_allow_nondeterministic_algorithms(allow_nondeterministic)
     actual = ip.batch_put(image, patches, sy, sx, check_bounds=False)
     torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-5)
     assert backend._disabled
@@ -146,7 +167,11 @@ def test_native_fallbacks(device, reason, monkeypatch):
 
 
 @CUDA
-def test_global_determinism_overrides_atomic_setting(monkeypatch):
+@pytest.mark.parametrize("allow_nondeterministic", [False, True])
+@pytest.mark.parametrize("global_deterministic", [False, True])
+def test_triton_always_uses_deterministic_kernel(
+    allow_nondeterministic, global_deterministic, monkeypatch
+):
     image, patches, sy, sx, _ = _inputs("cuda")
     modes = []
 
@@ -155,11 +180,11 @@ def test_global_determinism_overrides_atomic_setting(monkeypatch):
         return image.clone()
 
     monkeypatch.setattr(backend, "_accumulate", record_mode)
-    pmath.set_allow_nondeterministic_algorithms(True)
+    pmath.set_allow_nondeterministic_algorithms(allow_nondeterministic)
     previous = torch.are_deterministic_algorithms_enabled()
     warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
     try:
-        torch.use_deterministic_algorithms(True)
+        torch.use_deterministic_algorithms(global_deterministic)
         ip.batch_put(image, patches, sy, sx)
     finally:
         torch.use_deterministic_algorithms(previous, warn_only=warn_only)

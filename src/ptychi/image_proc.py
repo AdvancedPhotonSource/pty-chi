@@ -168,11 +168,7 @@ def batch_put(
     patch_size = patches.shape[-2:]
     if op == "add":
         result = try_accumulate_patches(
-            image, patches, sy, sx,
-            deterministic=(
-                not pmath.get_allow_nondeterministic_algorithms()
-                or torch.are_deterministic_algorithms_enabled()
-            ),
+            image, patches, sy, sx, deterministic=True,
         )
         if result is not None:
             image.copy_(result)
