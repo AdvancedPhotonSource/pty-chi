@@ -110,9 +110,14 @@ def batch_slice(
     ):
         raise ValueError("Patch indices are out of bounds.")
     
-    inds = _patch_linear_indices(sy, sx, patch_size, w)
-    patches = image.reshape(-1)[inds.reshape(-1)]
-    patches = patches.reshape(len(sy), patch_size[0], patch_size[1])
+    if torch.is_grad_enabled() and image.requires_grad:
+        # Indexing an unfolded view would allocate its full shape during backward.
+        inds = _patch_linear_indices(sy, sx, patch_size, w)
+        patches = image.reshape(-1)[inds.reshape(-1)]
+        patches = patches.reshape(len(sy), patch_size[0], patch_size[1])
+    else:
+        windows = image.unfold(0, patch_size[0], 1).unfold(1, patch_size[1], 1)
+        patches = windows[sy.long(), sx.long()]
     if not check_bounds and patches.is_cuda:
         AcceleratorModuleWrapper.get_module().synchronize()
     return patches
