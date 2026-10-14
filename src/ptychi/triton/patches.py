@@ -63,7 +63,7 @@ def try_accumulate_patches(image, patches, sy, sx, deterministic):
     try:
         if _accumulate is None:
             _accumulate = importlib.import_module(
-                "ptychi._triton_patch_kernels"
+                "ptychi.triton.patch_kernels"
             ).accumulate_patches
         with torch.cuda.device(image.device):
             result = _accumulate(image, patches, sy, sx, deterministic)

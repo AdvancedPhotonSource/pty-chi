@@ -5,7 +5,7 @@ import sys
 import pytest
 import torch
 
-import ptychi._triton_patches as backend
+import ptychi.triton.patches as backend
 import ptychi.image_proc as ip
 import ptychi.maths as pmath
 
@@ -181,6 +181,6 @@ image = torch.zeros(4, 5)
 patches = torch.ones(1, 2, 3)
 result = ip.batch_put(image, patches, torch.tensor([1]), torch.tensor([1]))
 assert result.sum().item() == 6
-assert 'ptychi._triton_patch_kernels' not in sys.modules
+assert 'ptychi.triton.patch_kernels' not in sys.modules
 """
     subprocess.run([sys.executable, "-c", script], check=True, env=os.environ.copy())

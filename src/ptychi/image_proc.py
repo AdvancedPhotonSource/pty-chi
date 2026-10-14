@@ -10,7 +10,7 @@ from torch import Tensor
 import torch.signal
 
 import ptychi.maths as pmath
-from ptychi._triton_patches import try_accumulate_patches
+from ptychi.triton.patches import try_accumulate_patches
 from ptychi.api.types import ComplexTensor, RealTensor
 from ptychi.device import AcceleratorModuleWrapper
 from ptychi.timing.timer_utils import timer, InlineTimer
