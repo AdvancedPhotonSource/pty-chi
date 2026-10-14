@@ -56,6 +56,18 @@ If you are not using uv, install the default build from PyPI with::
 
     pip install ptychi
 
+CUDA patch accumulation uses Triton when it is available in the PyTorch
+environment. Pty-Chi adds no mandatory Triton dependency or installation-time
+kernel build. Kernels are compiled on first use. Supported float32 and complex64
+operations use either deterministic reduction or atomic addition according to
+the reconstructor's ``allow_nondeterministic_algorithms`` setting.
+
+Other devices, unsupported inputs, and operations requiring autograd use PyTorch.
+Recoverable Triton import, compilation, or execution failures disable the Triton
+backend for the process and retry with PyTorch. Results are computed in temporary
+storage before updating the image. Set ``PTYCHI_USE_TRITON=0`` to select PyTorch
+explicitly. An unrecoverable CUDA device error still requires restarting the process.
+
 
 Developer installation
 ----------------------

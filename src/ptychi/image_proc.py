@@ -10,6 +10,7 @@ from torch import Tensor
 import torch.signal
 
 import ptychi.maths as pmath
+from ptychi._triton_patches import try_accumulate_patches
 from ptychi.api.types import ComplexTensor, RealTensor
 from ptychi.device import AcceleratorModuleWrapper
 from ptychi.timing.timer_utils import timer, InlineTimer
@@ -165,6 +166,19 @@ def batch_put(
         raise ValueError("Patch indices are out of bounds.")
     
     patch_size = patches.shape[-2:]
+    if op == "add":
+        result = try_accumulate_patches(
+            image, patches, sy, sx,
+            deterministic=(
+                not pmath.get_allow_nondeterministic_algorithms()
+                or torch.are_deterministic_algorithms_enabled()
+            ),
+        )
+        if result is not None:
+            image.copy_(result)
+            if not check_bounds:
+                AcceleratorModuleWrapper.get_module().synchronize()
+            return image
     inds = _patch_linear_indices(sy, sx, patch_size, w)
     image = image.reshape(-1)
     
