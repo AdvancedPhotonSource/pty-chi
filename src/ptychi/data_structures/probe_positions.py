@@ -269,13 +269,11 @@ class ProbePositions(dsbase.ReconstructParameter):
         
         # Truncate update by the limit and reapply it.
         if self.options.correction_options.clip_update_magnitude_by_mad:
-            limit_mad = pmath.mad(dx, dim=0) * 10
+            limit = pmath.mad(dx, dim=0) * 10
+            if limit_user is not None:
+                limit = torch.clip(limit, max=limit_user)
         else:
-            limit_mad = torch.inf
-        if limit_user is not None:
-            limit = torch.clip(limit_mad, max=limit_user)
-        else:
-            limit = limit_mad
+            limit = limit_user
         dx = update_mag.clip(max=limit) * update_signs
         
         with torch.no_grad():
