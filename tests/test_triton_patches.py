@@ -8,6 +8,7 @@ import torch
 import ptychi.triton.patches as backend
 import ptychi.image_proc as ip
 import ptychi.maths as pmath
+import ptychi.timing.timer_utils as timer_utils
 
 
 CUDA = pytest.mark.skipif(
@@ -85,14 +86,18 @@ def test_atomic_kernel_matches_reference(dtype):
 @CUDA
 @pytest.mark.parametrize("failure", ["import", "compile", "execution"])
 @pytest.mark.parametrize("allow_nondeterministic", [False, True])
+@pytest.mark.parametrize("timing_enabled", [False, True])
 def test_triton_failure_retries_without_double_accumulation(
-    failure, allow_nondeterministic, monkeypatch, caplog
+    failure, allow_nondeterministic, timing_enabled, monkeypatch, caplog
 ):
+    monkeypatch.setattr(timer_utils, "ENABLE_TIMING", timing_enabled)
     image, patches, sy, sx, expected = _inputs("cuda")
     original = image.clone()
     calls = []
+    execution_pending = False
 
     def unavailable(*args, **kwargs):
+        nonlocal execution_pending
         calls.append(failure)
         if failure == "import":
             raise ImportError("simulated unavailable Triton")
@@ -101,6 +106,8 @@ def test_triton_failure_retries_without_double_accumulation(
         assert scratch.data_ptr() != image.data_ptr()
         if failure == "compile":
             raise RuntimeError("simulated compiler failure")
+        # Arm the completion failure after the profiler's entry synchronization.
+        execution_pending = True
         return scratch
 
     if failure == "import":
@@ -109,12 +116,11 @@ def test_triton_failure_retries_without_double_accumulation(
         monkeypatch.setattr(backend, "_accumulate", unavailable)
     if failure == "execution":
         real_synchronize = torch.cuda.synchronize
-        first = True
 
         def fail_once(*args, **kwargs):
-            nonlocal first
-            if first:
-                first = False
+            nonlocal execution_pending
+            if execution_pending:
+                execution_pending = False
                 raise RuntimeError("simulated recoverable execution failure")
             return real_synchronize(*args, **kwargs)
 
