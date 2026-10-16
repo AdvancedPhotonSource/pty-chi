@@ -600,8 +600,9 @@ def shift_images(
         shift, it shifts the image by `-shifts`. For bilinear shift, it computes
         the adjoint of the bilinear shift operation.
     pad : Optional[int]
-        If not None, the image is padded with edge values by this amount before
-        shifting.
+        Positive values replicate-pad the image before shifting and crop the
+        result. The adjoint zero-pads before shifting and accumulates the halo
+        onto the boundary pixels afterward.
     
     Returns
     -------
@@ -609,7 +610,8 @@ def shift_images(
         Shifted images.
     """
     if pad is not None and pad > 0:
-        images = torch.nn.functional.pad(images, (pad, pad, pad, pad), mode="replicate")
+        mode = "constant" if adjoint else "replicate"
+        images = torch.nn.functional.pad(images, (pad, pad, pad, pad), mode=mode)
     if method == "bilinear":
         if adjoint:
             images = adjoint_bilinear_shift(images, shifts)
@@ -623,7 +625,16 @@ def shift_images(
     else:
         raise ValueError(f"Invalid shift method: {method}")
     if pad is not None and pad > 0:
-        images = images[..., pad:-pad, pad:-pad]
+        if adjoint:
+            # Fold columns first, then rows, so corner contributions are included.
+            columns = images[..., pad:-pad].clone()
+            columns[..., 0] += images[..., :pad].sum(dim=-1)
+            columns[..., -1] += images[..., -pad:].sum(dim=-1)
+            images = columns[..., pad:-pad, :].clone()
+            images[..., 0, :] += columns[..., :pad, :].sum(dim=-2)
+            images[..., -1, :] += columns[..., -pad:, :].sum(dim=-2)
+        else:
+            images = images[..., pad:-pad, pad:-pad]
     return images
 
 

@@ -766,7 +766,8 @@ class AnalyticalIterativePtychographyReconstructor(
             delta_p_to_shift, 
             fractional_shifts, 
             method=self.parameter_group.object.options.patch_interpolation_method,
-            adjoint=True
+            adjoint=True,
+            pad=self.forward_model.pad_for_shift,
         )
         
         if first_mode_only:
