@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
+import ptychi.image_proc as ip
 from ptychi.api import enums
 from ptychi.api.options.magpie import (
     MAGPIECapabilityError,
@@ -83,10 +84,9 @@ class MAGPIEReconstructor(PIEReconstructor):
     Object and probe proposals use the same pre-update forward state. Their
     phase-aligned geometric means are synthesized with counterpart-intensity
     weights. Probe corrections are first transported by the native shift
-    adjoint, then averaged with nonnegative confidence from the real row sums
-    of the local probe normal operators. This approximates the reference probe
-    synthesis; a singleton gives exactly the direct adjoint correction when
-    the computed intermediates are finite.
+    adjoint, then averaged using the intensity of each reverse-shifted object
+    patch. This approximates the reference probe synthesis; a singleton gives
+    exactly the direct adjoint correction when the intermediates are finite.
     """
 
     def __init__(self, parameter_group, dataset, options=None, *args, **kwargs):
@@ -284,35 +284,32 @@ class MAGPIEReconstructor(PIEReconstructor):
         return update.unsqueeze(0)
 
     def _synthesize_probe_update(self, indices, probe_old, probe_local, object_counterpart):
-        """Average global adjoint corrections using nonnegative confidence weights.
+        """Combine adjoint corrections using reverse-shifted object intensities.
 
-        Minimize sum_k c_k * |delta - a_k|**2, where d_k is the local GM
-        correction and a_k = S_k* d_k uses the native padded-shift adjoint.
-        For w_k = |object_counterpart_k|**2, the original local residual has
-        normal operator H_k = S_k* diag(w_k) S_k. Constant-preserving shifts
-        satisfy H_k 1 = S_k* w_k, so c_k is a real row-sum approximation,
-        floored at 1% of the local mean power, rather than diag(H_k).
+        Minimize sum_k c_k * |delta - a_k|**2, with a_k = S_k* d_k and
+        c_k = |T_k object_counterpart_k|**2. S_k* is the native probe-shift
+        adjoint; T_k uses native forward interpolation with reversed shifts,
+        replicate padding, and cropping. No confidence floor or clipping is needed.
 
-        The exact residual decomposition is S_k delta - d_k =
-        S_k (delta - a_k) + r_k, with r_k = (S_k S_k* - I) d_k.
-        This consensus omits the resulting linear term involving
-        S_k* diag(w_k) r_k and replaces H_k by diag(c_k). It preserves each
-        adjoint proposal as the center of its approximate local quadratic.
-        This changes the reference synthesis and does not guarantee descent
-        of the original weighted-residual objective. Zero total confidence
-        falls back to the ordinary mean of the adjoint corrections.
+        This is the original weighted residual in common probe coordinates
+        for ideal translations. Discrete interpolation and padded boundaries
+        make it approximate; descent of the original objective is not assured.
         """
-        adjoint = self.adjoint_shift_probe_update_direction
-        corrections = adjoint(indices, probe_local - probe_old, first_mode_only=True)
-        power = object_counterpart.abs().square()
-        # Real row sums of H_k can be negative even though H_k is positive
-        # semidefinite. Project them onto a floor of 1% of the local mean power.
-        floor = 0.01 * power.mean(dim=(-2, -1), keepdim=True)
-        confidence = adjoint(indices, power, first_mode_only=True).real.clamp_min(floor)
+        corrections = self.adjoint_shift_probe_update_direction(
+            indices, probe_local - probe_old, first_mode_only=True
+        )
+        fractional_shifts = self.forward_model.get_probe_grid_position_data()[2][indices]
+        object_on_probe_grid = ip.shift_images(
+            object_counterpart[:, 0],
+            -fractional_shifts,
+            method=self.parameter_group.object.options.patch_interpolation_method,
+            adjoint=False,
+            pad=self.forward_model.pad_for_shift,
+        )[:, None]
+        confidence = object_on_probe_grid.abs().square()
         mean_correction = corrections.mean(dim=0)
-        # With finite intermediates, centering gives exactly the direct adjoint
-        # for a singleton, including a final short minibatch. Zero total
-        # confidence falls back to the mean.
+        # Centering preserves the direct adjoint for singleton minibatches and
+        # selects the ordinary mean wherever the total confidence is zero.
         return mean_correction + _safe_divide(
             (confidence * (corrections - mean_correction)).sum(dim=0),
             confidence.sum(dim=0),

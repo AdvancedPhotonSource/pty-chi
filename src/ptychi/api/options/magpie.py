@@ -254,14 +254,12 @@ class MAGPIEProbeOptions(pie.PIEProbeOptions):
     OPR, and synthesis-dictionary probe representations are unsupported.
 
     Local probe corrections use the native shift adjoint before being averaged
-    with nonnegative confidence from the real row sums of each local probe
-    normal operator. Each pattern's confidence is floored at 1% of its mean
-    object power. The approximation neglects the residual term caused by
-    nonunitary padded shifts and replaces each normal operator by a diagonal
-    while preserving the corresponding adjoint correction as its local center.
-    It differs from the reference implementation's adjoint of weighted
-    residuals and does not guarantee descent of that objective. With finite
-    intermediates, a singleton minibatch gives exactly the direct adjoint.
+    with the intensity of each reverse-shifted local object patch. These weights
+    are nonnegative without a floor or clipping. Zero total weight selects the
+    ordinary mean; a singleton gives exactly the direct adjoint when the
+    intermediates are finite. This coordinate-transport approximation differs
+    from the reference synthesis and does not guarantee descent of its weighted
+    residual objective for discrete padded shifts.
     """
 
     def check(self, options):

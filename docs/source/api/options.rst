@@ -279,42 +279,46 @@ Native gradient position correction and post-epoch constraints remain available.
    )
    task.run()
 
-Probe synthesis uses a modified approximation of the reference algorithm's
-weighted residual objective. Let :math:`S_k` be the native padded probe shift,
+Probe synthesis approximates the reference algorithm's weighted residual in
+common probe coordinates. Let :math:`S_k` be the native padded probe shift,
 :math:`d_k=\widetilde P_k-S_kP` the local geometric-mean probe correction, and
-:math:`w_k=|\widetilde O_k|^2` the local geometric-mean object power. The shared
-probe correction is a weighted consensus of the individual adjoint corrections:
+:math:`\widetilde O_k` the local geometric-mean object patch. Define :math:`T_k`
+as the native coordinate shift with the opposite fractional displacement,
+using the same interpolation, replicate padding, and cropping. It differs
+from the actual padded adjoint :math:`S_k^*`.
+
+The shared probe correction minimizes a nonnegative weighted consensus:
 
 .. math::
 
    a_k &= S_k^*d_k, \\
-   c_k &= \max\!\left(\operatorname{Re}(S_k^*w_k),\,
-       0.01\,\operatorname{mean}_{\mathrm{pixels}}w_k\right), \\
-   \Delta P &= \frac{\sum_{k\in B}c_k\odot a_k}{\sum_{k\in B}c_k},
-       \qquad P_{\mathrm{new}}=P+\Delta P.
+   c_k &= |T_k\widetilde O_k|^2, \\
+   \Delta P &= \underset{\delta}{\operatorname{argmin}}\;
+       \frac12\sum_{k\in B}\left\|
+       (T_k\widetilde O_k)\odot(\delta-a_k)\right\|_2^2
+       = \frac{\sum_{k\in B}c_k\odot a_k}{\sum_{k\in B}c_k}, \\
+   P_{\mathrm{new}} &= P+\Delta P.
 
-Multiplication, division, and the maximum are elementwise. Zero total confidence
-uses the ordinary mean of the adjoint corrections. With finite intermediates,
-a singleton minibatch gives exactly its direct-adjoint correction, including
-a singleton at the end of a larger batch.
+Multiplication and division are elementwise; the displayed ratio applies where
+the total confidence is positive. The confidence has no floor or clipping.
+Zero total confidence uses the ordinary mean of the adjoint
+corrections. With finite intermediates, a singleton minibatch gives exactly
+its direct-adjoint correction, including a singleton at the end of a larger
+batch.
 
-The original local normal operator is
-:math:`H_k=S_k^*\operatorname{diag}(w_k)S_k`. Because the native shift preserves
-constants, :math:`H_k\mathbf{1}=S_k^*w_k`: the confidence uses the real row sums
-of this operator, projected onto the stated floor, rather than its diagonal.
-The approximation follows from decomposing the local residual as
+For ideal coordinate translations on a full or periodic domain,
+:math:`T_k=S_k^{-1}=S_k^*`, and translation preserves both the norm and pointwise
+products. Consequently,
 
 .. math::
 
-   S_k\Delta P-d_k
-   =S_k(\Delta P-a_k)+(S_kS_k^*-I)d_k.
+   \left\|\widetilde O_k\odot(S_k\delta-d_k)\right\|_2^2
+   =\left\|(T_k\widetilde O_k)\odot(\delta-S_k^*d_k)\right\|_2^2.
 
-It omits the linear term in the objective caused by the second term above and
-replaces :math:`H_k` by :math:`\operatorname{diag}(c_k)`. The resulting quadratic
-is centered at each adjoint correction, so its singleton update is preserved.
-The 1% floor is a fixed stabilization choice. This is an approximate synthesis
-rule; it does not claim exact minimization or monotone decrease of the original
-weighted residual objective for the discrete padded shifts.
+Discrete interpolation does not generally preserve products, and padding makes
+the reverse coordinate shift different from the adjoint. The implemented
+consensus is therefore an approximation; it does not guarantee exact
+minimization or monotone decrease of the original weighted residual objective.
 
 .. autoclass:: ptychi.api.options.magpie.MAGPIEOptions
    :members:

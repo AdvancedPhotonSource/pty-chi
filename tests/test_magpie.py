@@ -10,6 +10,7 @@ import pytest
 import torch
 from pydantic import ValidationError
 
+import ptychi.image_proc as ip
 import ptychi.maths as pmath
 from ptychi import api, utils
 from ptychi.api.options.magpie import (
@@ -348,7 +349,8 @@ def test_probe_consensus_zero_confidence_falls_back_to_native_adjoint_mean(
 
 
 @pytest.mark.parametrize(
-    "method", [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR]
+    "method",
+    [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR],
 )
 def test_probe_consensus_is_dense_quadratic_minimizer(method):
     dtype = torch.complex128
@@ -357,33 +359,89 @@ def test_probe_consensus_is_dense_quadratic_minimizer(method):
     indices = torch.tensor([2, 0, 1])
     old = _complex_random((3, 1, 4, 4), seed=150, dtype=dtype)
     local = old + _complex_random(old.shape, seed=151, dtype=dtype)
-    counterpart = torch.zeros_like(old)
-    counterpart[:, 0, 1, 1] = torch.tensor([1, 2, 4], dtype=dtype)
-    counterpart[:, 0, 2, 2] = 0.01j
+    counterpart = _complex_random(old.shape, seed=152, dtype=dtype)
     previous_probe = task.probe.data.clone()
     actual = rec._synthesize_probe_update(indices, old, local, counterpart).flatten()
     basis = torch.eye(16, dtype=dtype).reshape(16, 1, 4, 4)
     normal = torch.zeros((16, 16), dtype=dtype)
     rhs = torch.zeros(16, dtype=dtype)
+    shifts = rec.forward_model.get_probe_grid_position_data()[2]
     for batch, index in enumerate(indices):
         shifted = rec.forward_model.shift_unique_probes(index.repeat(16), basis)
         operator = shifted.reshape(16, 16).T
         correction = operator.H @ (local[batch] - old[batch]).flatten()
-        power = counterpart[batch].abs().square().flatten()
-        # Native shifts preserve constants, which identifies adjoint power
-        # with the row sums of the original local normal operator.
-        ones = torch.ones(16, dtype=dtype)
-        torch.testing.assert_close(operator @ ones, ones, atol=1e-10, rtol=1e-10)
-        local_normal = operator.H @ torch.diag(power.to(dtype)) @ operator
-        row_sums = local_normal @ ones
-        torch.testing.assert_close(row_sums, operator.H @ power.to(dtype), atol=1e-10, rtol=1e-10)
-        confidence = row_sums.real.clamp_min(0.01 * power.mean())
+        # Assemble the reverse coordinate transport from basis images. Applying
+        # this matrix to complex patches retains interference before taking power.
+        transported_basis = ip.shift_images(
+            basis[:, 0],
+            -shifts[index].expand(16, -1),
+            method=method,
+            adjoint=False,
+            pad=rec.forward_model.pad_for_shift,
+        )
+        transport = transported_basis.reshape(16, 16).T
+        confidence = (transport @ counterpart[batch].flatten()).abs().square()
         normal += torch.diag(confidence.to(dtype))
         rhs += confidence * correction
     expected = torch.linalg.solve(normal, rhs)
     torch.testing.assert_close(actual, expected, atol=1e-10, rtol=1e-10)
     assert torch.isfinite(actual).all()
     assert torch.equal(task.probe.data, previous_probe)
+
+
+@pytest.mark.parametrize(
+    "method",
+    [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR],
+)
+def test_probe_confidence_preserves_constant_patches_at_padded_boundaries(method):
+    dtype = torch.complex128
+    task = PtychographyTask(_options(dtype=dtype, method=method), **_tiny_data(dtype))
+    rec = task.reconstructor
+    indices = torch.tensor([2, 0, 1])
+    old = _complex_random((3, 1, 4, 4), seed=160, dtype=dtype)
+    local = old + _complex_random(old.shape, seed=161, dtype=dtype)
+    constants = torch.tensor([1, 2j, -3], dtype=dtype)[:, None, None, None]
+    counterpart = constants.expand_as(old)
+    corrections = rec.adjoint_shift_probe_update_direction(
+        indices, local - old, first_mode_only=True
+    )
+    expected = (corrections * constants.abs().square()).sum(0) / 14
+
+    actual = rec._synthesize_probe_update(indices, old, local, counterpart)
+
+    # Reverse coordinate shifts preserve constants all the way to the boundary;
+    # the adjoint of the padded shift does not preserve these confidence maps.
+    assert rec.forward_model.pad_for_shift == 1
+    torch.testing.assert_close(actual, expected, atol=1e-10, rtol=1e-10)
+
+
+@pytest.mark.parametrize(
+    "method",
+    [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR],
+)
+def test_probe_confidence_has_no_floor_for_high_contrast_patches(method):
+    dtype = torch.complex128
+    data = _tiny_data(dtype)
+    data["probe_position_y_px"] = data["probe_position_y_px"].round()
+    data["probe_position_x_px"] = data["probe_position_x_px"].round()
+    task = PtychographyTask(_options(dtype=dtype, method=method), **data)
+    rec = task.reconstructor
+    indices = torch.tensor([0, 1])
+    old = torch.zeros((2, 1, 4, 4), dtype=dtype)
+    local = torch.empty_like(old)
+    local[0].fill_(1 + 2j)
+    local[1].fill_(-2 + 1j)
+    counterpart = torch.ones_like(old)
+    counterpart[0, 0, 0, 0] = 0
+    counterpart[0, 0, 3, 3] = 100
+    expected = local.mean(0)
+    expected[0, 0, 0] = local[1, 0, 0, 0]
+    expected[0, 3, 3] = (10000 * local[0, 0, 3, 3] + local[1, 0, 3, 3]) / 10001
+
+    actual = rec._synthesize_probe_update(indices, old, local, counterpart)
+
+    # A bright pixel must not give a zero-amplitude pixel artificial confidence.
+    torch.testing.assert_close(actual, expected, atol=1e-10, rtol=1e-10)
 
 
 @pytest.mark.parametrize(
