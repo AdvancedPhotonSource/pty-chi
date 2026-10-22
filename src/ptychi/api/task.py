@@ -128,7 +128,13 @@ class PtychographyTask(Task):
         self.build()
         
     def check_options(self):
-        self.options.check()
+        # Let algorithm options reject unsupported data before parameter construction
+        # (for example, before multislice objects require slice spacings).
+        self.options.check(
+            object_data=self._task_data.object_data,
+            probe_data=self._task_data.probe_data,
+            opr_mode_weights_data=self._task_data.opr_mode_weights_data,
+        )
 
     def _resolve_task_data(
         self,

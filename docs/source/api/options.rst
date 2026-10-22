@@ -248,6 +248,104 @@ PIE Options
    :undoc-members:
    :show-inheritance:
 
+GM-rPIE and GM-MAGPIE Options
+----------------------------
+
+Both algorithms use ``MAGPIEOptions``. Set
+``reconstructor_options.multigrid_levels = 1`` for GM-rPIE or a larger
+valid depth for GM-MAGPIE. The initial implementation supports one object
+slice and one coherent shared probe, random minibatches, and matching
+object/probe/detector sampling. Object and probe must both be optimized
+on every minibatch, with unit SGD settings and no step-size schedulers.
+Native gradient position correction and post-epoch constraints remain available.
+
+.. code-block:: python
+
+   from ptychi.api import enums
+   from ptychi.api.options import MAGPIEOptions
+   from ptychi.api.task import PtychographyTask
+
+   options = MAGPIEOptions()
+   options.reconstructor_options.default_device = enums.Devices.CPU
+   options.reconstructor_options.multigrid_levels = 1  # GM-rPIE
+   # Supply your measured intensities, initial guesses, and positions.
+   task = PtychographyTask(
+       options,
+       diffraction_data=intensities,
+       object_data=object_guess,
+       probe_data=probe_guess,
+       probe_position_x_px=positions_x,
+       probe_position_y_px=positions_y,
+   )
+   task.run()
+
+Probe synthesis uses a modified approximation of the reference algorithm's
+weighted residual objective. Let :math:`S_k` be the native padded probe shift,
+:math:`d_k=\widetilde P_k-S_kP` the local geometric-mean probe correction, and
+:math:`w_k=|\widetilde O_k|^2` the local geometric-mean object power. The shared
+probe correction is a weighted consensus of the individual adjoint corrections:
+
+.. math::
+
+   a_k &= S_k^*d_k, \\
+   c_k &= \max\!\left(\operatorname{Re}(S_k^*w_k),\,
+       0.01\,\operatorname{mean}_{\mathrm{pixels}}w_k\right), \\
+   \Delta P &= \frac{\sum_{k\in B}c_k\odot a_k}{\sum_{k\in B}c_k},
+       \qquad P_{\mathrm{new}}=P+\Delta P.
+
+Multiplication, division, and the maximum are elementwise. Zero total confidence
+uses the ordinary mean of the adjoint corrections. With finite intermediates,
+a singleton minibatch gives exactly its direct-adjoint correction, including
+a singleton at the end of a larger batch.
+
+The original local normal operator is
+:math:`H_k=S_k^*\operatorname{diag}(w_k)S_k`. Because the native shift preserves
+constants, :math:`H_k\mathbf{1}=S_k^*w_k`: the confidence uses the real row sums
+of this operator, projected onto the stated floor, rather than its diagonal.
+The approximation follows from decomposing the local residual as
+
+.. math::
+
+   S_k\Delta P-d_k
+   =S_k(\Delta P-a_k)+(S_kS_k^*-I)d_k.
+
+It omits the linear term in the objective caused by the second term above and
+replaces :math:`H_k` by :math:`\operatorname{diag}(c_k)`. The resulting quadratic
+is centered at each adjoint correction, so its singleton update is preserved.
+The 1% floor is a fixed stabilization choice. This is an approximate synthesis
+rule; it does not claim exact minimization or monotone decrease of the original
+weighted residual objective for the discrete padded shifts.
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEReconstructorOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEObjectOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEProbeOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEProbePositionOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEOPRModeWeightsOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 LSQML Options
 -------------
 
