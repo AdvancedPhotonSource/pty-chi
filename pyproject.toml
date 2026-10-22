@@ -19,6 +19,7 @@ dependencies = [
     "scikit-image",
     "scikit-learn",
     "scipy",
+    "setuptools",
     "torch>=2.4",
     "torchvision",
     "tqdm",
