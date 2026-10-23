@@ -447,13 +447,24 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
                 )
             )
         ):
+            forward_model = self.forward_model
+            if isinstance(forward_model, torch.nn.parallel.DistributedDataParallel):
+                forward_model = forward_model.module
+            sampling_kwargs = {}
+            if hasattr(forward_model, "get_object_patch_sampler"):
+                sampling_kwargs = {
+                    "sampler": forward_model.get_object_patch_sampler(),
+                    "sampling_positions": forward_model.get_object_patch_sampling_positions(),
+                    "sampling_shape": forward_model.get_object_patch_sampling_shape(),
+                }
             self.parameter_group.object.update_preconditioner(
                 probe=self.parameter_group.probe,
                 probe_positions=self.parameter_group.probe_positions,
                 patterns=self.dataset.patterns,
-                use_all_modes=self.parameter_group.object.options.build_preconditioner_with_all_modes
+                use_all_modes=self.parameter_group.object.options.build_preconditioner_with_all_modes,
+                **sampling_kwargs,
             )
-            
+
     def run_pre_epoch_hooks(self) -> None:
         with torch.no_grad():
             self.update_preconditioners()
@@ -672,6 +683,7 @@ class AnalyticalIterativePtychographyReconstructor(
             free_space_propagation_distance_m=self.dataset.free_space_propagation_distance_m,
             pad_for_shift=self.options.forward_model_options.pad_for_shift,
             low_memory_mode=self.options.forward_model_options.low_memory_mode,
+            shift_operator=self.options.forward_model_options.shift_operator,
             diffraction_pattern_blur_sigma=self.options.forward_model_options.diffraction_pattern_blur_sigma,
         )
 
@@ -754,6 +766,8 @@ class AnalyticalIterativePtychographyReconstructor(
         Tensor
             A (batch_size, n_probe_modes, h, w) tensor giving the shifted probe update direction.
         """
+        if not getattr(self.forward_model, "apply_subpixel_shifts_on_probe", True):
+            return delta_p
         orig_shape = delta_p.shape
         fractional_shifts = self.forward_model.get_probe_grid_position_data()[2][indices]
         

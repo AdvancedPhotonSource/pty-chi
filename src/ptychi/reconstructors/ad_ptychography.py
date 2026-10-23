@@ -41,6 +41,7 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
         self.forward_model_params["detector_size"] = tuple(self.dataset.patterns.shape[-2:])
         self.forward_model_params["free_space_propagation_distance_m"] = self.dataset.free_space_propagation_distance_m
         self.forward_model_params["pad_for_shift"] = self.options.forward_model_options.pad_for_shift
+        self.forward_model_params["shift_operator"] = self.options.forward_model_options.shift_operator
         self.forward_model_params["low_memory_mode"] = self.options.forward_model_options.low_memory_mode
         return super().build_forward_model()
     

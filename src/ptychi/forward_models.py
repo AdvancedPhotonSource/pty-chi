@@ -18,6 +18,7 @@ from ptychi.propagate import (
 )
 from ptychi.metrics import MSELossOfSqrt
 import ptychi.image_proc as ip
+from ptychi.api.enums import ShiftOperators
 from ptychi.timing.timer_utils import timer
 from ptychi.utils import move_nested_tensors_to_device
 
@@ -160,6 +161,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         apply_subpixel_shifts_on_probe: bool = True,
         diffraction_pattern_blur_sigma: Optional[float] = None,
         low_memory_mode: bool = False,
+        shift_operator: ShiftOperators = ShiftOperators.AUTO,
         *args,
         **kwargs,
     ) -> None:
@@ -199,6 +201,9 @@ class PlanarPtychographyForwardModel(ForwardModel):
         low_memory_mode : bool
             If True, incoherent probe modes are propagated sequentially rather than in parallel
             which reduces the memory usage.
+        shift_operator : ShiftOperators
+            AUTO selects full-object periodic sampling for near-field illumination
+            exceeding 80% of both object dimensions on the probe grid.
         """
         super().__init__(
             parameter_group, retain_intermediates=retain_intermediates, detector_size=detector_size, 
@@ -228,7 +233,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
         self.wavelength_m = wavelength_m
         self.free_space_propagation_distance_m = free_space_propagation_distance_m
         
-        self.apply_subpixel_shifts_on_probe = apply_subpixel_shifts_on_probe
+        self.shift_operator = ShiftOperators(shift_operator)
+        self._apply_subpixel_shifts_on_probe = apply_subpixel_shifts_on_probe
         self.pad_for_shift = pad_for_shift
         
         # Build free space propagator.
@@ -246,6 +252,50 @@ class PlanarPtychographyForwardModel(ForwardModel):
         self.diffraction_pattern_blur_sigma = diffraction_pattern_blur_sigma
         
         self.check_inputs()
+
+    @property
+    def resolved_shift_operator(self) -> ShiftOperators:
+        return ShiftOperators(ip.resolve_shift_operator(
+            self.shift_operator, self.free_space_propagation_distance_m,
+            self.probe_grid_object_shape, self.probe.get_spatial_shape(),
+        ))
+
+    @property
+    def object_sampler(self):
+        return ip.ObjectPatchSampler(
+            self.resolved_shift_operator, self.object.options.patch_interpolation_method,
+            self.pad_for_shift,
+        )
+
+    def get_object_patch_sampler(self) -> Optional[ip.ObjectPatchSampler]:
+        """Return the full-object sampler, or None for default patch placement."""
+        if self.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
+            return None
+        return self.object_sampler
+
+    def get_object_patch_sampling_positions(self) -> Optional[Tensor]:
+        """Return continuous absolute centers in probe-grid (y, x) pixels.
+
+        PATCH returns None so the object uses its default integer positions.
+        Geometry is evaluated on each call to reflect pixel-size changes.
+        """
+        if self.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
+            return None
+        return self.transform_positions(self.probe_positions.tensor, absolute=True)
+
+    def get_object_patch_sampling_shape(self) -> Optional[tuple[int, int]]:
+        """Return the current probe-grid object shape, or None for PATCH."""
+        if self.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
+            return None
+        return self.probe_grid_object_shape
+
+    @property
+    def apply_subpixel_shifts_on_probe(self):
+        return self.object_sampler.integer_mode(self._apply_subpixel_shifts_on_probe)
+
+    @apply_subpixel_shifts_on_probe.setter
+    def apply_subpixel_shifts_on_probe(self, value):
+        self._apply_subpixel_shifts_on_probe = value
 
     @property
     def probe_pixel_size_m(self) -> float:
@@ -489,6 +539,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
         self, positions: Tensor, patches: Tensor, *, integer_mode: bool = True
     ) -> Tensor:
         """Place patches on an empty probe-grid object buffer."""
+        sampler = self.object_sampler
+        integer_mode = sampler.integer_mode(integer_mode)
         if integer_mode:
             centers = self._snap_probe_grid_centers(positions, patches.shape[-2:])
         else:
@@ -496,11 +548,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         image = torch.zeros(
             self.probe_grid_object_shape, dtype=patches.dtype, device=patches.device
         )
-        if integer_mode:
-            return ip.place_patches_integer(image, centers, patches, op="add")
-        return self.object.place_patches_function(
-            image, centers, patches, op="add", pad=self.pad_for_shift
-        )
+        return sampler.place(image, centers, patches, integer_mode=integer_mode)
 
     def extract_probe_grid_patches(
         self, image: Tensor, positions: Tensor, patch_shape=None, *, integer_mode: bool = True
@@ -508,12 +556,96 @@ class PlanarPtychographyForwardModel(ForwardModel):
         """Extract patches from a probe-grid buffer at object-domain positions."""
         if patch_shape is None:
             patch_shape = self.probe.get_spatial_shape()
+        sampler = self.object_sampler
+        integer_mode = sampler.integer_mode(integer_mode)
         if integer_mode:
             centers = self._snap_probe_grid_centers(positions, patch_shape)
-            return ip.extract_patches_integer(image, centers, patch_shape)
+        else:
+            centers = self.transform_positions(positions, absolute=True)
+        return sampler.extract(
+            image, centers, patch_shape, integer_mode=integer_mode
+        )
+
+    def object_position_derivative(self, positions, derivative, object_array=None):
+        r"""Differentiate full-object sampling with respect to native pixel positions.
+
+        Let :math:`t=(t_y,t_x)` be a supplied position, :math:`o` the position
+        origin, and :math:`g=(g_y,g_x)` the native-to-probe pixel scale. The
+        absolute probe-grid center is :math:`q=g(t+o)`, componentwise. For
+        ``derivative=(m, n)``, return, at each retained patch pixel,
+
+        .. math::
+
+            \frac{\partial^{m+n} O_q(u,v)}{\partial t_y^m\partial t_x^n}
+            = g_y^m g_x^n
+              \frac{\partial^{m+n}\widetilde O}{\partial y^m\partial x^n}
+              \left(u+q_y-\frac{p_y-1}{2},\,
+                    v+q_x-\frac{p_x-1}{2}\right).
+
+        Here :math:`p` is the probe shape and :math:`\widetilde O` is the
+        periodic interpolant of the complete object on the probe grid.
+        Derivatives are evaluated before the fixed crop/pad; padded margins
+        are zero. Order ``(0, 0)`` returns the sampled object itself.
+        Fourier derivatives use factors :math:`(2\pi i f_y)^m(2\pi i f_x)^n`.
+        Bilinear derivatives are piecewise, with zero pure second derivatives
+        and potentially nonzero mixed derivatives. Nearest derivatives are
+        zero almost everywhere. See ``_full_object_shift_multiplier`` for
+        the interpolation-specific formulas.
+
+        ``object_array`` optionally supplies a native-grid object or update
+        direction, which is resampled before differentiation. The result has
+        shape ``(batch_size, n_slices, probe_height, probe_width)``.
+        Returns ``None`` for PATCH sampling.
+        """
+        if self.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
+            return None
+        if object_array is None:
+            object_array = self.get_probe_grid_object()
+        elif self.resampling_enabled:
+            object_array = ip.fourier_resize(object_array, self.probe_grid_object_shape)
+        if object_array.ndim == 2:
+            object_array = object_array[None]
         centers = self.transform_positions(positions, absolute=True)
-        return self.object.extract_patches_function(
-            image, centers, patch_shape, pad=self.pad_for_shift
+        scale = self.probe_grid_scale if self.resampling_enabled else (1, 1)
+        factor = scale[0] ** derivative[0] * scale[1] ** derivative[1]
+        return torch.stack([
+            ip.extract_patches_full_object(
+                plane, centers, self.probe.get_spatial_shape(),
+                self.object.options.patch_interpolation_method, derivative=derivative,
+            ) * factor for plane in object_array
+        ], dim=1)
+
+    def get_object_position_gradients(self, indices, slice_index=None):
+        r"""Return the selected slice's sampling derivatives in probe-pixel units.
+
+        ``indices`` selects the batch from the model's probe positions.
+        ``slice_index`` defaults to the slice configured for position correction;
+        an explicit index selects that slice instead.
+
+        With native positions :math:`t`, probe-grid centers :math:`q=g(t+o)`,
+        and sampled object :math:`O_q`, the returned ``(dody, dodx)`` is
+
+        .. math::
+
+            \left(\frac{\partial O_q}{\partial q_y},
+                  \frac{\partial O_q}{\partial q_x}\right)
+            = \left(\frac{1}{g_y}\frac{\partial O_q}{\partial t_y},
+                    \frac{1}{g_x}\frac{\partial O_q}{\partial t_x}\right).
+
+        Each tensor has shape ``(batch_size, probe_height, probe_width)``.
+        The derivatives come from ``object_position_derivative`` before
+        cropping. Returns ``None`` for PATCH sampling so position correction
+        uses its existing patch-gradient approximation.
+        """
+        if self.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
+            return None
+        positions = self.probe_positions.tensor[indices]
+        if slice_index is None:
+            slice_index = self.probe_positions.get_slice_for_correction(self.object.n_slices)
+        scale = self.probe_grid_scale if self.resampling_enabled else (1, 1)
+        return tuple(
+            self.object_position_derivative(positions, order)[:, slice_index] / scale[axis]
+            for axis, order in enumerate(((1, 0), (0, 1)))
         )
 
     def object_update_to_native_grid(self, update: Tensor, *, normalized: bool = False) -> Tensor:
@@ -537,7 +669,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
             if self.wavelength_m is None:
                 raise ValueError("Wavelength must be given when the object is multislice.")
             
-        if self.free_space_propagation_distance_m < torch.inf and not self.pad_for_shift:
+        if (self.resolved_shift_operator == ShiftOperators.PATCH
+                and self.free_space_propagation_distance_m < torch.inf and not self.pad_for_shift):
             logger.warning(
                 "It seems that you are running near-field propagation "
                 f"(free_space_propagation_distance_m = {self.free_space_propagation_distance_m}). "
@@ -545,7 +678,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
                 "to a positive integer to avoid aliasing. Currently it is 0."
             )
         
-        if not self.apply_subpixel_shifts_on_probe and not self.pad_for_shift:
+        if (self.resolved_shift_operator == ShiftOperators.PATCH
+                and not self.apply_subpixel_shifts_on_probe and not self.pad_for_shift):
             ValueError(
                 "Using `pad_for_shift == 0` with `apply_subpixel_shifts_on_probe == False` is "
                 "prohibited because this causes serious image artifacts when applying subpixel "
@@ -586,21 +720,12 @@ class PlanarPtychographyForwardModel(ForwardModel):
                 
     def extract_object_patches(self, indices: Tensor) -> Tensor:
         object_on_probe_grid = self.get_probe_grid_object()
-        absolute, snapped, _ = self.get_probe_grid_position_data()
-        absolute_positions = (
-            snapped[indices] if self.apply_subpixel_shifts_on_probe else absolute[indices]
-        )
-        # PlanarObject.extract_patches expects positions relative to its configured
-        # origin. Offset the probe-grid absolute centers so adding that origin in
-        # the object method recovers the intended centers in object_on_probe_grid.
-        positions = absolute_positions - self.object.pos_origin_coords
-        return self.object.extract_patches(
-            positions,
-            self.probe.get_spatial_shape(),
-            integer_mode=self.apply_subpixel_shifts_on_probe,
-            pad_for_shift=self.pad_for_shift,
-            object_array=object_on_probe_grid,
-        )
+        positions = self.probe_positions.tensor[indices]
+        return torch.stack([
+            self.extract_probe_grid_patches(
+                plane, positions, integer_mode=self.apply_subpixel_shifts_on_probe
+            ) for plane in object_on_probe_grid
+        ], dim=1)
 
     def get_unique_probes(self, indices: Tensor, always_return_probe_batch: bool = True) -> Tensor:
         """Get the unique probes for all positions in the batch. 
@@ -646,6 +771,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
         first_mode_only : bool
             If True, only the first mode is shifted.
         """
+        if not getattr(self, "apply_subpixel_shifts_on_probe", True):
+            return unique_probes
         orig_shape = unique_probes.shape
         fractional_shifts = self.get_probe_grid_position_data()[2][indices]
         
@@ -726,7 +853,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
             exiting plane.
         """
         # Shape of obj_patches:   (batch_size, n_slices, h, w)
-        probe = self.get_unique_probes(indices, always_return_probe_batch=self.apply_subpixel_shifts_on_probe)
+        probe = self.get_unique_probes(indices, always_return_probe_batch=self._apply_subpixel_shifts_on_probe)
         if self.apply_subpixel_shifts_on_probe:
             probe = self.shift_unique_probes(indices, probe, first_mode_only=True)
         self.record_intermediate_variable("shifted_unique_probes", probe)
@@ -928,7 +1055,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         self.record_intermediate_variable("positions", positions)
         self.record_intermediate_variable("obj_patches", obj_patches)
 
-        probe = self.get_unique_probes(indices, always_return_probe_batch=self.apply_subpixel_shifts_on_probe)
+        probe = self.get_unique_probes(indices, always_return_probe_batch=self._apply_subpixel_shifts_on_probe)
         if self.apply_subpixel_shifts_on_probe:
             probe = self.shift_unique_probes(indices, probe, first_mode_only=True)
             self.record_intermediate_variable("shifted_unique_probes", probe)

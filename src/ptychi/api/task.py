@@ -27,6 +27,7 @@ from ptychi.reconstructors.base import Reconstructor
 from ptychi.utils import to_tensor
 import ptychi.utils as utils
 import ptychi.maths as pmath
+import ptychi.image_proc as ip
 from ptychi.timing import timer_utils
 import ptychi.movies as movies
 from ptychi.device import AcceleratorModuleWrapper
@@ -376,6 +377,12 @@ class PtychographyTask(Task):
             max(1, round(obj_lateral_shape[0] * object_pixel_height / probe_pixel_height)),
             max(1, round(obj_lateral_shape[1] * object_pixel_width / probe_pixel_width)),
         )
+        if ip.resolve_shift_operator(
+            self.reconstructor_options.forward_model_options.shift_operator,
+            self.data_options.free_space_propagation_distance_m,
+            probe_grid_shape, probe_lateral_shape,
+        ) == "full_object":
+            return
         scale = np.asarray(probe_grid_shape) / np.asarray(obj_lateral_shape)
         pos_y_probe = pos_y * scale[0]
         pos_x_probe = pos_x * scale[1]

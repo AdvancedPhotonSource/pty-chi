@@ -84,7 +84,7 @@ def test_update_probe_positions_uses_position_momentum_math_when_enabled():
     expected_delta_pos = torch.tensor([[0.05, -0.04], [0.02, -0.01]], dtype=torch.float32)
     get_update_calls = []
 
-    def get_update(chi, obj_patches, delta_o_patches, unique_probes, object_step_size):
+    def get_update(chi, obj_patches, delta_o_patches, unique_probes, object_step_size, **kwargs):
         get_update_calls.append(
             (chi.clone(), obj_patches.clone(), delta_o_patches.clone(), unique_probes.clone(), object_step_size)
         )
@@ -96,7 +96,10 @@ def test_update_probe_positions_uses_position_momentum_math_when_enabled():
         probe_positions=probe_positions,
     )
     reconstructor.options = SimpleNamespace(momentum_acceleration_gradient_mixing_factor=0.0)
-    reconstructor.forward_model = SimpleNamespace(free_space_propagation_distance_m=torch.inf)
+    reconstructor.forward_model = SimpleNamespace(
+        free_space_propagation_distance_m=torch.inf,
+        get_object_position_gradients=lambda indices: None,
+    )
     reconstructor.current_epoch = 2
     reconstructor.probe_position_momentum_params = MomentumState(
         position_update_history=[

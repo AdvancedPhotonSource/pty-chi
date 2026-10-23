@@ -280,6 +280,13 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         probe_numerator += numerator_update
         probe_denominator += denominator_update
 
+    def stabilize_object_projection_denominator(self, denominator):
+        """Regularize the approximate full-object normalization."""
+        if self.forward_model.resolved_shift_operator != api.ShiftOperators.FULL_OBJECT:
+            return denominator
+        floor = (0.05 * denominator.max()).clamp_min(torch.finfo(denominator.dtype).tiny)
+        return denominator.clamp_min(floor)
+
     @timer()
     def calculate_object_update(self, start_pts: list[int], end_pts: list[int]) -> Tensor:
         "Calculate and apply the object update."
@@ -318,6 +325,9 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             )
 
         # Calculate DM object update
+        object_denominator = self.stabilize_object_projection_denominator(
+            object_denominator
+        )
         object_update = object_numerator / torch.sqrt(
             object_denominator**2 + (0.05 * object_denominator.max()) ** 2
         )
@@ -357,5 +367,6 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             None,
             probe,
             None,
+            object_gradients=self.forward_model.get_object_position_gradients(indices),
         )
         return self.forward_model.probe_displacements_to_object_pixels(delta_pos)
