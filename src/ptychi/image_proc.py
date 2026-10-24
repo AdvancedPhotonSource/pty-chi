@@ -1,7 +1,7 @@
 # Copyright © 2025 UChicago Argonne, LLC All right reserved
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
-from typing import Tuple, Literal, Optional, Protocol
+from typing import Tuple, Literal, Optional, Protocol, NamedTuple
 import math
 import logging
 
@@ -673,6 +673,18 @@ class ObjectPatchSampler:
         return get_patch_placer_function_by_name(self.method)(
             image, positions, patches, pad=self.pad
         )
+
+
+class ObjectSamplingParameters(NamedTuple):
+    """Sampler and its geometry on one pixel grid.
+
+    ``positions`` contains continuous absolute centers in (y, x) pixels;
+    ``shape`` is the complete object shape on that same sampling grid.
+    """
+
+    sampler: ObjectPatchSampler
+    positions: Tensor
+    shape: Tuple[int, int]
 
 
 class ObjectPatchInterpolator:

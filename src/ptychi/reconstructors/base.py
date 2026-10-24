@@ -450,19 +450,15 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             forward_model = self.forward_model
             if isinstance(forward_model, torch.nn.parallel.DistributedDataParallel):
                 forward_model = forward_model.module
-            sampling_kwargs = {}
-            if hasattr(forward_model, "get_object_patch_sampler"):
-                sampling_kwargs = {
-                    "sampler": forward_model.get_object_patch_sampler(),
-                    "sampling_positions": forward_model.get_object_patch_sampling_positions(),
-                    "sampling_shape": forward_model.get_object_patch_sampling_shape(),
-                }
+            sampling = None
+            if hasattr(forward_model, "get_object_sampling_parameters"):
+                sampling = forward_model.get_object_sampling_parameters()
             self.parameter_group.object.update_preconditioner(
                 probe=self.parameter_group.probe,
                 probe_positions=self.parameter_group.probe_positions,
                 patterns=self.dataset.patterns,
                 use_all_modes=self.parameter_group.object.options.build_preconditioner_with_all_modes,
-                **sampling_kwargs,
+                sampling=sampling,
             )
 
     def run_pre_epoch_hooks(self) -> None:

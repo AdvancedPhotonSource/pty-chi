@@ -614,9 +614,7 @@ class PlanarObject(Object):
         probe_positions: "ds.probe_positions.ProbePositions",
         use_all_modes: bool = False,
         *,
-        sampler: Optional["ip.ObjectPatchSampler"] = None,
-        sampling_positions: Optional[Tensor] = None,
-        sampling_shape: Optional[Tuple[int, int]] = None,
+        sampling: Optional["ip.ObjectSamplingParameters"] = None,
     ) -> Tensor:
         """Calculate the illumination map by overlaying the probe intensity
         at all positions on a zero array. The map is used to calculate 
@@ -630,16 +628,12 @@ class PlanarObject(Object):
             The positions of the probe.
         use_all_modes : bool, optional
             Whether to use all modes of the probe.
-        sampler : ip.ObjectPatchSampler, optional
-            Sampler used to accumulate probe intensity with its adjoint placement.
-            If omitted, use integer patch placement on the native object grid.
-        sampling_positions : Tensor, optional
-            Absolute centers in sampling-grid (y, x) pixels, required with
-            ``sampler``. Positions are used continuously without rounding.
-        sampling_shape : tuple[int, int], optional
-            Object shape on the probe pixel grid, required with ``sampler``.
-            Accumulate on this grid, then apply normalized adjoint resizing to
-            the native object grid and keep the real, nonnegative result.
+        sampling : ip.ObjectSamplingParameters, optional
+            Sampler, continuous absolute (y, x) centers, and object shape on
+            the probe pixel grid. Accumulate with the sampler's adjoint, then
+            apply normalized adjoint resizing to the native object grid and
+            keep the real, nonnegative result. If omitted, use integer patch
+            placement on the native object grid.
 
         Returns
         -------
@@ -655,7 +649,7 @@ class PlanarObject(Object):
         else:
             probe_int = probe.get_mode_and_opr_mode(mode=0, opr_mode=0)[None, ...].abs() ** 2
 
-        if sampler is None:
+        if sampling is None:
             probe_pixel_width = (
                 self.pixel_size_m
                 if probe.options.pixel_size_m is None
@@ -680,10 +674,10 @@ class PlanarObject(Object):
             positions_all = positions_all.round().int() + self.pos_origin_coords
             image = torch.zeros_like(object_.real).type(torch.get_default_dtype())
         else:
-            place_patches = sampler.place
+            place_patches = sampling.sampler.place
             placement_kwargs = {"integer_mode": False}
-            positions_all = sampling_positions
-            image = probe_int.new_zeros(sampling_shape)
+            positions_all = sampling.positions
+            image = probe_int.new_zeros(sampling.shape)
 
         # Stitch probes of all positions on the object buffer
         # TODO: allow setting chunk size externally
@@ -701,7 +695,7 @@ class PlanarObject(Object):
             },
             chunk_size=64,
         )
-        if sampler is not None:
+        if sampling is not None:
             probe_sq_map = ip.fourier_resize(
                 probe_sq_map, tuple(self.lateral_shape),
                 adjoint=True, normalized_adjoint=True,
@@ -715,9 +709,7 @@ class PlanarObject(Object):
         patterns: Tensor = None,
         use_all_modes: bool = False,
         *,
-        sampler: Optional["ip.ObjectPatchSampler"] = None,
-        sampling_positions: Optional[Tensor] = None,
-        sampling_shape: Optional[Tuple[int, int]] = None,
+        sampling: Optional["ip.ObjectSamplingParameters"] = None,
     ) -> None:
         """Update the preconditioner. This function reproduces the behavior
         of PtychoShelves in `ptycho_solver`: it averages the new illumination
@@ -734,23 +726,17 @@ class PlanarObject(Object):
             if the preconditioner does not exist and needs to be initialized.
         use_all_modes : bool, optional
             Whether to use the sum of all probe modes' intensities for the illumination map.
-        sampler : ip.ObjectPatchSampler, optional
-            Placement sampler passed to ``calculate_illumination_map``.
-        sampling_positions : Tensor, optional
-            Absolute sampling-grid centers passed to ``calculate_illumination_map``.
-        sampling_shape : tuple[int, int], optional
-            Sampling-grid object shape passed to ``calculate_illumination_map``.
+        sampling : ip.ObjectSamplingParameters, optional
+            Sampling parameters passed to ``calculate_illumination_map``.
         """
         if self.preconditioner is None:
             self.initialize_preconditioner(
                 probe, probe_positions, patterns, use_all_modes=use_all_modes,
-                sampler=sampler, sampling_positions=sampling_positions,
-                sampling_shape=sampling_shape,
+                sampling=sampling,
             )
         illum_map = self.calculate_illumination_map(
             probe, probe_positions, use_all_modes=use_all_modes,
-            sampler=sampler, sampling_positions=sampling_positions,
-            sampling_shape=sampling_shape,
+            sampling=sampling,
         )
         self.preconditioner = (self.preconditioner + illum_map) / 2
     
@@ -761,9 +747,7 @@ class PlanarObject(Object):
         patterns: Tensor,
         use_all_modes: bool = False,
         *,
-        sampler: Optional["ip.ObjectPatchSampler"] = None,
-        sampling_positions: Optional[Tensor] = None,
-        sampling_shape: Optional[Tuple[int, int]] = None,
+        sampling: Optional["ip.ObjectSamplingParameters"] = None,
     ) -> None:
         """Initialize the preconditioner. This function reproduces the behavior
         of PtychoShelves in `init_solver` and `load_from_p`: the probe is first
@@ -780,12 +764,8 @@ class PlanarObject(Object):
             A (n_scan_points, h, w) tensor giving the diffraction patterns.
         use_all_modes : bool, optional
             Whether to use the sum of all probe modes' intensities for the illumination map.
-        sampler : ip.ObjectPatchSampler, optional
-            Placement sampler passed to ``calculate_illumination_map``.
-        sampling_positions : Tensor, optional
-            Absolute sampling-grid centers passed to ``calculate_illumination_map``.
-        sampling_shape : tuple[int, int], optional
-            Sampling-grid object shape passed to ``calculate_illumination_map``.
+        sampling : ip.ObjectSamplingParameters, optional
+            Sampling parameters passed to ``calculate_illumination_map``.
         """
         probe_data = probe.data
         probe_renormalization_factor = get_probe_renormalization_factor(patterns)
@@ -793,8 +773,7 @@ class PlanarObject(Object):
         probe_temp = ds.probe.Probe(data=probe_data, options=copy.deepcopy(probe.options))
         self.preconditioner = self.calculate_illumination_map(
             probe_temp, probe_positions, use_all_modes=use_all_modes,
-            sampler=sampler, sampling_positions=sampling_positions,
-            sampling_shape=sampling_shape,
+            sampling=sampling,
         )
 
 

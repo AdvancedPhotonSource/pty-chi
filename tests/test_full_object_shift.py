@@ -159,11 +159,23 @@ def test_selection_overrides_and_serialization():
     task = make_task()
     model = task.reconstructor.forward_model
     assert model.resolved_shift_operator == api.ShiftOperators.FULL_OBJECT
+    sampling = model.get_object_sampling_parameters()
+    assert sampling.shape == model.probe_grid_object_shape
+    torch.testing.assert_close(
+        sampling.positions, model.transform_positions(task.probe_positions.tensor, absolute=True)
+    )
     task.probe.options.pixel_size_m = 0.5e-6
     assert model.resolved_shift_operator == api.ShiftOperators.PATCH
+    assert model.get_object_sampling_parameters() is None
     model.shift_operator = api.ShiftOperators.FULL_OBJECT
     assert model.resolved_shift_operator == api.ShiftOperators.FULL_OBJECT
     assert model.shift_operator == api.ShiftOperators.FULL_OBJECT
+    updated = model.get_object_sampling_parameters()
+    assert updated.shape == model.probe_grid_object_shape
+    assert updated.shape != sampling.shape
+    torch.testing.assert_close(
+        updated.positions, model.transform_positions(task.probe_positions.tensor, absolute=True)
+    )
 
 
 @pytest.mark.parametrize("origin", list(api.ObjectPosOriginCoordsMethods))
@@ -374,11 +386,10 @@ def test_illumination_map_matches_selected_adjoint(method, resample, use_all_mod
         positions, intensity, integer_mode=False,
     )
     expected = model.object_update_to_native_grid(expected, normalized=True).real.clamp_min(0)
+    sampling = model.get_object_sampling_parameters()
     actual = task.object.calculate_illumination_map(
         task.probe, task.probe_positions, use_all_modes=use_all_modes,
-        sampler=model.get_object_patch_sampler(),
-        sampling_positions=model.get_object_patch_sampling_positions().repeat(25, 1),
-        sampling_shape=model.get_object_patch_sampling_shape(),
+        sampling=sampling._replace(positions=sampling.positions.repeat(25, 1)),
     )
     torch.testing.assert_close(actual, expected)
     assert (actual >= 0).all()

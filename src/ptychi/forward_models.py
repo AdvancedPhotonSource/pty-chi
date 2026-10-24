@@ -267,27 +267,20 @@ class PlanarPtychographyForwardModel(ForwardModel):
             self.pad_for_shift,
         )
 
-    def get_object_patch_sampler(self) -> Optional["ip.ObjectPatchSampler"]:
-        """Return the full-object sampler, or None for default patch placement."""
-        if self.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
-            return None
-        return self.object_sampler
+    def get_object_sampling_parameters(self) -> Optional["ip.ObjectSamplingParameters"]:
+        """Return continuous full-object sampling parameters on the probe grid.
 
-    def get_object_patch_sampling_positions(self) -> Optional[Tensor]:
-        """Return continuous absolute centers in probe-grid (y, x) pixels.
-
-        PATCH returns None so the object uses its default integer positions.
-        Geometry is evaluated on each call to reflect pixel-size changes.
+        PATCH returns None to retain native-grid integer accumulation for the
+        illumination map. Geometry is evaluated on each call to reflect current
+        positions and pixel sizes.
         """
         if self.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
             return None
-        return self.transform_positions(self.probe_positions.tensor, absolute=True)
-
-    def get_object_patch_sampling_shape(self) -> Optional[tuple[int, int]]:
-        """Return the current probe-grid object shape, or None for PATCH."""
-        if self.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
-            return None
-        return self.probe_grid_object_shape
+        return ip.ObjectSamplingParameters(
+            sampler=self.object_sampler,
+            positions=self.transform_positions(self.probe_positions.tensor, absolute=True),
+            shape=self.probe_grid_object_shape,
+        )
 
     @property
     def apply_subpixel_shifts_on_probe(self):
