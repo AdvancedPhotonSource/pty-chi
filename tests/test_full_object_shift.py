@@ -484,3 +484,33 @@ def test_sampling_derivative_units_on_anisotropic_grid(method):
             actual = (derivative.conj() * weights).real.sum((-2, -1))
             expected = hessian[torch.arange(3), axis, torch.arange(3), other]
             torch.testing.assert_close(actual, expected / (scale[axis] * scale[other]))
+
+
+@pytest.mark.parametrize("factory", [api.DMOptions, api.RAAROptions])
+@pytest.mark.parametrize("operator", [api.ShiftOperators.PATCH, api.ShiftOperators.FULL_OBJECT])
+def test_projection_denominator_policy(factory, operator):
+    options = factory()
+    options.reconstructor_options.forward_model_options.shift_operator = operator
+    reconstructor = make_task(options).reconstructor
+    weights = torch.tensor([[-1., 0., 0.01, 0.1, 1.]])
+    actual = reconstructor.stabilize_object_projection_denominator(weights)
+    if operator == api.ShiftOperators.PATCH:
+        assert actual is weights
+    else:
+        torch.testing.assert_close(actual, torch.tensor([[0.05, 0.05, 0.05, 0.1, 1.]]))
+        empty = reconstructor.stabilize_object_projection_denominator(torch.zeros_like(weights))
+        assert (empty > 0).all()
+    torch.testing.assert_close(weights, torch.tensor([[-1., 0., 0.01, 0.1, 1.]]))
+
+
+def test_raar_projection_preserves_original_illumination_mask():
+    task = make_task(api.RAAROptions())
+    reconstructor = task.reconstructor
+    denominator = torch.ones(task.object.lateral_shape)
+    denominator[0, :3] = torch.tensor([-0.1, 0., 0.01])
+    numerator = torch.full_like(task.object.data[0], 0.1 + 0.2j)
+    actual = reconstructor.finish_object_projection(numerator, denominator)
+    expected = numerator.clone()
+    expected[0, :2] = task.object.data[0, 0, :2]
+    expected[0, 2] = numerator[0, 2] / 0.05
+    torch.testing.assert_close(actual, expected)

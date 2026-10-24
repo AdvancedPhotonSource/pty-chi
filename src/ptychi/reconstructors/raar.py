@@ -238,13 +238,6 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
             )
         )
 
-    def stabilize_object_projection_denominator(self, denominator):
-        """Regularize the approximate full-object normalization."""
-        if self.forward_model.resolved_shift_operator != api.ShiftOperators.FULL_OBJECT:
-            return denominator
-        floor = (0.05 * denominator.max()).clamp_min(torch.finfo(denominator.dtype).tiny)
-        return denominator.clamp_min(floor)
-
     def finish_object_projection(self, numerator: Tensor, denominator: Tensor) -> Tensor:
         tiny = torch.finfo(denominator.dtype).tiny
         illuminated = denominator > tiny

@@ -280,13 +280,6 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         probe_numerator += numerator_update
         probe_denominator += denominator_update
 
-    def stabilize_object_projection_denominator(self, denominator):
-        """Regularize the approximate full-object normalization."""
-        if self.forward_model.resolved_shift_operator != api.ShiftOperators.FULL_OBJECT:
-            return denominator
-        floor = (0.05 * denominator.max()).clamp_min(torch.finfo(denominator.dtype).tiny)
-        return denominator.clamp_min(floor)
-
     @timer()
     def calculate_object_update(self, start_pts: list[int], end_pts: list[int]) -> Tensor:
         "Calculate and apply the object update."

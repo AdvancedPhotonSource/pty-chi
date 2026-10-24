@@ -683,6 +683,19 @@ class AnalyticalIterativePtychographyReconstructor(
             diffraction_pattern_blur_sigma=self.options.forward_model_options.diffraction_pattern_blur_sigma,
         )
 
+    def stabilize_object_projection_denominator(self, denominator: Tensor) -> Tensor:
+        """Floor full-object projection weights at 5% of their maximum.
+
+        DM and RAAR use this approximate normalization because fractional
+        full-object sampling couples pixels in the normal operator. PATCH
+        weights pass through unchanged. Algorithm-specific normalization and
+        masking are applied by each reconstructor after this shared floor.
+        """
+        if self.forward_model.resolved_shift_operator != enums.ShiftOperators.FULL_OBJECT:
+            return denominator
+        floor = (0.05 * denominator.max()).clamp_min(torch.finfo(denominator.dtype).tiny)
+        return denominator.clamp_min(floor)
+
     def run_post_epoch_hooks(self) -> None:
         with torch.no_grad():
             super().run_post_epoch_hooks()
