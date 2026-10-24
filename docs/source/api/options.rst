@@ -248,6 +248,108 @@ PIE Options
    :undoc-members:
    :show-inheritance:
 
+GM-rPIE and GM-MAGPIE Options
+----------------------------
+
+Both algorithms use ``MAGPIEOptions``. Set
+``reconstructor_options.multigrid_levels = 1`` for GM-rPIE or a larger
+valid depth for GM-MAGPIE. The initial implementation supports one object
+slice and one coherent shared probe, random minibatches, and matching
+object/probe/detector sampling. Object and probe must both be optimized
+on every minibatch, with unit SGD settings and no step-size schedulers.
+Native gradient position correction and post-epoch constraints remain available.
+
+.. code-block:: python
+
+   from ptychi.api import enums
+   from ptychi.api.options import MAGPIEOptions
+   from ptychi.api.task import PtychographyTask
+
+   options = MAGPIEOptions()
+   options.reconstructor_options.default_device = enums.Devices.CPU
+   options.reconstructor_options.multigrid_levels = 1  # GM-rPIE
+   # Supply your measured intensities, initial guesses, and positions.
+   task = PtychographyTask(
+       options,
+       diffraction_data=intensities,
+       object_data=object_guess,
+       probe_data=probe_guess,
+       probe_position_x_px=positions_x,
+       probe_position_y_px=positions_y,
+   )
+   task.run()
+
+Probe synthesis approximates the reference algorithm's weighted residual in
+common probe coordinates. Let :math:`S_k` be the native padded probe shift,
+:math:`d_k=\widetilde P_k-S_kP` the local geometric-mean probe correction, and
+:math:`\widetilde O_k` the local geometric-mean object patch. Define :math:`T_k`
+as the native coordinate shift with the opposite fractional displacement,
+using the same interpolation, replicate padding, and cropping. It differs
+from the actual padded adjoint :math:`S_k^*`.
+
+The shared probe correction minimizes a nonnegative weighted consensus:
+
+.. math::
+
+   a_k &= S_k^*d_k, \\
+   c_k &= |T_k\widetilde O_k|^2, \\
+   \Delta P &= \underset{\delta}{\operatorname{argmin}}\;
+       \frac12\sum_{k\in B}\left\|
+       (T_k\widetilde O_k)\odot(\delta-a_k)\right\|_2^2
+       = \frac{\sum_{k\in B}c_k\odot a_k}{\sum_{k\in B}c_k}, \\
+   P_{\mathrm{new}} &= P+\Delta P.
+
+Multiplication and division are elementwise; the displayed ratio applies where
+the total confidence is positive. The confidence has no floor or clipping.
+Zero total confidence uses the ordinary mean of the adjoint
+corrections. With finite intermediates, a singleton minibatch gives exactly
+its direct-adjoint correction, including a singleton at the end of a larger
+batch.
+
+For ideal coordinate translations on a full or periodic domain,
+:math:`T_k=S_k^{-1}=S_k^*`, and translation preserves both the norm and pointwise
+products. Consequently,
+
+.. math::
+
+   \left\|\widetilde O_k\odot(S_k\delta-d_k)\right\|_2^2
+   =\left\|(T_k\widetilde O_k)\odot(\delta-S_k^*d_k)\right\|_2^2.
+
+Discrete interpolation does not generally preserve products, and padding makes
+the reverse coordinate shift different from the adjoint. The implemented
+consensus is therefore an approximation; it does not guarantee exact
+minimization or monotone decrease of the original weighted residual objective.
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEReconstructorOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEObjectOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEProbeOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEProbePositionOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEOPRModeWeightsOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 LSQML Options
 -------------
 

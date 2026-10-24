@@ -57,6 +57,7 @@ def get_reconstructor_by_enum(key: enums.Reconstructors) -> Type["Reconstructor"
         enums.Reconstructors.PIE: reconstructors.PIEReconstructor,
         enums.Reconstructors.EPIE: reconstructors.EPIEReconstructor,
         enums.Reconstructors.RPIE: reconstructors.RPIEReconstructor,
+        enums.Reconstructors.MAGPIE: reconstructors.MAGPIEReconstructor,
         enums.Reconstructors.DM: reconstructors.DMReconstructor,
         enums.Reconstructors.RAAR: reconstructors.RAARReconstructor,
         enums.Reconstructors.BH: reconstructors.BHReconstructor,
