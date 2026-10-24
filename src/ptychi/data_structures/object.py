@@ -425,7 +425,7 @@ class PlanarObject(Object):
     @timer()
     def constrain_smoothness(self) -> None:
         """
-        Smooth the magnitude of the object.
+        Smooth the real and imaginary components of each object slice.
         """
         if self.options.smoothness_constraint.alpha <= 0:
             return
@@ -433,7 +433,7 @@ class PlanarObject(Object):
         if alpha > 1.0 / 8:
             logger.warning(f"Alpha = {alpha} in smoothness constraint should be less than 1/8.")
         psf = torch.ones(3, 3, device=self.tensor.data.device) * alpha
-        psf[2, 2] = 1 - 8 * alpha
+        psf[1, 1] = 1 - 8 * alpha
 
         data = self.data
         for i_slice in range(self.n_slices):
