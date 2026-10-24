@@ -22,6 +22,7 @@ class Test2dPtychoNearField(tutils.BaseTester):
         )
         
         options = api.LSQMLOptions()
+        options.reconstructor_options.forward_model_options.shift_operator = api.ShiftOperators.PATCH
         diffraction_data = data
         options.data_options.wavelength_m = 1240 / 33.35 * 1e-12
         options.data_options.free_space_propagation_distance_m = 0.0043
@@ -72,6 +73,7 @@ class Test2dPtychoNearField(tutils.BaseTester):
         )
         
         options = api.AutodiffPtychographyOptions()
+        options.reconstructor_options.forward_model_options.shift_operator = api.ShiftOperators.PATCH
         diffraction_data = data
         options.data_options.wavelength_m = 1240 / 33.35 * 1e-12
         options.data_options.free_space_propagation_distance_m = 0.0043

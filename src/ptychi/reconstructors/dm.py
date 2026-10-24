@@ -318,6 +318,9 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             )
 
         # Calculate DM object update
+        object_denominator = self.stabilize_object_projection_denominator(
+            object_denominator
+        )
         object_update = object_numerator / torch.sqrt(
             object_denominator**2 + (0.05 * object_denominator.max()) ** 2
         )
@@ -357,5 +360,6 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             None,
             probe,
             None,
+            object_gradients=lambda: self.forward_model.get_object_position_gradients(indices),
         )
         return self.forward_model.probe_displacements_to_object_pixels(delta_pos)

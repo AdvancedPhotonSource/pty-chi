@@ -612,7 +612,9 @@ class PlanarObject(Object):
         self, 
         probe: "ds.probe.Probe",
         probe_positions: "ds.probe_positions.ProbePositions",
-        use_all_modes: bool = False
+        use_all_modes: bool = False,
+        *,
+        sampling: Optional["ip.ObjectSamplingParameters"] = None,
     ) -> Tensor:
         """Calculate the illumination map by overlaying the probe intensity
         at all positions on a zero array. The map is used to calculate 
@@ -626,6 +628,12 @@ class PlanarObject(Object):
             The positions of the probe.
         use_all_modes : bool, optional
             Whether to use all modes of the probe.
+        sampling : ip.ObjectSamplingParameters, optional
+            Sampler, continuous absolute (y, x) centers, and object shape on
+            the probe pixel grid. Accumulate with the sampler's adjoint, then
+            apply normalized adjoint resizing to the native object grid and
+            keep the real, nonnegative result. If omitted, use integer patch
+            placement on the native object grid.
 
         Returns
         -------
@@ -641,41 +649,57 @@ class PlanarObject(Object):
         else:
             probe_int = probe.get_mode_and_opr_mode(mode=0, opr_mode=0)[None, ...].abs() ** 2
 
-        probe_pixel_width = (
-            self.pixel_size_m
-            if probe.options.pixel_size_m is None
-            else probe.options.pixel_size_m
-        )
-        probe_aspect_ratio = (
-            self.options.pixel_size_aspect_ratio
-            if probe.options.pixel_size_aspect_ratio is None
-            else probe.options.pixel_size_aspect_ratio
-        )
-        probe_pixel_height = probe_pixel_width / probe_aspect_ratio
-        object_pixel_height = self.pixel_size_m / self.options.pixel_size_aspect_ratio
-        physical_footprint_shape = (
-            max(1, round(probe_int.shape[-2] * probe_pixel_height / object_pixel_height)),
-            max(1, round(probe_int.shape[-1] * probe_pixel_width / self.pixel_size_m)),
-        )
-        if physical_footprint_shape != tuple(probe_int.shape[-2:]):
-            probe_int = ip.fourier_resize(probe_int, physical_footprint_shape).real.clamp_min_(0)
+        if sampling is None:
+            probe_pixel_width = (
+                self.pixel_size_m
+                if probe.options.pixel_size_m is None
+                else probe.options.pixel_size_m
+            )
+            probe_aspect_ratio = (
+                self.options.pixel_size_aspect_ratio
+                if probe.options.pixel_size_aspect_ratio is None
+                else probe.options.pixel_size_aspect_ratio
+            )
+            probe_pixel_height = probe_pixel_width / probe_aspect_ratio
+            object_pixel_height = self.pixel_size_m / self.options.pixel_size_aspect_ratio
+            physical_footprint_shape = (
+                max(1, round(probe_int.shape[-2] * probe_pixel_height / object_pixel_height)),
+                max(1, round(probe_int.shape[-1] * probe_pixel_width / self.pixel_size_m)),
+            )
+            if physical_footprint_shape != tuple(probe_int.shape[-2:]):
+                probe_int = ip.fourier_resize(probe_int, physical_footprint_shape).real.clamp_min_(0)
+
+            place_patches = ip.place_patches_integer
+            placement_kwargs = {"op": "add"}
+            positions_all = positions_all.round().int() + self.pos_origin_coords
+            image = torch.zeros_like(object_.real).type(torch.get_default_dtype())
+        else:
+            place_patches = sampling.sampler.place
+            placement_kwargs = {"integer_mode": False}
+            positions_all = sampling.positions
+            image = probe_int.new_zeros(sampling.shape)
 
         # Stitch probes of all positions on the object buffer
         # TODO: allow setting chunk size externally
         probe_sq_map = chunked_processing(
-            func=ip.place_patches_integer,
-            common_kwargs={"op": "add"},
+            func=place_patches,
+            common_kwargs=placement_kwargs,
             chunkable_kwargs={
-                "positions": positions_all.round().int() + self.pos_origin_coords,
+                "positions": positions_all,
             },
             iterated_kwargs={
-                "image": torch.zeros_like(object_.real).type(torch.get_default_dtype())
+                "image": image
             },
             replicated_kwargs={
                 "patches": probe_int,
             },
             chunk_size=64,
         )
+        if sampling is not None:
+            probe_sq_map = ip.fourier_resize(
+                probe_sq_map, tuple(self.lateral_shape),
+                adjoint=True, normalized_adjoint=True,
+            ).real.clamp_min(0)
         return probe_sq_map
 
     def update_preconditioner(
@@ -684,6 +708,8 @@ class PlanarObject(Object):
         probe_positions: "ds.probe_positions.ProbePositions",
         patterns: Tensor = None,
         use_all_modes: bool = False,
+        *,
+        sampling: Optional["ip.ObjectSamplingParameters"] = None,
     ) -> None:
         """Update the preconditioner. This function reproduces the behavior
         of PtychoShelves in `ptycho_solver`: it averages the new illumination
@@ -700,10 +726,18 @@ class PlanarObject(Object):
             if the preconditioner does not exist and needs to be initialized.
         use_all_modes : bool, optional
             Whether to use the sum of all probe modes' intensities for the illumination map.
+        sampling : ip.ObjectSamplingParameters, optional
+            Sampling parameters passed to ``calculate_illumination_map``.
         """
         if self.preconditioner is None:
-            self.initialize_preconditioner(probe, probe_positions, patterns, use_all_modes=use_all_modes)
-        illum_map = self.calculate_illumination_map(probe, probe_positions, use_all_modes=use_all_modes)
+            self.initialize_preconditioner(
+                probe, probe_positions, patterns, use_all_modes=use_all_modes,
+                sampling=sampling,
+            )
+        illum_map = self.calculate_illumination_map(
+            probe, probe_positions, use_all_modes=use_all_modes,
+            sampling=sampling,
+        )
         self.preconditioner = (self.preconditioner + illum_map) / 2
     
     def initialize_preconditioner(
@@ -712,6 +746,8 @@ class PlanarObject(Object):
         probe_positions: "ds.probe_positions.ProbePositions",
         patterns: Tensor,
         use_all_modes: bool = False,
+        *,
+        sampling: Optional["ip.ObjectSamplingParameters"] = None,
     ) -> None:
         """Initialize the preconditioner. This function reproduces the behavior
         of PtychoShelves in `init_solver` and `load_from_p`: the probe is first
@@ -728,12 +764,17 @@ class PlanarObject(Object):
             A (n_scan_points, h, w) tensor giving the diffraction patterns.
         use_all_modes : bool, optional
             Whether to use the sum of all probe modes' intensities for the illumination map.
+        sampling : ip.ObjectSamplingParameters, optional
+            Sampling parameters passed to ``calculate_illumination_map``.
         """
         probe_data = probe.data
         probe_renormalization_factor = get_probe_renormalization_factor(patterns)
         probe_data = probe_data / (math.sqrt(probe.shape[-1] * probe.shape[-2]) * 2 * probe_renormalization_factor)
         probe_temp = ds.probe.Probe(data=probe_data, options=copy.deepcopy(probe.options))
-        self.preconditioner = self.calculate_illumination_map(probe_temp, probe_positions, use_all_modes=use_all_modes)
+        self.preconditioner = self.calculate_illumination_map(
+            probe_temp, probe_positions, use_all_modes=use_all_modes,
+            sampling=sampling,
+        )
 
 
 class DIPObject(Object):

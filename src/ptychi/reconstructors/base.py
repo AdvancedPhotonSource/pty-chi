@@ -447,13 +447,20 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
                 )
             )
         ):
+            forward_model = self.forward_model
+            if isinstance(forward_model, torch.nn.parallel.DistributedDataParallel):
+                forward_model = forward_model.module
+            sampling = None
+            if hasattr(forward_model, "get_object_sampling_parameters"):
+                sampling = forward_model.get_object_sampling_parameters()
             self.parameter_group.object.update_preconditioner(
                 probe=self.parameter_group.probe,
                 probe_positions=self.parameter_group.probe_positions,
                 patterns=self.dataset.patterns,
-                use_all_modes=self.parameter_group.object.options.build_preconditioner_with_all_modes
+                use_all_modes=self.parameter_group.object.options.build_preconditioner_with_all_modes,
+                sampling=sampling,
             )
-            
+
     def run_pre_epoch_hooks(self) -> None:
         with torch.no_grad():
             self.update_preconditioners()
@@ -672,8 +679,22 @@ class AnalyticalIterativePtychographyReconstructor(
             free_space_propagation_distance_m=self.dataset.free_space_propagation_distance_m,
             pad_for_shift=self.options.forward_model_options.pad_for_shift,
             low_memory_mode=self.options.forward_model_options.low_memory_mode,
+            shift_operator=self.options.forward_model_options.shift_operator,
             diffraction_pattern_blur_sigma=self.options.forward_model_options.diffraction_pattern_blur_sigma,
         )
+
+    def stabilize_object_projection_denominator(self, denominator: Tensor) -> Tensor:
+        """Floor full-object projection weights at 5% of their maximum.
+
+        DM and RAAR use this approximate normalization because fractional
+        full-object sampling couples pixels in the normal operator. PATCH
+        weights pass through unchanged. Algorithm-specific normalization and
+        masking are applied by each reconstructor after this shared floor.
+        """
+        if self.forward_model.resolved_shift_operator != enums.ShiftOperators.FULL_OBJECT:
+            return denominator
+        floor = (0.05 * denominator.max()).clamp_min(torch.finfo(denominator.dtype).tiny)
+        return denominator.clamp_min(floor)
 
     def run_post_epoch_hooks(self) -> None:
         with torch.no_grad():
@@ -754,6 +775,8 @@ class AnalyticalIterativePtychographyReconstructor(
         Tensor
             A (batch_size, n_probe_modes, h, w) tensor giving the shifted probe update direction.
         """
+        if not getattr(self.forward_model, "apply_subpixel_shifts_on_probe", True):
+            return delta_p
         orig_shape = delta_p.shape
         fractional_shifts = self.forward_model.get_probe_grid_position_data()[2][indices]
         

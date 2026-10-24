@@ -1532,6 +1532,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             delta_o_patches,
             unique_probes,
             self.parameter_group.object.step_size,
+            object_gradients=lambda: self.forward_model.get_object_position_gradients(indices),
         )
         if getattr(self.forward_model, "resampling_enabled", False):
             delta_pos = self.forward_model.probe_displacements_to_object_pixels(delta_pos)

@@ -12,6 +12,7 @@ from ptychi.reconstructors.base import (
 from ptychi.metrics import MSELossOfSqrt
 from ptychi.maths import reprod, redot
 from ptychi.utils import get_default_complex_dtype
+from ptychi.api.enums import ShiftOperators
 import ptychi.forward_models as fm
 import ptychi.image_proc as ip
 
@@ -70,6 +71,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
             free_space_propagation_distance_m=self.dataset.free_space_propagation_distance_m,
             pad_for_shift=self.options.forward_model_options.pad_for_shift,
             low_memory_mode=self.options.forward_model_options.low_memory_mode,
+            shift_operator=self.options.forward_model_options.shift_operator,
             apply_subpixel_shifts_on_probe=False
         )
 
@@ -193,6 +195,75 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         return (delta_o, delta_p_all_modes, delta_pos), y
 
+    def refresh_object_direction_patches(self, direction, positions, patches):
+        r"""Resample a cached object search direction at the current positions.
+
+        FULL_OBJECT returns :math:`\widetilde{\Delta O}(u+q_y-(p_y-1)/2,
+        v+q_x-(p_x-1)/2)` on the fixed retained support, with zero padded
+        margins. Here :math:`q` is the current absolute probe-grid center and
+        :math:`p` is the probe shape. PATCH retains its cached ``patches``.
+        """
+        if self.forward_model.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
+            return patches
+        return self.forward_model.object_sampling_derivative(positions, (0, 0), direction)
+
+    def position_directional_derivative(
+        self, patches, positions, direction, *, object_array=None, second_direction=None
+    ):
+        r"""Evaluate first or mixed second position derivatives for BH curvature.
+
+        For each position, let :math:`S(q)` denote its sampled object patch
+        and :math:`d=(d_y,d_x)` the supplied ``direction`` in probe-grid pixels.
+        With no ``second_direction``, return
+
+        .. math::
+
+            D_d S = d_y\partial_{q_y}S + d_x\partial_{q_x}S.
+
+        With ``second_direction`` :math:`e=(e_y,e_x)`, return
+
+        .. math::
+
+            D_e D_d S = d_y e_y\partial_{q_y}^2 S
+                + (d_y e_x+d_x e_y)\partial_{q_y}\partial_{q_x}S
+                + d_x e_x\partial_{q_x}^2 S.
+
+        Directions are held fixed during differentiation. FULL_OBJECT uses
+        probe-grid derivatives of the complete object before cropping,
+        provided by ``object_sampling_derivative``.
+        ``positions`` are in native object pixels; ``object_array`` optionally
+        supplies a native-grid object update direction in place of the object.
+
+        PATCH Fourier-differentiates ``patches`` on their own periodic grid:
+        the multiplier is :math:`2\pi i(f_y d_y+f_x d_x)`, multiplied by
+        :math:`2\pi i(f_y e_y+f_x e_x)` for the second derivative. The output
+        retains shape ``(batch_size, n_slices, probe_height, probe_width)``.
+        """
+        if self.forward_model.resolved_shift_operator == ShiftOperators.FULL_OBJECT:
+            def derivative(order):
+                return self.forward_model.object_sampling_derivative(positions, order, object_array)
+            dy, dx = direction[:, 0, None, None, None], direction[:, 1, None, None, None]
+            if second_direction is None:
+                return dy * derivative((1, 0)) + dx * derivative((0, 1))
+            ey = second_direction[:, 0, None, None, None]
+            ex = second_direction[:, 1, None, None, None]
+            return (
+                dy * ey * derivative((2, 0))
+                + (dy * ex + dx * ey) * derivative((1, 1))
+                + dx * ex * derivative((0, 2))
+            )
+        fy = torch.fft.fftfreq(patches.shape[-2], device=patches.device)
+        fx = torch.fft.fftfreq(patches.shape[-1], device=patches.device)
+        def factor(vector):
+            return 2j * torch.pi * (
+                fy[None, None, :, None] * vector[:, 0, None, None, None]
+                + fx[None, None, None, :] * vector[:, 1, None, None, None]
+            )
+        multiplier = factor(direction)
+        if second_direction is not None:
+            multiplier = multiplier * factor(second_direction)
+        return torch.fft.ifft2(torch.fft.fft2(patches) * multiplier)
+
     def compute_updates_object(self, op, p, psi_far, gradF, d):
         grad_o, grad_op = self.gradient_o(p, gradF)
 
@@ -201,7 +272,9 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
             eta_op = -grad_op
         elif self.options.method == "CG":
             eta_o = self.eta_o
-            eta_op = self.eta_op[self.indices]
+            eta_op = self.refresh_object_direction_patches(
+                eta_o, self.positions, self.eta_op[self.indices]
+            )
 
             beta = self.calc_beta_object(p, d, psi_far, grad_op, eta_op)
             eta_o = -grad_o + beta * eta_o
@@ -231,7 +304,9 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         elif self.options.method == "CG":
             # intermediate variables for the CG
             eta_o = self.eta_o
-            eta_op = self.eta_op[self.indices]
+            eta_op = self.refresh_object_direction_patches(
+                eta_o, self.positions, self.eta_op[self.indices]
+            )
             eta_p = self.eta_p
 
             beta = self.calc_beta_object_probe(
@@ -272,12 +347,15 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         elif self.options.method == "CG":
             # intermediate variables for the CG
             eta_o = self.eta_o
-            eta_op = self.eta_op[self.indices]
+            eta_op = self.refresh_object_direction_patches(
+                eta_o, self.positions, self.eta_op[self.indices]
+            )
             eta_p = self.eta_p
             eta_pos = self.eta_pos[self.indices]
 
             beta = self.calc_beta_object_probe_positions(
-                p, grad_p, eta_p, grad_pos, eta_pos, d, gradF, psi_far, op, grad_op, eta_op
+                p, grad_p, eta_p, grad_pos, eta_pos, d, gradF, psi_far, op, grad_op, eta_op,
+                do1=grad_o, do2=eta_o,
             )
             eta_o = -grad_o + beta * eta_o
             eta_op = -grad_op + beta * eta_op
@@ -389,14 +467,12 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
     def gradient_pos(self, op, p, pos, gradF):
         """Gradient with respect to positions"""
 
-        xi1 = torch.fft.fftfreq(op.shape[-1])
-        xi2, xi1 = torch.meshgrid(xi1, xi1, indexing="xy")
+        direction = torch.zeros_like(pos)
+        direction[:, 0] = 1
+        dt1 = self.position_directional_derivative(op, pos, direction)
+        dt2 = self.position_directional_derivative(op, pos, direction.flip(-1))
 
-        tmp = torch.fft.fft2(op)
-        dt1 = 2 * torch.pi * 1j * torch.fft.ifft2(xi1 * tmp)
-        dt2 = 2 * torch.pi * 1j * torch.fft.ifft2(xi2 * tmp)
-
-        grad_pos = torch.zeros([len(pos), 2])
+        grad_pos = torch.zeros_like(pos)
         grad_pos[:, 0] = redot(gradF, p * dt1, axis=(1, 2, 3))
         grad_pos[:, 1] = redot(gradF, p * dt2, axis=(1, 2, 3))
 
@@ -434,23 +510,10 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         dp2 = self.parameter_group.probe.options.rho * dp2
         dpos2 = self.parameter_group.probe_positions.options.rho * dpos2
 
-        xi1 = torch.fft.fftfreq(p.shape[-1])
-        [xi2, xi1] = torch.meshgrid(xi1, xi1, indexing="xy")
-
-        dpos2 = dpos2[:, :, None, None, None]
-        w1 = xi1 * dpos2[:, 0] + xi2 * dpos2[:, 1]
-        w2 = (
-            xi1**2 * dpos2[:, 0] ** 2
-            + 2 * xi1 * xi2 * (dpos2[:, 0] * dpos2[:, 1])
-            + xi2**2 * dpos2[:, 1] ** 2
-        )
-
-        tmp = torch.fft.fft2(dop2)
-        dt2 = 2 * torch.pi * 1j * torch.fft.ifft2(w1 * tmp)
-
-        tmp = torch.fft.fft2(op)
-        dt = 2 * torch.pi * 1j * torch.fft.ifft2(w1 * tmp)
-        d2t = -4 * torch.pi**2 * torch.fft.ifft2(w2 * tmp)
+        derivative = self.position_directional_derivative
+        dt2 = derivative(dop2, self.positions, dpos2, object_array=do2)
+        dt = derivative(op, self.positions, dpos2)
+        d2t = derivative(op, self.positions, dpos2, second_direction=dpos2)
 
         dm2 = dp2 * op + p * (dop2 + dt)
         d2m2 = p * (2 * dt2 + d2t) + 2 * dp2 * dop2 + 2 * dp2 * dt
@@ -492,7 +555,8 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         return top / bottom
 
     def calc_beta_object_probe_positions(
-        self, p, dp1, dp2, dpos1, dpos2, d, gradF, psi_far, op, dop1, dop2
+        self, p, dp1, dp2, dpos1, dpos2, d, gradF, psi_far, op, dop1, dop2,
+        *, do1=None, do2=None,
     ):
         """Step length for the CG direction with respect to the object, probe and positions"""
 
@@ -502,38 +566,14 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         dpos1 = self.parameter_group.probe_positions.options.rho * dpos1
         dpos2 = self.parameter_group.probe_positions.options.rho * dpos2
 
-        xi1 = torch.fft.fftfreq(p.shape[-1])
-        [xi2, xi1] = torch.meshgrid(xi1, xi1, indexing="xy")
-
-        dpos1 = dpos1[:, :, None, None, None]
-        dpos2 = dpos2[:, :, None, None, None]
-
-        w1 = xi1 * dpos1[:, 0] + xi2 * dpos1[:, 1]
-        w2 = xi1 * dpos2[:, 0] + xi2 * dpos2[:, 1]
-        w12 = (
-            xi1**2 * dpos1[:, 0] * dpos2[:, 0]
-            + xi1 * xi2 * (dpos1[:, 0] * dpos2[:, 1] + dpos1[:, 1] * dpos2[:, 0])
-            + xi2**2 * dpos1[:, 1] * dpos2[:, 1]
-        )
-        w22 = (
-            xi1**2 * dpos2[:, 0] ** 2
-            + 2 * xi1 * xi2 * (dpos2[:, 0] * dpos2[:, 1])
-            + xi2**2 * dpos2[:, 1] ** 2
-        )
-
-        tmp = torch.fft.fft2(dop1)
-        dt12 = 2 * torch.pi * 1j * torch.fft.ifft2(w2 * tmp)
-
-        tmp = torch.fft.fft2(dop2)
-        dt21 = 2 * torch.pi * 1j * torch.fft.ifft2(w1 * tmp)
-        dt22 = 2 * torch.pi * 1j * torch.fft.ifft2(w2 * tmp)
-
-        tmp = torch.fft.fft2(op)
-        dt1 = 2 * torch.pi * 1j * torch.fft.ifft2(w1 * tmp)
-        dt2 = 2 * torch.pi * 1j * torch.fft.ifft2(w2 * tmp)
-
-        d2t1 = -4 * torch.pi**2 * torch.fft.ifft2(w12 * tmp)
-        d2t2 = -4 * torch.pi**2 * torch.fft.ifft2(w22 * tmp)
+        derivative = self.position_directional_derivative
+        dt12 = derivative(dop1, self.positions, dpos2, object_array=do1)
+        dt21 = derivative(dop2, self.positions, dpos1, object_array=do2)
+        dt22 = derivative(dop2, self.positions, dpos2, object_array=do2)
+        dt1 = derivative(op, self.positions, dpos1)
+        dt2 = derivative(op, self.positions, dpos2)
+        d2t1 = derivative(op, self.positions, dpos1, second_direction=dpos2)
+        d2t2 = derivative(op, self.positions, dpos2, second_direction=dpos2)
 
         dm1 = dp1 * op + p * (dop1 + dt1)
         dm2 = dp2 * op + p * (dop2 + dt2)
