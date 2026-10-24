@@ -566,7 +566,9 @@ class PlanarPtychographyForwardModel(ForwardModel):
             image, centers, patch_shape, integer_mode=integer_mode
         )
 
-    def object_position_derivative(self, positions, derivative, object_array=None):
+    def object_position_derivative(
+        self, positions, derivative, object_array=None, *, slice_index=None
+    ):
         r"""Differentiate full-object sampling with respect to native pixel positions.
 
         Let :math:`t=(t_y,t_x)` be a supplied position, :math:`o` the position
@@ -595,7 +597,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
         ``object_array`` optionally supplies a native-grid object or update
         direction, which is resampled before differentiation. The result has
         shape ``(batch_size, n_slices, probe_height, probe_width)``.
-        Returns ``None`` for PATCH sampling.
+        ``slice_index`` selects one slice before differentiation and retains
+        a singleton slice dimension. Returns ``None`` for PATCH sampling.
         """
         if self.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
             return None
@@ -605,6 +608,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
             object_array = ip.fourier_resize(object_array, self.probe_grid_object_shape)
         if object_array.ndim == 2:
             object_array = object_array[None]
+        if slice_index is not None:
+            object_array = object_array[slice_index][None]
         centers = self.transform_positions(positions, absolute=True)
         scale = self.probe_grid_scale if self.resampling_enabled else (1, 1)
         factor = scale[0] ** derivative[0] * scale[1] ** derivative[1]
@@ -644,7 +649,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
             slice_index = self.probe_positions.get_slice_for_correction(self.object.n_slices)
         scale = self.probe_grid_scale if self.resampling_enabled else (1, 1)
         return tuple(
-            self.object_position_derivative(positions, order)[:, slice_index] / scale[axis]
+            self.object_position_derivative(positions, order, slice_index=slice_index)[:, 0] / scale[axis]
             for axis, order in enumerate(((1, 0), (0, 1)))
         )
 

@@ -395,3 +395,49 @@ def test_standalone_illumination_map_keeps_integer_placement():
     )
     actual = task.object.calculate_illumination_map(task.probe, task.probe_positions)
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("factory", [api.EPIEOptions, api.LSQMLOptions])
+def test_cross_correlation_does_not_request_gradients(factory, monkeypatch):
+    options = factory()
+    options.probe_position_options.correction_options.correction_type = (
+        api.PositionCorrectionTypes.CROSS_CORRELATION
+    )
+    task = make_task(options, optimize_positions=True)
+
+    def unexpected_gradients(*args, **kwargs):
+        pytest.fail("Cross-correlation requested object gradients")
+
+    monkeypatch.setattr(task.reconstructor.forward_model, "get_object_position_gradients",
+                        unexpected_gradients)
+    task.run()
+
+
+@pytest.mark.parametrize("resample", [False, True])
+def test_selected_slice_gradients_match_full_derivatives(resample, monkeypatch):
+    options = api.EPIEOptions()
+    options.reconstructor_options.forward_model_options.shift_operator = api.ShiftOperators.FULL_OBJECT
+    if resample:
+        options.probe_options.pixel_size_m = 0.8e-6
+        options.probe_options.pixel_size_aspect_ratio = 1.2
+    task = make_task(options, n_slices=3)
+    with torch.no_grad():
+        task.object.set_data(torch.randn_like(task.object.data))
+    model = task.reconstructor.forward_model
+    indices = torch.arange(3)
+    expected = tuple(
+        model.object_position_derivative(task.probe_positions.tensor, order)[:, 1]
+        / model.probe_grid_scale[axis]
+        for axis, order in enumerate(((1, 0), (0, 1)))
+    )
+    calls = []
+    extract = ip.extract_patches_full_object
+
+    def counted_extract(*args, **kwargs):
+        calls.append(kwargs["derivative"])
+        return extract(*args, **kwargs)
+
+    monkeypatch.setattr(ip, "extract_patches_full_object", counted_extract)
+    actual = model.get_object_position_gradients(indices, slice_index=1)
+    torch.testing.assert_close(actual, expected)
+    assert calls == [(1, 0), (0, 1)]

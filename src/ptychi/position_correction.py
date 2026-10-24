@@ -51,12 +51,20 @@ class PositionCorrection:
         object_step_size : float
             The step size/learning rate of the object optimizer.
 
+        object_gradients : tuple[Tensor, Tensor] or callable, optional
+            Sampling derivatives (dody, dodx) in probe-pixel units, each with
+            shape (batch_size, height, width). A zero-argument callable is
+            evaluated only for gradient correction and may return None to use
+            the configured patch-gradient approximation.
+
         Returns
         -------
         Tensor
             A (n_positions, 2) tensor of updates to the probe positions.
         """
         if self.options.correction_type is api.PositionCorrectionTypes.GRADIENT:
+            if callable(object_gradients):
+                object_gradients = object_gradients()
             return self.get_gradient_update(
                 chi, obj_patches, unique_probes, object_gradients=object_gradients
             )

@@ -367,6 +367,6 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             None,
             probe,
             None,
-            object_gradients=self.forward_model.get_object_position_gradients(indices),
+            object_gradients=lambda: self.forward_model.get_object_position_gradients(indices),
         )
         return self.forward_model.probe_displacements_to_object_pixels(delta_pos)

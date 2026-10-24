@@ -128,7 +128,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                     delta_o_patches,
                     self.forward_model.intermediate_variables.shifted_unique_probes[i_slice],
                     object_.step_size,
-                    object_gradients=self.forward_model.get_object_position_gradients(indices, i_slice),
+                    object_gradients=lambda: self.forward_model.get_object_position_gradients(indices, i_slice),
                 )
                 delta_pos[indices] = self.forward_model.probe_displacements_to_object_pixels(
                     delta_pos_i
