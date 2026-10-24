@@ -1,69 +1,43 @@
-import argparse
-
-import torch
 import pytest
+import torch
 
-import ptychi.api as api
-from ptychi.api.task import PtychographyTask
-from ptychi.utils import get_suggested_object_size, get_default_complex_dtype, generate_initial_opr_mode_weights
-
-import test_utils as tutils
+from ptychi.api.options.base import ObjectOptions
+from ptychi.data_structures.object import PlanarObject
 
 
-class Test2dPtychoSmoothness(tutils.TungstenDataTester):
-    
-    @pytest.mark.local
-    @tutils.TungstenDataTester.wrap_recon_tester(name='test_2d_ptycho_smoothness')
-    def test_2d_ptycho_smoothness(self):        
-        self.setup_ptychi(cpu_only=False)
+@pytest.mark.parametrize("alpha", [0.0, 0.01, 0.05, 1.0 / 8])
+def test_smoothness_impulse_response(alpha):
+    options = ObjectOptions(optimizable=False, slice_spacings_m=[1e-6])
+    options.smoothness_constraint.alpha = alpha
+    data = torch.zeros((2, 7, 7), dtype=torch.complex64)
+    data[0, 3, 3] = 1
+    data[1, 2, 4] = -2 + 3j
+    object_ = PlanarObject(data=data, options=options)
 
-        data, probe, pixel_size_m, positions_px = self.load_tungsten_data(pos_type='true')
-        
-        options = api.LSQMLOptions()
-        diffraction_data = data
-        
-        object_data = torch.ones([1, *get_suggested_object_size(positions_px, probe.shape[-2:], extra=100)], dtype=get_default_complex_dtype())
-        options.object_options.pixel_size_m = pixel_size_m
-        options.object_options.optimizable = True
-        options.object_options.optimizer = api.Optimizers.SGD
-        options.object_options.step_size = 1
-        options.object_options.build_preconditioner_with_all_modes = True
-        options.object_options.smoothness_constraint.enabled = True
-        options.object_options.smoothness_constraint.alpha = 0.05
-        
-        probe_data = probe
-        options.probe_options.optimizable = True
-        options.probe_options.optimizer = api.Optimizers.SGD
-        options.probe_options.step_size = 1
+    object_.constrain_smoothness()
 
-        probe_position_x_px = positions_px[:, 1]
-        probe_position_y_px = positions_px[:, 0]
-        options.probe_position_options.optimizable = False
-        
-        options.reconstructor_options.batch_size = 96
-        options.reconstructor_options.noise_model = api.NoiseModels.GAUSSIAN
-        options.reconstructor_options.num_epochs = 8
-        options.reconstructor_options.allow_nondeterministic_algorithms = False
-        
-        task = PtychographyTask(
-            options,
-            diffraction_data=diffraction_data,
-            object_data=object_data,
-            probe_data=probe_data,
-            probe_position_x_px=probe_position_x_px,
-            probe_position_y_px=probe_position_y_px,
-        )
-        task.run()
-        
-        recon = task.get_data_to_cpu('object', as_numpy=True)[0]
-        return recon
+    # An interior impulse exposes the kernel weights and their spatial alignment.
+    kernel = torch.tensor([
+        [alpha, alpha, alpha],
+        [alpha, 1 - 8 * alpha, alpha],
+        [alpha, alpha, alpha],
+    ])
+    expected = torch.zeros_like(data)
+    expected[0, 2:5, 2:5] = kernel
+    expected[1, 1:4, 3:6] = (-2 + 3j) * kernel
+    torch.testing.assert_close(object_.data, expected)
 
-    
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--generate-gold', action='store_true')
-    args = parser.parse_args()
 
-    tester = Test2dPtychoSmoothness()
-    tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=True)
-    tester.test_2d_ptycho_smoothness()
+def test_smoothness_complex_values_with_replicated_boundaries():
+    options = ObjectOptions(optimizable=False)
+    options.smoothness_constraint.alpha = 1.0 / 8
+    data = torch.tensor([[[1 + 4j, 2 - 2j], [3 + 0j, 4 + 6j]]], dtype=torch.complex64)
+    object_ = PlanarObject(data=data, options=options)
+
+    object_.constrain_smoothness()
+
+    # At alpha=1/8, each pixel is the mean of its eight replicated neighbors.
+    expected = torch.tensor(
+        [[[17 + 14j, 19 + 14j], [21 + 18j, 23 + 18j]]], dtype=torch.complex64
+    ) / 8
+    torch.testing.assert_close(object_.data, expected)

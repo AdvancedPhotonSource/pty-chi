@@ -326,7 +326,7 @@ class ObjectL2NormConstraintOptions(FeatureOptions):
 
 @dataclass
 class ObjectSmoothnessConstraintOptions(FeatureOptions):
-    """Settings for smoothing of the magnitude (but not the phase) of the object"""
+    """Settings for smoothing the real and imaginary components of the object."""
 
     enabled: bool = False
 
@@ -344,7 +344,7 @@ class ObjectSmoothnessConstraintOptions(FeatureOptions):
         alpha, 1 - 8 * alpha, alpha
         alpha, alpha,         alpha
 
-    and convolve it with the object magnitude. When `alpha == 1 / 8`, the smoothing power
+    and convolving it with each complex object slice. When `alpha == 1 / 8`, the smoothing power
     is maximal. The value of alpha should not be larger than 1 / 8.
     """
 
