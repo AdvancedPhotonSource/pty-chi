@@ -566,10 +566,10 @@ class PlanarPtychographyForwardModel(ForwardModel):
             image, centers, patch_shape, integer_mode=integer_mode
         )
 
-    def object_position_derivative(
+    def object_sampling_derivative(
         self, positions, derivative, object_array=None, *, slice_index=None
     ):
-        r"""Differentiate full-object sampling with respect to native pixel positions.
+        r"""Differentiate full-object sampling with respect to probe-grid centers.
 
         Let :math:`t=(t_y,t_x)` be a supplied position, :math:`o` the position
         origin, and :math:`g=(g_y,g_x)` the native-to-probe pixel scale. The
@@ -578,14 +578,16 @@ class PlanarPtychographyForwardModel(ForwardModel):
 
         .. math::
 
-            \frac{\partial^{m+n} O_q(u,v)}{\partial t_y^m\partial t_x^n}
-            = g_y^m g_x^n
+            \frac{\partial^{m+n} O_q(u,v)}{\partial q_y^m\partial q_x^n}
+            =
               \frac{\partial^{m+n}\widetilde O}{\partial y^m\partial x^n}
               \left(u+q_y-\frac{p_y-1}{2},\,
                     v+q_x-\frac{p_x-1}{2}\right).
 
         Here :math:`p` is the probe shape and :math:`\widetilde O` is the
         periodic interpolant of the complete object on the probe grid.
+        Input positions remain in native object pixels; derivative units are
+        inverse probe-grid pixels to order ``m + n``.
         Derivatives are evaluated before the fixed crop/pad; padded margins
         are zero. Order ``(0, 0)`` returns the sampled object itself.
         Fourier derivatives use factors :math:`(2\pi i f_y)^m(2\pi i f_x)^n`.
@@ -611,13 +613,11 @@ class PlanarPtychographyForwardModel(ForwardModel):
         if slice_index is not None:
             object_array = object_array[slice_index][None]
         centers = self.transform_positions(positions, absolute=True)
-        scale = self.probe_grid_scale if self.resampling_enabled else (1, 1)
-        factor = scale[0] ** derivative[0] * scale[1] ** derivative[1]
         return torch.stack([
             ip.extract_patches_full_object(
                 plane, centers, self.probe.get_spatial_shape(),
                 self.object.options.patch_interpolation_method, derivative=derivative,
-            ) * factor for plane in object_array
+            ) for plane in object_array
         ], dim=1)
 
     def get_object_position_gradients(self, indices, slice_index=None):
@@ -638,7 +638,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
                     \frac{1}{g_x}\frac{\partial O_q}{\partial t_x}\right).
 
         Each tensor has shape ``(batch_size, probe_height, probe_width)``.
-        The derivatives come from ``object_position_derivative`` before
+        The derivatives come from ``object_sampling_derivative`` before
         cropping. Returns ``None`` for PATCH sampling so position correction
         uses its existing patch-gradient approximation.
         """
@@ -647,10 +647,9 @@ class PlanarPtychographyForwardModel(ForwardModel):
         positions = self.probe_positions.tensor[indices]
         if slice_index is None:
             slice_index = self.probe_positions.get_slice_for_correction(self.object.n_slices)
-        scale = self.probe_grid_scale if self.resampling_enabled else (1, 1)
         return tuple(
-            self.object_position_derivative(positions, order, slice_index=slice_index)[:, 0] / scale[axis]
-            for axis, order in enumerate(((1, 0), (0, 1)))
+            self.object_sampling_derivative(positions, order, slice_index=slice_index)[:, 0]
+            for order in ((1, 0), (0, 1))
         )
 
     def object_update_to_native_grid(self, update: Tensor, *, normalized: bool = False) -> Tensor:

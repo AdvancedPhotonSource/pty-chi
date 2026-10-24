@@ -205,7 +205,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         if self.forward_model.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
             return patches
-        return self.forward_model.object_position_derivative(positions, (0, 0), direction)
+        return self.forward_model.object_sampling_derivative(positions, (0, 0), direction)
 
     def position_directional_derivative(
         self, patches, positions, direction, *, object_array=None, second_direction=None
@@ -229,8 +229,8 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
                 + d_x e_x\partial_{q_x}^2 S.
 
         Directions are held fixed during differentiation. FULL_OBJECT uses
-        derivatives of the complete object before cropping, dividing out the
-        native-to-probe scale factors from ``object_position_derivative``.
+        probe-grid derivatives of the complete object before cropping,
+        provided by ``object_sampling_derivative``.
         ``positions`` are in native object pixels; ``object_array`` optionally
         supplies a native-grid object update direction in place of the object.
 
@@ -240,11 +240,8 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         retains shape ``(batch_size, n_slices, probe_height, probe_width)``.
         """
         if self.forward_model.resolved_shift_operator == ShiftOperators.FULL_OBJECT:
-            scale = self.forward_model.probe_grid_scale if self.forward_model.resampling_enabled else (1, 1)
             def derivative(order):
-                return self.forward_model.object_position_derivative(positions, order, object_array) / (
-                    scale[0] ** order[0] * scale[1] ** order[1]
-                )
+                return self.forward_model.object_sampling_derivative(positions, order, object_array)
             dy, dx = direction[:, 0, None, None, None], direction[:, 1, None, None, None]
             if second_direction is None:
                 return dy * derivative((1, 0)) + dx * derivative((0, 1))

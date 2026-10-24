@@ -426,9 +426,8 @@ def test_selected_slice_gradients_match_full_derivatives(resample, monkeypatch):
     model = task.reconstructor.forward_model
     indices = torch.arange(3)
     expected = tuple(
-        model.object_position_derivative(task.probe_positions.tensor, order)[:, 1]
-        / model.probe_grid_scale[axis]
-        for axis, order in enumerate(((1, 0), (0, 1)))
+        model.object_sampling_derivative(task.probe_positions.tensor, order)[:, 1]
+        for order in ((1, 0), (0, 1))
     )
     calls = []
     extract = ip.extract_patches_full_object
@@ -441,3 +440,36 @@ def test_selected_slice_gradients_match_full_derivatives(resample, monkeypatch):
     actual = model.get_object_position_gradients(indices, slice_index=1)
     torch.testing.assert_close(actual, expected)
     assert calls == [(1, 0), (0, 1)]
+
+
+@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest"])
+def test_sampling_derivative_units_on_anisotropic_grid(method):
+    options = api.EPIEOptions()
+    options.reconstructor_options.forward_model_options.shift_operator = api.ShiftOperators.FULL_OBJECT
+    options.probe_options.pixel_size_m = 0.8e-6
+    options.probe_options.pixel_size_aspect_ratio = 1.2
+    task = make_task(options, method=method)
+    with torch.no_grad():
+        task.object.set_data(torch.randn_like(task.object.data))
+    model = task.reconstructor.forward_model
+    positions = task.probe_positions.tensor
+    weights = torch.randn(3, 8, 9, dtype=torch.complex128)
+
+    def loss(p):
+        patches = model.extract_probe_grid_patches(model.get_probe_grid_object()[0], p)
+        return (patches.conj() * weights).real.sum()
+
+    gradient = torch.autograd.functional.jacobian(loss, positions)
+    hessian = torch.autograd.functional.hessian(loss, positions)
+    scale = model.probe_grid_scale
+    for axis, order in enumerate(((1, 0), (0, 1))):
+        derivative = model.object_sampling_derivative(positions, order)[:, 0]
+        actual = (derivative.conj() * weights).real.sum((-2, -1))
+        torch.testing.assert_close(actual, gradient[:, axis] / scale[axis])
+        for other in range(2):
+            second_order = list(order)
+            second_order[other] += 1
+            derivative = model.object_sampling_derivative(positions, second_order)[:, 0]
+            actual = (derivative.conj() * weights).real.sum((-2, -1))
+            expected = hessian[torch.arange(3), axis, torch.arange(3), other]
+            torch.testing.assert_close(actual, expected / (scale[axis] * scale[other]))
