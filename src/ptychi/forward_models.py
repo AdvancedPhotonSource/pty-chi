@@ -267,7 +267,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
             self.pad_for_shift,
         )
 
-    def get_object_patch_sampler(self) -> Optional[ip.ObjectPatchSampler]:
+    def get_object_patch_sampler(self) -> Optional["ip.ObjectPatchSampler"]:
         """Return the full-object sampler, or None for default patch placement."""
         if self.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
             return None

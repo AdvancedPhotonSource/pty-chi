@@ -197,7 +197,8 @@ def test_triton_always_uses_deterministic_kernel(
     assert modes == [True]
 
 
-def test_import_and_cpu_accumulation_without_triton():
+@pytest.mark.parametrize("block_triton", [False, True])
+def test_import_and_cpu_accumulation(block_triton):
     script = """
 import sys
 import importlib.abc
@@ -205,7 +206,8 @@ class NoTriton(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, *args):
         if fullname == 'triton' or fullname.startswith('triton.'):
             raise ImportError('Triton is unavailable')
-sys.meta_path.insert(0, NoTriton())
+if sys.argv[1] == 'True':
+    sys.meta_path.insert(0, NoTriton())
 import torch
 import ptychi.image_proc as ip
 image = torch.zeros(4, 5)
@@ -214,4 +216,6 @@ result = ip.batch_put(image, patches, torch.tensor([1]), torch.tensor([1]))
 assert result.sum().item() == 6
 assert 'ptychi.triton.patch_kernels' not in sys.modules
 """
-    subprocess.run([sys.executable, "-c", script], check=True, env=os.environ.copy())
+    subprocess.run(
+        [sys.executable, "-c", script, str(block_triton)], check=True, env=os.environ.copy()
+    )

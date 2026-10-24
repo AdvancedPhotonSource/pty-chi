@@ -614,7 +614,7 @@ class PlanarObject(Object):
         probe_positions: "ds.probe_positions.ProbePositions",
         use_all_modes: bool = False,
         *,
-        sampler: Optional[ip.ObjectPatchSampler] = None,
+        sampler: Optional["ip.ObjectPatchSampler"] = None,
         sampling_positions: Optional[Tensor] = None,
         sampling_shape: Optional[Tuple[int, int]] = None,
     ) -> Tensor:
@@ -715,7 +715,7 @@ class PlanarObject(Object):
         patterns: Tensor = None,
         use_all_modes: bool = False,
         *,
-        sampler: Optional[ip.ObjectPatchSampler] = None,
+        sampler: Optional["ip.ObjectPatchSampler"] = None,
         sampling_positions: Optional[Tensor] = None,
         sampling_shape: Optional[Tuple[int, int]] = None,
     ) -> None:
@@ -761,7 +761,7 @@ class PlanarObject(Object):
         patterns: Tensor,
         use_all_modes: bool = False,
         *,
-        sampler: Optional[ip.ObjectPatchSampler] = None,
+        sampler: Optional["ip.ObjectPatchSampler"] = None,
         sampling_positions: Optional[Tensor] = None,
         sampling_shape: Optional[Tuple[int, int]] = None,
     ) -> None:
