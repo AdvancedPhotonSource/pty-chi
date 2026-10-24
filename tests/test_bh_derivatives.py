@@ -6,6 +6,7 @@ import torch
 import ptychi.api  # noqa: F401 -- Initialize API types before importing reconstructors.
 from ptychi.propagate import FourierPropagator
 from ptychi.reconstructors.bh import BHReconstructor
+from ptychi.api.enums import ShiftOperators
 
 
 def amplitude_loss(field, data, mask):
@@ -96,4 +97,72 @@ def test_hessianF_couples_distinct_probe_modes(reconstructor, random_complex, da
     # Disjoint mode support removes the diagonal term; only cross-mode coupling remains.
     assert expected > 0.1
     actual = reconstructor.hessianF(field, direction1, direction2, data)
+    torch.testing.assert_close(actual, expected, rtol=1e-11, atol=1e-11)
+
+
+@pytest.fixture
+def patch_reconstructor():
+    dtype = torch.get_default_dtype()
+    torch.set_default_dtype(torch.float64)
+    reconstructor = object.__new__(BHReconstructor)
+    reconstructor.forward_model = SimpleNamespace(resolved_shift_operator=ShiftOperators.PATCH)
+    yield reconstructor
+    torch.set_default_dtype(dtype)
+
+
+@pytest.mark.parametrize("size", [6, 7])
+@pytest.mark.parametrize("second", [None, "same", "mixed"])
+def test_patch_derivatives_match_legacy_square_formulas(
+    patch_reconstructor, random_complex, size, second
+):
+    patches = random_complex((2, 2, size, size))
+    direction = torch.tensor([[0.3, -0.8], [-0.2, 0.5]], device="cpu")
+    other = None if second is None else (
+        direction if second == "same" else direction.flip(-1)
+    )
+    # These are the square-patch Fourier formulas used before the sampling refactor.
+    frequency = torch.fft.fftfreq(size, device="cpu")
+    xi2, xi1 = torch.meshgrid(frequency, frequency, indexing="xy")
+    dy, dx = direction[:, 0, None, None, None], direction[:, 1, None, None, None]
+    spectrum = torch.fft.fft2(patches)
+    if other is None:
+        expected = 2 * torch.pi * 1j * torch.fft.ifft2((xi1 * dy + xi2 * dx) * spectrum)
+    else:
+        ey, ex = other[:, 0, None, None, None], other[:, 1, None, None, None]
+        multiplier = xi1**2 * dy * ey + xi1 * xi2 * (dy * ex + dx * ey) + xi2**2 * dx * ex
+        expected = -4 * torch.pi**2 * torch.fft.ifft2(multiplier * spectrum)
+    actual = patch_reconstructor.position_directional_derivative(
+        patches, torch.zeros_like(direction), direction, second_direction=other
+    )
+    torch.testing.assert_close(actual, expected, rtol=1e-11, atol=1e-11)
+
+
+@pytest.mark.parametrize("shape", [(7, 10), (8, 11)])
+@pytest.mark.parametrize("second", [None, "same", "mixed"])
+def test_patch_derivatives_match_analytic_rectangular_waves(
+    patch_reconstructor, random_complex, shape, second
+):
+    height, width = shape
+    y = torch.arange(height, device="cpu")[:, None]
+    x = torch.arange(width, device="cpu")[None, :]
+    direction = torch.tensor([[1., 0.], [0.3, -0.8]], device="cpu")
+    other = None if second is None else (
+        direction if second == "same" else torch.tensor([[0., 1.], [-0.2, 0.5]], device="cpu")
+    )
+    coefficients = random_complex((2, 2, 2))
+    patches = torch.zeros((2, 2, height, width), dtype=torch.complex128, device="cpu")
+    expected = torch.zeros_like(patches)
+    # Different signed frequencies on each axis detect swapped (y, x) components
+    # and accidental normalization by the width on both axes.
+    for i, (ky, kx) in enumerate(((1, -2), (-2, 1))):
+        wave = torch.exp(2j * torch.pi * (ky * y / height + kx * x / width))
+        term = coefficients[:, :, i, None, None] * wave
+        multiplier = 2j * torch.pi * (ky * direction[:, 0] / height + kx * direction[:, 1] / width)
+        if other is not None:
+            multiplier *= 2j * torch.pi * (ky * other[:, 0] / height + kx * other[:, 1] / width)
+        patches += term
+        expected += term * multiplier[:, None, None, None]
+    actual = patch_reconstructor.position_directional_derivative(
+        patches, torch.zeros_like(direction), direction, second_direction=other
+    )
     torch.testing.assert_close(actual, expected, rtol=1e-11, atol=1e-11)
