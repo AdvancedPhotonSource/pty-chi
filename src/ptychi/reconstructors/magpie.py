@@ -5,8 +5,6 @@ arXiv:2511.01793, and the authors' implementation at
 https://github.com/borongzhang/blind_magpie_ptychography.
 """
 
-from types import SimpleNamespace
-
 import torch
 import torch.nn.functional as F
 from torch import Tensor
@@ -15,13 +13,64 @@ import ptychi.image_proc as ip
 from ptychi.api import enums
 from ptychi.api.options.magpie import (
     MAGPIECapabilityError,
+    MAGPIEInitializationError,
+    MAGPIEMultimodeError,
+    MAGPIEMultisliceError,
     MAGPIEOPRError,
     MAGPIEReconstructorOptions,
-    _check_data_capabilities,
-    _check_direct_updates,
-    _check_initial_factors,
 )
 from ptychi.reconstructors.pie import PIEReconstructor
+from ptychi.timing.timer_utils import timer
+
+
+def _check_data_capabilities(
+    object_data: Tensor, probe_data: Tensor, opr_mode_weights_data: Tensor
+):
+    """Check the supported slice/mode counts and constructed OPR weight values."""
+    if object_data.shape[0] != 1:
+        raise MAGPIEMultisliceError(
+            f"GM-rPIE/GM-MAGPIE received {object_data.shape[0]} object slices but support "
+            "a single slice; supply object_data with shape (1, height, width)."
+        )
+    if probe_data.shape[0] != 1:
+        raise MAGPIEOPRError(
+            f"GM-rPIE/GM-MAGPIE received {probe_data.shape[0]} OPR modes but do not support "
+            "OPR; supply probe_data with one shared mode, shape (1, 1, height, width)."
+        )
+    if probe_data.shape[1] != 1:
+        raise MAGPIEMultimodeError(
+            f"GM-rPIE/GM-MAGPIE received {probe_data.shape[1]} incoherent probe modes but support "
+            "a single coherent mode; supply probe_data with shape (1, 1, height, width)."
+        )
+    if opr_mode_weights_data.shape[-1] != 1 or not torch.all(opr_mode_weights_data == 1).item():
+        raise MAGPIEOPRError(
+            f"GM-rPIE/GM-MAGPIE received OPR weights with shape {tuple(opr_mode_weights_data.shape)} "
+            "and multiple modes or non-unity values. OPR and scan-dependent intensity "
+            "variation are unsupported; omit the weights or supply one mode fixed at unity."
+        )
+
+
+def _check_initial_factors(object_data: Tensor, probe_data: Tensor):
+    """Validate the initial factors after native parameter dtype conversion."""
+    for name, values in (("object", object_data), ("probe", probe_data)):
+        if not torch.isfinite(values).all().item():
+            raise MAGPIEInitializationError(
+                f"GM-rPIE/GM-MAGPIE received NaN or infinity in {name}_data. "
+                f"Supply an initial {name} guess containing only finite values."
+            )
+        if not torch.any(values != 0).item():
+            raise MAGPIEInitializationError(
+                f"GM-rPIE/GM-MAGPIE received all-zero {name}_data. "
+                f"Supply a finite initial {name} guess with nonzero amplitude; "
+                "geometric-mean updates cannot recover an entirely zero factor."
+            )
+        if name == "object" and torch.any(values == 0).item():
+            raise MAGPIEInitializationError(
+                "GM-rPIE/GM-MAGPIE received zero entries in object_data. "
+                "Supply a finite initial object guess with nonzero amplitude at every pixel "
+                "(for example, an array of complex ones); exact-zero object pixels cannot "
+                "be updated by the geometric mean."
+            )
 
 
 def _power(x: Tensor) -> Tensor:
@@ -31,8 +80,8 @@ def _power(x: Tensor) -> Tensor:
 def _safe_divide(numerator: Tensor, denominator: Tensor) -> Tensor:
     """Divide where the denominator is nonzero, returning zero elsewhere."""
     nonzero = denominator != 0
-    safe_denominator = torch.where(nonzero, denominator, torch.ones_like(denominator))
-    return torch.where(nonzero, numerator / safe_denominator, torch.zeros_like(numerator))
+    safe_denominator = torch.where(nonzero, denominator, 1)
+    return torch.where(nonzero, numerator / safe_denominator, 0)
 
 
 def _restrict_2x(x: Tensor) -> Tensor:
@@ -92,12 +141,6 @@ class MAGPIEReconstructor(PIEReconstructor):
     def __init__(self, parameter_group, dataset, options=None, *args, **kwargs):
         if options is None:
             options = MAGPIEReconstructorOptions()
-        self.num_levels = options.multigrid_levels
-        _check_data_capabilities(
-            parameter_group.object.tensor,
-            parameter_group.probe.tensor,
-            parameter_group.opr_mode_weights.data,
-        )
         super().__init__(parameter_group, dataset, options, *args, **kwargs)
 
     def check_inputs(self, *args, **kwargs):
@@ -108,63 +151,33 @@ class MAGPIEReconstructor(PIEReconstructor):
         super().check_inputs(*args, **kwargs)
         group = self.parameter_group
         object_, probe = group.object, group.probe
-        _check_data_capabilities(object_.tensor, probe.tensor, group.opr_mode_weights.data)
-        # Also validate direct construction and values after dtype conversion.
-        _check_initial_factors(object_.data, probe.data)
-        _check_direct_updates(object_.options, "object")
-        _check_direct_updates(probe.options, "probe")
         if probe.representation != ProbeRepresentation.NORMAL or isinstance(object_, DIPObject):
             raise MAGPIECapabilityError(
                 "GM-rPIE/GM-MAGPIE requires directly represented object and probe arrays. "
                 "Use ordinary PlanarObject and Probe parameters."
             )
-        weights = group.opr_mode_weights
-        if (
-            weights.optimizable
-            or weights.options.optimize_intensity_variation
-            or weights.options.smoothing.enabled
-        ):
-            raise MAGPIEOPRError(
-                "GM-rPIE/GM-MAGPIE requires fixed unit OPR weights; disable OPR "
-                "optimization, intensity variation, and smoothing."
-            )
-        positions = group.probe_positions
-        if (
-            positions.optimizable
-            and positions.position_correction.options.correction_type
-            != enums.PositionCorrectionTypes.GRADIENT
-        ):
+        object_data, probe_data = object_.data, probe.data
+        _check_data_capabilities(object_data, probe_data, group.opr_mode_weights.data)
+        _check_initial_factors(object_data, probe_data)
+        if self.forward_model.resolved_shift_operator != enums.ShiftOperators.PATCH:
             raise MAGPIECapabilityError(
-                "GM-rPIE/GM-MAGPIE position refinement currently supports gradient "
-                "correction only; select PositionCorrectionTypes.GRADIENT."
+                "GM-rPIE/GM-MAGPIE require patch-based object sampling. "
+                "FULL_OBJECT sampling, including automatic near-field selection, is unsupported; "
+                "set reconstructor_options.forward_model_options.shift_operator="
+                "ShiftOperators.PATCH."
             )
-        # Recheck options for callers constructing the reconstructor directly.
-        options = SimpleNamespace(
-            reconstructor_options=self.options,
-            object_options=object_.options,
-            probe_options=probe.options,
-            probe_position_options=group.probe_positions.options,
-            opr_mode_weight_options=group.opr_mode_weights.options,
-        )
-        for parameter_options in vars(options).values():
-            parameter_options.check(options)
         if self.forward_model.resampling_enabled:
             raise MAGPIECapabilityError(
                 "GM-rPIE/GM-MAGPIE does not support object/probe resampling. "
                 "Use matching object and probe pixel sizes and aspect ratios, or select PIE."
             )
-        if tuple(self.dataset.patterns.shape[-2:]) != tuple(probe.data.shape[-2:]):
+        if tuple(self.dataset.patterns.shape[-2:]) != tuple(probe_data.shape[-2:]):
             raise MAGPIECapabilityError(
                 "GM-rPIE/GM-MAGPIE requires matching detector and probe shapes; received "
-                f"{tuple(self.dataset.patterns.shape[-2:])} and {tuple(probe.data.shape[-2:])}. "
+                f"{tuple(self.dataset.patterns.shape[-2:])} and {tuple(probe_data.shape[-2:])}. "
                 "Supply matching shapes or select a reconstructor supporting detector cropping."
             )
-        if self.options.forward_model_options.diffraction_pattern_blur_sigma not in (None, 0):
-            raise MAGPIECapabilityError(
-                "GM-rPIE/GM-MAGPIE does not support diffraction-pattern blur. "
-                "Disable diffraction_pattern_blur_sigma or select an autodiff reconstructor."
-            )
-        height, width = probe.data.shape[-2:]
+        height, width = probe_data.shape[-2:]
         max_levels = 1
         while min(height, width) >= 2 and height % 2 == 0 and width % 2 == 0:
             height, width = height // 2, width // 2
@@ -172,7 +185,7 @@ class MAGPIEReconstructor(PIEReconstructor):
         if self.options.multigrid_levels > max_levels:
             raise MAGPIECapabilityError(
                 f"multigrid_levels={self.options.multigrid_levels} exceeds the {max_levels} "
-                f"dyadic levels supported by probe shape {tuple(probe.data.shape[-2:])}. "
+                f"dyadic levels supported by probe shape {tuple(probe_data.shape[-2:])}. "
                 f"Choose a level count from 1 to {max_levels}."
             )
         self.num_levels = self.options.multigrid_levels
@@ -217,14 +230,11 @@ class MAGPIEReconstructor(PIEReconstructor):
         z_levels = [factor_old]
         target_levels = [psi_prime]
         for level in range(1, self.num_levels):
-            power_down = downsampled_power[level - 1]
-            weight_z = _safe_divide(
-                q_power[level - 1],
-                _prolong_2x(power_down),
-            )
+            power_down = _prolong_2x(downsampled_power[level - 1])
+            weight_z = _safe_divide(q_power[level - 1], power_down)
             weight_target = _safe_divide(
                 _prolong_2x(q_levels[level]) * q_levels[level - 1].conj(),
-                _prolong_2x(power_down),
+                power_down,
             )
             restricted = _restrict_2x(
                 torch.cat(
@@ -315,6 +325,7 @@ class MAGPIEReconstructor(PIEReconstructor):
             confidence.sum(dim=0),
         )
 
+    @timer()
     @torch.no_grad()
     def compute_updates(self, indices: Tensor, y_true: Tensor):
         """Return ``((delta_object, delta_probe, delta_positions), intensities)``.
@@ -357,6 +368,7 @@ class MAGPIEReconstructor(PIEReconstructor):
             delta_pos[indices] = self.forward_model.probe_displacements_to_object_pixels(direction)
         return (delta_o, delta_p, delta_pos), y_pred
 
+    @timer()
     @torch.no_grad()
     def apply_updates(self, delta_o, delta_p_i, delta_pos, *args, **kwargs):
         """Apply synthesized factor corrections once; use the native position optimizer."""

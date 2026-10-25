@@ -5,7 +5,6 @@
 
 from dataclasses import field
 
-import torch
 from pydantic import Field as PydanticField
 from pydantic.dataclasses import dataclass
 
@@ -26,8 +25,6 @@ __all__ = [
     "MAGPIEReconstructorOptions",
 ]
 
-_UNSET_TASK_DATA = object()
-
 
 class MAGPIECapabilityError(ValueError):
     """A requested feature is unsupported by GM-rPIE and GM-MAGPIE."""
@@ -47,83 +44,6 @@ class MAGPIEMultimodeError(MAGPIECapabilityError):
 
 class MAGPIEOPRError(MAGPIECapabilityError):
     """GM-rPIE and GM-MAGPIE require a shared probe without OPR."""
-
-
-def _check_data_capabilities(object_data=None, probe_data=None, opr_mode_weights_data=None):
-    """Check valid task array shapes before constructing model parameters."""
-    if object_data is not None:
-        shape = (
-            object_data.shape
-            if hasattr(object_data, "shape")
-            else torch.as_tensor(object_data, device="cpu").shape
-        )
-        if len(shape) == 3 and shape[0] != 1:
-            raise MAGPIEMultisliceError(
-                f"GM-rPIE/GM-MAGPIE received {shape[0]} object slices but support "
-                "a single slice; supply object_data with shape (1, height, width)."
-            )
-    if probe_data is not None:
-        shape = (
-            probe_data.shape
-            if hasattr(probe_data, "shape")
-            else torch.as_tensor(probe_data, device="cpu").shape
-        )
-        if len(shape) == 4:
-            if shape[0] != 1:
-                raise MAGPIEOPRError(
-                    f"GM-rPIE/GM-MAGPIE received {shape[0]} OPR modes but do not support "
-                    "OPR; supply probe_data with one shared mode, shape (1, 1, height, width)."
-                )
-            if shape[1] != 1:
-                raise MAGPIEMultimodeError(
-                    f"GM-rPIE/GM-MAGPIE received {shape[1]} incoherent probe modes but support "
-                    "a single coherent mode; supply probe_data with shape (1, 1, height, width)."
-                )
-    if opr_mode_weights_data is not None:
-        weights = (
-            opr_mode_weights_data
-            if isinstance(opr_mode_weights_data, torch.Tensor)
-            else torch.as_tensor(opr_mode_weights_data, device="cpu")
-        )
-        if weights.ndim in (1, 2) and (
-            weights.shape[-1] != 1 or not torch.all(weights == 1).item()
-        ):
-            raise MAGPIEOPRError(
-                f"GM-rPIE/GM-MAGPIE received OPR weights with shape {tuple(weights.shape)} "
-                "and multiple modes or non-unity values. OPR and scan-dependent intensity "
-                "variation are unsupported; omit the weights or supply one mode fixed at unity."
-            )
-
-
-def _check_initial_factors(object_data=None, probe_data=None):
-    """Require finite factors, a nonzero object everywhere, and a nonzero probe."""
-    for name, data in (("object", object_data), ("probe", probe_data)):
-        if data is None:
-            continue
-        if isinstance(data, (list, tuple)):
-            # Python values must not inherit a lower process-wide precision
-            # before task setup selects its configured dtype.
-            values = torch.as_tensor(data, dtype=torch.complex128, device="cpu")
-        else:
-            values = data if isinstance(data, torch.Tensor) else torch.as_tensor(data, device="cpu")
-        if not torch.isfinite(values).all().item():
-            raise MAGPIEInitializationError(
-                f"GM-rPIE/GM-MAGPIE received NaN or infinity in {name}_data. "
-                f"Supply an initial {name} guess containing only finite values."
-            )
-        if not torch.any(values != 0).item():
-            raise MAGPIEInitializationError(
-                f"GM-rPIE/GM-MAGPIE received all-zero {name}_data. "
-                f"Supply a finite initial {name} guess with nonzero amplitude; "
-                "geometric-mean updates cannot recover an entirely zero factor."
-            )
-        if name == "object" and torch.any(values == 0).item():
-            raise MAGPIEInitializationError(
-                "GM-rPIE/GM-MAGPIE received zero entries in object_data. "
-                "Supply a finite initial object guess with nonzero amplitude at every pixel "
-                "(for example, an array of complex ones); exact-zero object pixels cannot "
-                "be updated by the geometric mean."
-            )
 
 
 def _check_direct_updates(options: base.ParameterOptions, name: str):
@@ -192,7 +112,12 @@ class MAGPIEReconstructorOptions(pie.PIEReconstructorOptions):
     forward_model_options: base.ForwardModelOptions = field(
         default_factory=lambda: base.ForwardModelOptions(pad_for_shift=1)
     )
-    """Native forward-model options, with one-pixel subpixel-shift padding."""
+    """Native forward-model options, with one-pixel subpixel-shift padding.
+
+    Only ``ShiftOperators.PATCH`` sampling is supported. ``AUTO`` is accepted
+    when it resolves to ``PATCH`` for the constructed geometry.
+    Detector blur is disabled; a zero blur sigma is normalized to ``None``.
+    """
 
     def get_reconstructor_type(self) -> enums.Reconstructors:
         return enums.Reconstructors.MAGPIE
@@ -213,6 +138,14 @@ class MAGPIEReconstructorOptions(pie.PIEReconstructorOptions):
             raise MAGPIECapabilityError(
                 "GM-rPIE/GM-MAGPIE support FLOAT32/complex64 and FLOAT64/complex128 precision."
             )
+        if self.forward_model_options.diffraction_pattern_blur_sigma not in (None, 0):
+            raise MAGPIECapabilityError(
+                "GM-rPIE/GM-MAGPIE does not support diffraction-pattern blur. "
+                "Disable diffraction_pattern_blur_sigma or select an autodiff reconstructor."
+            )
+        if self.forward_model_options.diffraction_pattern_blur_sigma == 0:
+            # The native forward model uses None to bypass the blur operation.
+            self.forward_model_options.diffraction_pattern_blur_sigma = None
 
 
 @dataclass
@@ -311,17 +244,101 @@ class MAGPIEOPRModeWeightsOptions(pie.PIEOPRModeWeightsOptions):
 
 @dataclass
 class MAGPIEOptions(pie.PIEOptions):
-    """Native task options for GM-rPIE and GM-MAGPIE.
+    r"""Native task options for GM-rPIE and GM-MAGPIE.
 
-    Set ``reconstructor_options.multigrid_levels`` to 1 for GM-rPIE or a
-    larger valid depth for GM-MAGPIE. Supply data and initial guesses as
-    keyword arguments to :class:`ptychi.api.task.PtychographyTask`.
+    Both algorithms use ``MAGPIEOptions``. Set
+    ``reconstructor_options.multigrid_levels = 1`` for GM-rPIE or a larger
+    valid depth for GM-MAGPIE. The initial implementation supports one object
+    slice and one coherent shared probe, random minibatches, and matching
+    object/probe/detector sampling. Object and probe must both be optimized
+    on every minibatch, with unit SGD settings and no step-size schedulers.
+    Native gradient position correction and post-epoch constraints remain available.
+
+    Object sampling must resolve to ``ShiftOperators.PATCH``. The default
+    ``AUTO`` selection is accepted when it resolves to ``PATCH``; near-field
+    geometries with a probe approaching the object size can instead select
+    ``FULL_OBJECT`` and are rejected during setup. To use patch sampling for
+    such a geometry, explicitly set
+    ``reconstructor_options.forward_model_options.shift_operator`` to
+    ``enums.ShiftOperators.PATCH``. Full-object sampling is unsupported because
+    the synthesis assumes integer object-patch placement and fractional probe shifts.
+
+    .. code-block:: python
+
+       from ptychi.api import enums
+       from ptychi.api.options import MAGPIEOptions
+       from ptychi.api.task import PtychographyTask
+
+       options = MAGPIEOptions()
+       options.reconstructor_options.default_device = enums.Devices.CPU
+       options.reconstructor_options.multigrid_levels = 1  # GM-rPIE
+       # Supply your measured intensities, initial guesses, and positions.
+       task = PtychographyTask(
+           options,
+           diffraction_data=intensities,
+           object_data=object_guess,
+           probe_data=probe_guess,
+           probe_position_x_px=positions_x,
+           probe_position_y_px=positions_y,
+       )
+       task.run()
+
+    Probe synthesis approximates the reference algorithm's weighted residual in
+    common probe coordinates. Let :math:`S_k` be the native padded probe shift,
+    :math:`d_k=\widetilde P_k-S_kP` the local geometric-mean probe correction, and
+    :math:`\widetilde O_k` the local geometric-mean object patch. Define :math:`T_k`
+    as the native coordinate shift with the opposite fractional displacement,
+    using the same interpolation, replicate padding, and cropping. It differs
+    from the actual padded adjoint :math:`S_k^*`.
+
+    The shared probe correction minimizes a nonnegative weighted consensus:
+
+    .. math::
+
+       a_k &= S_k^*d_k, \\
+       c_k &= |T_k\widetilde O_k|^2, \\
+       \Delta P &= \underset{\delta}{\operatorname{argmin}}\;
+           \frac12\sum_{k\in B}\left\|
+           (T_k\widetilde O_k)\odot(\delta-a_k)\right\|_2^2
+           = \frac{\sum_{k\in B}c_k\odot a_k}{\sum_{k\in B}c_k}, \\
+       P_{\mathrm{new}} &= P+\Delta P.
+
+    Multiplication and division are elementwise; the displayed ratio applies where
+    the total confidence is positive. The confidence has no floor or clipping.
+    Zero total confidence uses the ordinary mean of the adjoint
+    corrections. With finite intermediates, a singleton minibatch gives exactly
+    its direct-adjoint correction, including a singleton at the end of a larger
+    batch.
+
+    For ideal coordinate translations on a full or periodic domain,
+    :math:`T_k=S_k^{-1}=S_k^*`, and translation preserves both the norm and pointwise
+    products. Consequently,
+
+    .. math::
+
+       \left\|\widetilde O_k\odot(S_k\delta-d_k)\right\|_2^2
+       =\left\|(T_k\widetilde O_k)\odot(\delta-S_k^*d_k)\right\|_2^2.
+
+    Discrete interpolation does not generally preserve products, and padding makes
+    the reverse coordinate shift different from the adjoint. The implemented
+    consensus is therefore an approximation; it does not guarantee exact
+    minimization or monotone decrease of the original weighted residual objective.
 
     Initial object and probe arrays must contain only finite values. Every
     object pixel must have nonzero amplitude because exact-zero object pixels
     cannot be updated by the geometric mean. The probe must contain at least
-    one nonzero value; individual zero probe pixels are allowed. Invalid
-    arrays raise :class:`MAGPIEInitializationError` during setup.
+    one nonzero value; individual zero probe pixels are allowed. The constructed
+    arrays are checked after dtype conversion, before reconstruction starts.
+    Invalid values raise ``MAGPIEInitializationError`` during setup.
+
+    :class:`ptychi.api.task.PtychographyTask` validates the complete options
+    configuration before constructing parameters. When constructing parameters
+    and ``MAGPIEReconstructor`` directly,
+    call ``options.check()`` on a complete ``MAGPIEOptions`` configuration
+    first, use its corresponding parameter and reconstructor options, and call
+    ``reconstructor.build()`` before reconstruction. The reconstructor's
+    ``check_inputs()`` validates constructed data and forward-model compatibility;
+    it does not repeat the options-validation hierarchy.
     """
 
     reconstructor_options: MAGPIEReconstructorOptions = field(
@@ -335,23 +352,3 @@ class MAGPIEOptions(pie.PIEOptions):
     opr_mode_weight_options: MAGPIEOPRModeWeightsOptions = field(
         default_factory=MAGPIEOPRModeWeightsOptions
     )
-
-    def check(
-        self,
-        *args,
-        object_data=_UNSET_TASK_DATA,
-        probe_data=_UNSET_TASK_DATA,
-        opr_mode_weights_data=_UNSET_TASK_DATA,
-        **kwargs,
-    ):
-        # Run before task construction so unsupported capabilities produce
-        # their own errors, rather than missing-slice-spacing/weight errors.
-        if object_data is _UNSET_TASK_DATA:
-            object_data = self.object_options.initial_guess
-        if probe_data is _UNSET_TASK_DATA:
-            probe_data = self.probe_options.initial_guess
-        if opr_mode_weights_data is _UNSET_TASK_DATA:
-            opr_mode_weights_data = self.opr_mode_weight_options.initial_weights
-        _check_data_capabilities(object_data, probe_data, opr_mode_weights_data)
-        _check_initial_factors(object_data, probe_data)
-        super().check(*args, **kwargs)

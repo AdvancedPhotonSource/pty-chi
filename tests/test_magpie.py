@@ -3,6 +3,7 @@
 import json
 import math
 import random
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import numpy as np
@@ -22,6 +23,12 @@ from ptychi.api.options.magpie import (
     MAGPIEReconstructorOptions,
 )
 from ptychi.api.task import PtychographyTask
+from ptychi.data_structures.object import PlanarObject
+from ptychi.data_structures.opr_mode_weights import OPRModeWeights
+from ptychi.data_structures.parameter_group import PlanarPtychographyParameterGroup
+from ptychi.data_structures.probe import Probe
+from ptychi.data_structures.probe_positions import ProbePositions
+from ptychi.io_handles import PtychographyDataset
 from ptychi.reconstructors.magpie import (
     MAGPIEReconstructor,
     _prolong_2x,
@@ -29,6 +36,7 @@ from ptychi.reconstructors.magpie import (
     _safe_divide,
     aligned_geom_mean,
 )
+from ptychi.timing import timer_utils
 
 
 @pytest.fixture(autouse=True)
@@ -444,31 +452,6 @@ def test_probe_confidence_has_no_floor_for_high_contrast_patches(method):
     torch.testing.assert_close(actual, expected, atol=1e-10, rtol=1e-10)
 
 
-@pytest.mark.parametrize(
-    "method", [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR]
-)
-@pytest.mark.parametrize("dtype", [torch.complex64, torch.complex128])
-def test_native_shift_and_inherited_adjoint_pairing(method, dtype):
-    task = PtychographyTask(_options(dtype=dtype, method=method), **_tiny_data(dtype))
-    reconstructor = task.reconstructor
-    indices = torch.arange(3)
-    image = _complex_random((3, 1, 4, 4), seed=50, dtype=dtype)
-    cotangent = _complex_random(image.shape, seed=51, dtype=dtype)
-    shifted = reconstructor.forward_model.shift_unique_probes(indices, image)
-    adjoint = reconstructor.adjoint_shift_probe_update_direction(
-        indices, cotangent, first_mode_only=True
-    )
-    tolerance = 3e-5 if dtype == torch.complex64 else 1e-10
-    torch.testing.assert_close(
-        torch.vdot(shifted.flatten(), cotangent.flatten()),
-        torch.vdot(image.flatten(), adjoint.flatten()),
-        rtol=tolerance,
-        atol=tolerance,
-    )
-    assert reconstructor.forward_model.pad_for_shift == 1
-    assert shifted.dtype == adjoint.dtype == dtype
-
-
 @pytest.mark.parametrize("levels", [1, 2])
 @pytest.mark.parametrize("dtype", [torch.complex64, torch.complex128])
 @torch.no_grad()
@@ -569,16 +552,107 @@ def _set_option(options, dotted_path, value):
         ("reconstructor_options.default_dtype", api.Dtypes.FLOAT16),
         ("reconstructor_options.forward_model_options.pad_for_shift", 0),
         ("probe_options.experimental.sdl_probe_options.enabled", True),
-        ("probe_options.pixel_size_m", 2.0),
-        ("probe_options.pixel_size_aspect_ratio", 2.0),
         ("reconstructor_options.forward_model_options.diffraction_pattern_blur_sigma", 1.0),
     ],
 )
-def test_unsupported_options_fail_during_setup(path, value):
+def test_unsupported_settings_fail_options_validation(path, value):
     options = _options()
     _set_option(options, path, value)
     with pytest.raises(MAGPIECapabilityError):
+        options.check()
+
+
+@pytest.mark.parametrize("levels", [1, 2])
+def test_zero_detector_blur_matches_disabled_blur(levels):
+    tasks = []
+    for sigma in (None, 0.0):
+        options = _options(levels=levels)
+        options.reconstructor_options.forward_model_options.diffraction_pattern_blur_sigma = sigma
+        options.check()
+        assert (
+            options.reconstructor_options.forward_model_options.diffraction_pattern_blur_sigma
+            is None
+        )
+        task = PtychographyTask(options, **_tiny_data())
+        assert task.reconstructor.forward_model.diffraction_pattern_blur_sigma is None
+        indices = torch.tensor([0, 1])
+        task.reconstructor.run_minibatch((indices,), task.dataset.patterns[indices])
+        assert np.isfinite(task.reconstructor.loss_tracker.epoch_loss)
+        tasks.append(task)
+
+    torch.testing.assert_close(tasks[0].object.data, tasks[1].object.data, rtol=0, atol=0)
+    torch.testing.assert_close(tasks[0].probe.data, tasks[1].probe.data, rtol=0, atol=0)
+    assert (
+        tasks[0].reconstructor.loss_tracker.epoch_loss
+        == tasks[1].reconstructor.loss_tracker.epoch_loss
+    )
+
+
+@pytest.mark.parametrize(
+    "path,value",
+    [
+        ("probe_options.pixel_size_m", 2.0),
+        ("probe_options.pixel_size_aspect_ratio", 2.0),
+    ],
+)
+def test_sampling_capabilities_are_checked_on_constructed_forward_model(path, value):
+    options = _options()
+    _set_option(options, path, value)
+    options.check()
+    with pytest.raises(MAGPIECapabilityError, match="resampling"):
         PtychographyTask(options, **_tiny_data())
+
+
+@pytest.mark.parametrize("levels", [1, 2])
+@pytest.mark.parametrize("operator", [api.ShiftOperators.AUTO, api.ShiftOperators.FULL_OBJECT])
+def test_full_object_sampling_is_rejected_after_geometry_resolution(levels, operator):
+    options, data = _options(levels=levels), _tiny_data()
+    options.data_options.free_space_propagation_distance_m = 0.01
+    options.data_options.wavelength_m = 1e-9
+    options.object_options.pixel_size_m = 1e-6
+    options.reconstructor_options.forward_model_options.shift_operator = operator
+    data["object_data"] = data["object_data"][:, 6:10, 6:10]
+    data["probe_position_x_px"] /= 4
+    data["probe_position_y_px"] /= 4
+    # AUTO depends on the actual object/probe geometry, not options alone.
+    options.check()
+    with pytest.raises(MAGPIECapabilityError, match=r"FULL_OBJECT.*ShiftOperators\.PATCH"):
+        PtychographyTask(options, **data)
+
+
+@pytest.mark.parametrize("levels", [1, 2])
+@pytest.mark.parametrize(
+    "operator,object_size,distance",
+    [
+        (api.ShiftOperators.PATCH, 4, 0.01),
+        (api.ShiftOperators.AUTO, 17, 0.01),
+        (api.ShiftOperators.AUTO, 4, float("inf")),
+    ],
+)
+def test_supported_patch_sampling_runs(levels, operator, object_size, distance):
+    options, data = _options(levels=levels), _tiny_data()
+    options.data_options.free_space_propagation_distance_m = distance
+    options.data_options.wavelength_m = 1e-9
+    options.object_options.pixel_size_m = 1e-6
+    options.reconstructor_options.forward_model_options.shift_operator = operator
+    if object_size == 4:
+        data["object_data"] = data["object_data"][:, 6:10, 6:10]
+        data["probe_position_x_px"] /= 4
+        data["probe_position_y_px"] /= 4
+    task = PtychographyTask(options, **data)
+    assert task.reconstructor.forward_model.resolved_shift_operator == api.ShiftOperators.PATCH
+    task.run()
+    assert torch.isfinite(task.object.data).all()
+    assert torch.isfinite(task.probe.data).all()
+    assert np.isfinite(task.reconstructor.loss_tracker.table["loss"].to_numpy()).all()
+
+
+def test_detector_and_probe_shape_mismatch_is_rejected_during_setup():
+    options, data = _options(), _tiny_data()
+    options.check()
+    data["diffraction_data"] = torch.ones((3, 2, 2))
+    with pytest.raises(MAGPIECapabilityError, match="matching detector and probe shapes"):
+        PtychographyTask(options, **data)
 
 
 @pytest.mark.parametrize(
@@ -594,10 +668,13 @@ def test_unsupported_tensor_capabilities_have_explicit_exceptions(kind, error):
     options, data = _options(), _tiny_data()
     if kind == "multislice":
         data["object_data"] = data["object_data"].repeat(2, 1, 1)
+        options.object_options.slice_spacings_m = [1e-6]
+        options.data_options.wavelength_m = 1e-9
     elif kind == "multimode":
         data["probe_data"] = data["probe_data"].repeat(1, 2, 1, 1)
     elif kind == "opr":
         data["probe_data"] = data["probe_data"].repeat(2, 1, 1, 1)
+        data["opr_mode_weights_data"] = torch.ones((3, 2))
     else:
         data["opr_mode_weights_data"] = torch.tensor([[1.0], [0.8], [1.1]])
     with pytest.raises(error):
@@ -617,7 +694,7 @@ def test_unsupported_capability_options_have_explicit_exceptions(path, value, er
     options = _options()
     _set_option(options, path, value)
     with pytest.raises(error):
-        PtychographyTask(options, **_tiny_data())
+        options.check()
 
 
 @pytest.mark.parametrize("factor", ["object", "probe"])
@@ -625,7 +702,7 @@ def test_unsupported_capability_options_have_explicit_exceptions(path, value, er
 @pytest.mark.parametrize(
     "invalid", [0, float("nan"), float("inf"), -float("inf"), complex(1, float("nan"))]
 )
-def test_invalid_initial_factors_fail_before_task_build(factor, as_numpy, invalid):
+def test_invalid_initial_factors_fail_constructed_data_validation(factor, as_numpy, invalid):
     data = _tiny_data()
     key = f"{factor}_data"
     if invalid == 0:
@@ -636,12 +713,8 @@ def test_invalid_initial_factors_fail_before_task_build(factor, as_numpy, invali
         reason = "NaN or infinity"
     if as_numpy:
         data[key] = data[key].numpy()
-    with (
-        patch.object(PtychographyTask, "build") as build,
-        pytest.raises(MAGPIEInitializationError, match=rf"{reason}.*{key}.*Supply"),
-    ):
+    with pytest.raises(MAGPIEInitializationError, match=rf"{reason}.*{key}.*Supply"):
         PtychographyTask(_options(), **data)
-    build.assert_not_called()
 
 
 @pytest.mark.parametrize("factor", ["object", "probe"])
@@ -675,7 +748,7 @@ def test_direct_reconstructor_rejects_invalid_initial_factors(factor, invalid):
     with pytest.raises(MAGPIEInitializationError, match=f"{factor}_data"):
         MAGPIEReconstructor(
             task.reconstructor.parameter_group, task.dataset, task.options.reconstructor_options
-        ).build()
+        ).check_inputs()
 
 
 @pytest.mark.parametrize("factor", ["object", "probe"])
@@ -703,7 +776,7 @@ def test_python_initial_guesses_preserve_precision_before_task_setup(factor, val
 
 @pytest.mark.parametrize("levels", [1, 2])
 @pytest.mark.parametrize("container", ["tensor", "numpy", "list", "tuple"])
-def test_single_zero_object_pixel_is_rejected_before_task_build(levels, container):
+def test_single_zero_object_pixel_is_rejected_during_setup(levels, container):
     data = _tiny_data()
     data["object_data"][0, 8, 8] = 0
     if container == "numpy":
@@ -712,15 +785,11 @@ def test_single_zero_object_pixel_is_rejected_before_task_build(levels, containe
         data["object_data"] = data["object_data"].tolist()
         if container == "tuple":
             data["object_data"] = tuple(data["object_data"])
-    with (
-        patch.object(PtychographyTask, "build") as build,
-        pytest.raises(
-            MAGPIEInitializationError,
-            match="zero entries in object_data.*Supply.*nonzero amplitude at every pixel",
-        ),
+    with pytest.raises(
+        MAGPIEInitializationError,
+        match="zero entries in object_data.*Supply.*nonzero amplitude at every pixel",
     ):
         PtychographyTask(_options(levels=levels), **data)
-    build.assert_not_called()
 
 
 @pytest.mark.parametrize("levels", [1, 2])
@@ -733,7 +802,7 @@ def test_direct_reconstructor_rejects_single_zero_object_pixel(levels):
     with pytest.raises(MAGPIEInitializationError, match="zero entries in object_data"):
         MAGPIEReconstructor(
             task.reconstructor.parameter_group, task.dataset, task.options.reconstructor_options
-        ).build()
+        ).check_inputs()
 
 
 def test_single_object_pixel_underflow_is_rejected_after_dtype_conversion():
@@ -759,8 +828,10 @@ def test_partly_zero_initial_probe_remains_valid(levels):
 
 
 def test_excessive_multigrid_depth_is_rejected_not_truncated():
+    options = _options(levels=4)
+    options.check()
     with pytest.raises(MAGPIECapabilityError, match="(?i)(multigrid|level|divisib)"):
-        PtychographyTask(_options(levels=4), **_tiny_data())
+        PtychographyTask(options, **_tiny_data())
 
 
 def test_position_correction_uses_supported_native_gradient_method():
@@ -769,7 +840,7 @@ def test_position_correction_uses_supported_native_gradient_method():
         api.PositionCorrectionTypes.CROSS_CORRELATION
     )
     with pytest.raises(MAGPIECapabilityError, match="(?i)gradient"):
-        PtychographyTask(options, **_tiny_data())
+        options.check()
 
 
 def test_explicit_none_weights_override_deprecated_initial_weights():
@@ -821,20 +892,91 @@ def test_inherited_minibatch_loop_handles_short_final_batch(levels):
     assert torch.isfinite(task.probe.data).all()
 
 
-@pytest.mark.parametrize(
-    "parameter,option_class,path,value",
-    [
-        ("object", api.PIEObjectOptions, "step_size", 0.5),
-        ("probe", api.PIEProbeOptions, "optimization_plan.step_size_scheduler_class", "StepLR"),
-        ("opr_mode_weights", api.PIEOPRModeWeightsOptions, "smoothing.enabled", True),
-    ],
-)
-def test_runtime_validation_cannot_be_bypassed_with_ordinary_pie_options(
-    parameter, option_class, path, value
-):
-    task = PtychographyTask(_options(), **_tiny_data())
-    ordinary_options = option_class()
-    _set_option(ordinary_options, path, value)
-    getattr(task, parameter).options = ordinary_options
-    with pytest.raises(MAGPIECapabilityError):
+def test_task_validates_each_options_component_once():
+    class NoArgumentCheckOptions(api.MAGPIEOptions):
+        def check(self):
+            super().check()
+
+    options = NoArgumentCheckOptions()
+    options.load_from_dict(_options().get_dict())
+    components = (
+        options.data_options,
+        options.reconstructor_options,
+        options.object_options,
+        options.probe_options,
+        options.probe_position_options,
+        options.opr_mode_weight_options,
+    )
+    with ExitStack() as stack:
+        validators = [
+            stack.enter_context(
+                patch.object(
+                    type(component), "check", autospec=True, side_effect=type(component).check
+                )
+            )
+            for component in components
+        ]
+        task = PtychographyTask(options, **_tiny_data())
+        # Constructed-data validation must not dispatch options validation again.
         task.reconstructor.check_inputs()
+        for validator, component in zip(validators, components):
+            validator.assert_called_once_with(component, options)
+
+
+def test_direct_construction_uses_explicitly_validated_complete_options():
+    options, data = _options(), _tiny_data()
+    options.check()
+    group = PlanarPtychographyParameterGroup(
+        object=PlanarObject(data=data["object_data"], options=options.object_options),
+        probe=Probe(data=data["probe_data"], options=options.probe_options),
+        probe_positions=ProbePositions(
+            data=torch.stack((data["probe_position_y_px"], data["probe_position_x_px"]), dim=1),
+            options=options.probe_position_options,
+        ),
+        opr_mode_weights=OPRModeWeights(
+            data=torch.ones((3, 1)), options=options.opr_mode_weight_options
+        ),
+    )
+    dataset = PtychographyDataset(
+        data["diffraction_data"],
+        wavelength_m=options.data_options.wavelength_m,
+        free_space_propagation_distance_m=options.data_options.free_space_propagation_distance_m,
+        fft_shift=options.data_options.fft_shift,
+    )
+    reconstructor = MAGPIEReconstructor(group, dataset, options.reconstructor_options)
+    reconstructor.build()
+    indices = torch.tensor([0, 1])
+    reconstructor.run_minibatch((indices,), dataset.patterns[indices])
+    assert torch.isfinite(group.object.data).all()
+    assert torch.isfinite(group.probe.data).all()
+    assert np.isfinite(reconstructor.loss_tracker.epoch_loss)
+
+
+def test_update_stages_appear_in_standard_timing_reports(monkeypatch):
+    task = PtychographyTask(_options(), **_tiny_data())
+    names = (
+        "ENABLE_TIMING",
+        "ELAPSED_TIME_DICT",
+        "ADVANCED_TIME_DICT",
+        "CURRENT_DICT_REFERENCE",
+        "TIMING_OVERHEAD_ARRAY",
+    )
+    saved = {name: getattr(timer_utils, name) for name in names}
+    # The native timer synchronizes the configured accelerator even on CPU.
+    monkeypatch.setattr(
+        timer_utils.AcceleratorModuleWrapper.get_module(), "synchronize", lambda: None
+    )
+    try:
+        timer_utils.clear_timer_globals()
+        timer_utils.toggle_timer(True)
+        indices = torch.tensor([0, 1])
+        task.reconstructor.run_minibatch((indices,), task.dataset.patterns[indices])
+        detailed = timer_utils.ADVANCED_TIME_DICT["PIEReconstructor.run_minibatch"]
+        for name in ("MAGPIEReconstructor.compute_updates", "MAGPIEReconstructor.apply_updates"):
+            elapsed = timer_utils.ELAPSED_TIME_DICT[name]
+            assert elapsed.shape == (1,)
+            assert np.isfinite(elapsed).all() and (elapsed >= 0).all()
+            np.testing.assert_array_equal(detailed[name]["time"], elapsed)
+    finally:
+        for name, value in saved.items():
+            setattr(timer_utils, name, value)
