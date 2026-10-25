@@ -27,6 +27,7 @@ class PositionCorrection:
         delta_o_patches: torch.Tensor,
         unique_probes: torch.Tensor,
         object_step_size: float,
+        object_gradients=None,
     ):
         """
         Calculate the position update step direction using the selected position correction function.
@@ -50,13 +51,23 @@ class PositionCorrection:
         object_step_size : float
             The step size/learning rate of the object optimizer.
 
+        object_gradients : tuple[Tensor, Tensor] or callable, optional
+            Sampling derivatives (dody, dodx) in probe-pixel units, each with
+            shape (batch_size, height, width). A zero-argument callable is
+            evaluated only for gradient correction and may return None to use
+            the configured patch-gradient approximation.
+
         Returns
         -------
         Tensor
             A (n_positions, 2) tensor of updates to the probe positions.
         """
         if self.options.correction_type is api.PositionCorrectionTypes.GRADIENT:
-            return self.get_gradient_update(chi, obj_patches, unique_probes)
+            if callable(object_gradients):
+                object_gradients = object_gradients()
+            return self.get_gradient_update(
+                chi, obj_patches, unique_probes, object_gradients=object_gradients
+            )
         elif self.options.correction_type is api.PositionCorrectionTypes.CROSS_CORRELATION:
             return self.get_cross_correlation_update(
                 obj_patches, delta_o_patches, unique_probes, object_step_size
@@ -101,7 +112,8 @@ class PositionCorrection:
 
     @timer()
     def get_gradient_update(
-        self, chi: torch.Tensor, obj_patches: torch.Tensor, probe: torch.Tensor, eps=1e-6
+        self, chi: torch.Tensor, obj_patches: torch.Tensor, probe: torch.Tensor, eps=1e-6,
+        object_gradients=None,
     ):
         """
         Calculate the update direction for probe positions. This routine calculates the gradient with regards
@@ -109,7 +121,26 @@ class PositionCorrection:
         Odstrcil (2018). However, this is the method implemented in both PtychoShelves and Tike.
 
         Denote probe positions as s. Given dL/dP = -chi * O.conj() (Eq. 24a), dL/ds = dL/dO * dO/ds =
-        real(-chi * P.conj() * grad_O.conj()), where grad_O is the spatial gradient of the probe in x or y.
+        real(-chi * P.conj() * grad_O.conj()), where grad_O is the spatial gradient of the object in x or y.
+
+        For a sampled object patch O_q(u, v) = O_interp(u + q_y - c_y, v + q_x - c_x),
+        the exact position derivative is dO_q/dq_y = (dO_interp/dy)(u + q_y - c_y,
+        v + q_x - c_x), and similarly for x. Here O_interp is the interpolant of the
+        complete object and c_y, c_x are fixed crop offsets. FULL_OBJECT sampling
+        supplies these derivatives through object_gradients, evaluating them before
+        cropping; fixed zero-padded margins have zero derivatives.
+
+        PATCH sampling retains the existing gradient estimate from the extracted
+        patches to limit computation for large objects in far-field ptychography.
+        In particular, Fourier differentiation of a cropped patch uses the patch's
+        own periodic interpolant. This generally differs from cropping the derivative
+        of the full object's periodic interpolant: cropping and Fourier differentiation
+        do not commute. The chain rule is exact, but this patch-gradient estimate is
+        approximate.
+
+        TODO: Benchmark exact full-object-interpolant derivatives against the current
+        patch-gradient approximation for PATCH sampling, comparing runtime, memory,
+        position-refinement accuracy, and reconstruction convergence.
         """
         # Just take the first slice.
         obj_patches = obj_patches[:, 0]
@@ -118,7 +149,9 @@ class PositionCorrection:
         probe = probe[:, 0, :, :]
         chi_m0 = chi[:, 0, :, :]
         
-        if self.options.differentiation_method == api.ImageGradientMethods.GAUSSIAN:
+        if object_gradients is not None:
+            dody, dodx = object_gradients
+        elif self.options.differentiation_method == api.ImageGradientMethods.GAUSSIAN:
             dody, dodx = ip.gaussian_gradient(obj_patches, sigma=0.33)
         elif self.options.differentiation_method == api.ImageGradientMethods.FOURIER_DIFFERENTIATION:
             dody, dodx = ip.fourier_gradient(obj_patches)

@@ -1,7 +1,7 @@
 # Copyright © 2025 UChicago Argonne, LLC All right reserved
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
-from typing import Tuple, Literal, Optional, Protocol
+from typing import Tuple, Literal, Optional, Protocol, NamedTuple
 import math
 import logging
 
@@ -471,6 +471,220 @@ def place_patches_fourier_shift(
         pad_lengths[0] : image.shape[1] - pad_lengths[1],
     ]
     return image
+
+
+def resolve_shift_operator(requested, distance, object_shape, probe_shape):
+    """Resolve sampling using dimensions represented on the same pixel grid."""
+    if requested == "auto":
+        return (
+            "full_object"
+            if math.isfinite(distance)
+            and all(5 * p > 4 * o for p, o in zip(probe_shape, object_shape))
+            else "patch"
+        )
+    if requested not in ("patch", "full_object"):
+        raise ValueError(f"Invalid shift operator: {requested}")
+    return requested
+
+
+def _fixed_patch_geometry(object_shape, patch_shape):
+    overlap = tuple(min(o, p) for o, p in zip(object_shape, patch_shape))
+    source_start = tuple(o // 2 - n // 2 for o, n in zip(object_shape, overlap))
+    target_start = tuple(p // 2 - n // 2 for p, n in zip(patch_shape, overlap))
+    source = tuple(slice(a, a + n) for a, n in zip(source_start, overlap))
+    target = tuple(slice(b, b + n) for b, n in zip(target_start, overlap))
+    center = tuple(a - b + (p - 1) / 2 for a, b, p in zip(source_start, target_start, patch_shape))
+    return source, target, center
+
+
+def _full_object_shift_multiplier(positions, object_shape, patch_shape, method, derivative=(0, 0)):
+    r"""Return the periodic shift multiplier or its patch-center derivatives.
+
+    For each axis, the shift is :math:`s=c-q`, where :math:`q` is the absolute
+    patch center and :math:`c=a-b+(p-1)/2` uses the fixed source/target crop
+    starts :math:`a,b` and patch size :math:`p`. With signed FFT frequency
+    :math:`f` in cycles per pixel, Fourier interpolation uses
+
+    .. math::
+
+        M(q,f)=\exp(-2\pi i f s), \qquad
+        \partial_q^r M=(2\pi i f)^r M.
+
+    Bilinear interpolation is separable. On each interval with constant
+    :math:`j=\lfloor s\rfloor`, let :math:`\alpha=s-j` and
+    :math:`E_j=\exp(-2\pi i f j)`. Its one-axis factors are
+
+    .. math::
+
+        M=(1-\alpha)E_j+\alpha E_{j+1}, \qquad
+        \partial_q M=E_j-E_{j+1}, \qquad \partial_q^r M=0\quad(r\geq2).
+
+    These are piecewise derivatives; classical derivatives need not exist
+    at interpolation knots. Nearest uses :math:`M=\exp(-2\pi i f\,\mathrm{round}(s))`
+    and zero derivatives almost everywhere (also returned at ties).
+    For ``derivative=(m, n)``, multiply the y-axis order-m and x-axis order-n
+    factors. Thus bilinear mixed second derivatives can be nonzero even
+    though its pure second derivatives vanish between knots.
+    """
+    _, _, center = _fixed_patch_geometry(object_shape, patch_shape)
+    shifts = positions.new_tensor(center) - positions
+    factors = []
+    for axis, (size, order) in enumerate(zip(object_shape, derivative)):
+        frequency = torch.fft.fftfreq(size, device=positions.device, dtype=positions.dtype)
+        omega = 2j * torch.pi * frequency[None]
+        shift = shifts[:, axis, None]
+        if method == "fourier":
+            factor = torch.exp(-omega * shift) * omega ** order
+        elif method == "bilinear":
+            lower = shift.floor()
+            fraction = shift - lower
+            left = torch.exp(-omega * lower)
+            right = torch.exp(-omega * (lower + 1))
+            if order == 0:
+                factor = (1 - fraction) * left + fraction * right
+            elif order == 1:
+                factor = left - right
+            else:
+                factor = (left + right) * 0
+        elif method == "nearest":
+            factor = torch.exp(-omega * shift.round())
+            # Keep a zero-valued position dependency for autograd.
+            factor = factor + shift * 0
+            if order:
+                factor = factor * 0
+        else:
+            raise ValueError(f"Invalid interpolation method: {method}")
+        factors.append(factor)
+    return factors[0][:, :, None] * factors[1][:, None, :]
+
+
+def _fixed_patch_resize(image, shape):
+    source, target, _ = _fixed_patch_geometry(image.shape[-2:], shape)
+    cropped = image[..., source[0], source[1]]
+    if tuple(cropped.shape[-2:]) == tuple(shape):
+        return cropped
+    return torch.nn.functional.pad(cropped, (
+        target[1].start, shape[1] - target[1].stop,
+        target[0].start, shape[0] - target[0].stop,
+    ))
+
+
+@timer()
+def extract_patches_full_object(
+    image: Tensor, positions: Tensor, shape: Tuple[int, int],
+    method: str = "fourier", *, derivative: Tuple[int, int] = (0, 0),
+) -> Tensor:
+    r"""Periodically shift a complete 2D image, then center crop/pad to patch shape.
+
+    Positions are absolute patch centers in (y, x) pixels. Derivative orders
+    refer to these centers, and are applied before the fixed crop. Pixels
+    outside the image-sized shifted support are zero when the patch is larger.
+
+    Let :math:`\widehat O_{kl}` be the image FFT, :math:`N_y,N_x` its shape,
+    and :math:`M_y,M_x` the factors from ``_full_object_shift_multiplier``.
+    For ``derivative=(m, n)``, compute the complete periodic field
+
+    .. math::
+
+        Z_q(r_y,r_x)=\frac{1}{N_yN_x}\sum_{k,l}\widehat O_{kl}
+            (\partial_{q_y}^m M_y)(\partial_{q_x}^n M_x)
+            \exp\left[2\pi i(f_{y,k}r_y+f_{x,l}r_x)\right].
+
+    The returned patch is :math:`Z_q(u+a_y-b_y,v+a_x-b_x)` on the
+    fixed overlap, where :math:`a,b` are source/target crop starts.
+    Real inputs return the real part. The image FFT is shared by all positions.
+    """
+    positions = positions.to(device=image.device, dtype=image.real.dtype)
+    spectrum = pmath.fft2_precise(image)
+    multiplier = _full_object_shift_multiplier(positions, image.shape, shape, method, derivative)
+    shifted = pmath.ifft2_precise(spectrum[None] * multiplier)
+    if not image.is_complex():
+        shifted = shifted.real
+    return _fixed_patch_resize(shifted, shape)
+
+
+@timer()
+def place_patches_full_object(
+    image: Tensor, positions: Tensor, patches: Tensor,
+    op: Literal["add", "set"] = "add", method: str = "fourier",
+) -> Tensor:
+    r"""Add the exact adjoint of full-object patch extraction to an image.
+
+    Undo the fixed crop/pad for each patch :math:`Y_i`: copy its retained
+    overlap into a zero object-sized array :math:`E_i`, discarding padded
+    margins. With :math:`M_i` the two-axis interpolation multiplier, add
+
+    .. math::
+
+        \Delta O(r_y,r_x)=\frac{1}{N_yN_x}\sum_{k,l}
+            \left[\sum_i\overline{M_i(k,l)}\,\widehat E_i(k,l)\right]
+            \exp\left[2\pi i(f_{y,k}r_y+f_{x,l}r_x)\right].
+
+    Contributions are summed in Fourier space before the inverse FFT.
+    Conjugating the bilinear multiplier gives its adjoint, which generally
+    differs from interpolation with a reversed shift. Real image buffers
+    receive the real part. A 2D patch is shared across all positions;
+    batched patches have shape ``(batch_size, patch_height, patch_width)``.
+    Only additive placement is supported.
+    """
+    if op != "add":
+        raise ValueError("Full-object placement supports only additive placement.")
+    if patches.ndim == 2:
+        patches = patches[None].expand(len(positions), -1, -1)
+    positions = positions.to(device=patches.device, dtype=patches.real.dtype)
+    expanded = _fixed_patch_resize(patches, image.shape)
+    multiplier = _full_object_shift_multiplier(
+        positions, image.shape, patches.shape[-2:], method
+    )
+    spectrum = (pmath.fft2_precise(expanded) * multiplier.conj()).sum(0)
+    update = pmath.ifft2_precise(spectrum)
+    if not image.is_complex():
+        update = update.real
+    return image + update
+
+
+class ObjectPatchSampler:
+    """Dispatch patch operations without changing reconstruction update rules."""
+
+    def __init__(self, operator="patch", method="fourier", pad=0):
+        self.operator = operator
+        self.method = method
+        self.pad = pad
+
+    def integer_mode(self, requested):
+        return requested and self.operator == "patch"
+
+    def extract(self, image, positions, shape, integer_mode=False):
+        if self.operator == "full_object":
+            return extract_patches_full_object(image, positions, shape, self.method)
+        if integer_mode:
+            return extract_patches_integer(image, positions, shape)
+        from ptychi.maps import get_patch_extractor_function_by_name
+        return get_patch_extractor_function_by_name(self.method)(
+            image, positions, shape, pad=self.pad
+        )
+
+    def place(self, image, positions, patches, integer_mode=False):
+        if self.operator == "full_object":
+            return place_patches_full_object(image, positions, patches, method=self.method)
+        if integer_mode:
+            return place_patches_integer(image, positions, patches)
+        from ptychi.maps import get_patch_placer_function_by_name
+        return get_patch_placer_function_by_name(self.method)(
+            image, positions, patches, pad=self.pad
+        )
+
+
+class ObjectSamplingParameters(NamedTuple):
+    """Sampler and its geometry on one pixel grid.
+
+    ``positions`` contains continuous absolute centers in (y, x) pixels;
+    ``shape`` is the complete object shape on that same sampling grid.
+    """
+
+    sampler: ObjectPatchSampler
+    positions: Tensor
+    shape: Tuple[int, int]
 
 
 class ObjectPatchInterpolator:

@@ -326,7 +326,7 @@ class ObjectL2NormConstraintOptions(FeatureOptions):
 
 @dataclass
 class ObjectSmoothnessConstraintOptions(FeatureOptions):
-    """Settings for smoothing of the magnitude (but not the phase) of the object"""
+    """Settings for smoothing the real and imaginary components of the object."""
 
     enabled: bool = False
 
@@ -344,7 +344,7 @@ class ObjectSmoothnessConstraintOptions(FeatureOptions):
         alpha, 1 - 8 * alpha, alpha
         alpha, alpha,         alpha
 
-    and convolve it with the object magnitude. When `alpha == 1 / 8`, the smoothing power
+    and convolving it with each complex object slice. When `alpha == 1 / 8`, the smoothing power
     is maximal. The value of alpha should not be larger than 1 / 8.
     """
 
@@ -482,10 +482,8 @@ class ObjectOptions(ParameterOptions):
         enums.PatchInterpolationMethods.FOURIER
     )
     """
-    Selects the interpolation method used for extracting and updating 
-    patches of the object IF patch extraction/placement is done using 
-    the object's methods `extract_patches_function` or 
-    `place_patches_function`.
+    Selects interpolation for object patch sampling and probe subpixel shifts.
+    Full-object sampling supports Fourier, bilinear, and nearest interpolation.
     """
     
     remove_object_probe_ambiguity: RemoveObjectProbeAmbiguityOptions = field(
@@ -1115,6 +1113,13 @@ class OPRModeWeightsOptions(ParameterOptions):
     
 @dataclass
 class ForwardModelOptions(Options):
+    shift_operator: enums.ShiftOperators = enums.ShiftOperators.AUTO
+    """Object sampling operator. AUTO uses periodic full-object shifting for finite
+    propagation distance when both probe dimensions exceed 80% of the object
+    dimensions on the probe pixel grid. PATCH preserves patch-based sampling.
+    FULL_OBJECT honors the object's interpolation method and ignores pad_for_shift.
+    """
+
     low_memory_mode: bool = False
     """If True, forward propagation of ptychography will be done using less vectorized code.
     This reduces the speed, but also lowers memory usage.

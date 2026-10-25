@@ -99,6 +99,12 @@ class PatchInterpolationMethods(StrEnum):
     NEAREST = auto()
 
 
+class ShiftOperators(StrEnum):
+    AUTO = auto()
+    PATCH = auto()
+    FULL_OBJECT = auto()
+
+
 class OPRWeightSmoothingMethods(StrEnum):
     MEDIAN = auto()
     POLYNOMIAL = auto()

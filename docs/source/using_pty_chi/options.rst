@@ -99,6 +99,61 @@ the old option fields such as ``options.data_options.data`` and
 ``DeprecationWarning`` when ``PtychographyTask`` resolves them.
 
 
+Object Shift Operators
+----------------------
+
+The forward model automatically selects its object sampling operator through
+``reconstructor_options.forward_model_options.shift_operator``:
+
+- ``api.ShiftOperators.AUTO`` (default) selects full-object shifting when the
+  free-space propagation distance is finite and the probe height and width each
+  strictly exceed 80% of the corresponding object dimensions on the probe pixel
+  grid. Different pixel sizes and aspect ratios are included in this comparison.
+- ``api.ShiftOperators.PATCH`` selects the existing patch extraction and placement
+  operators.
+- ``api.ShiftOperators.FULL_OBJECT`` selects full-object shifting for any geometry.
+
+For example, to force full-object sampling:
+
+.. code-block:: python
+
+    options.reconstructor_options.forward_model_options.shift_operator = (
+        api.ShiftOperators.FULL_OBJECT
+    )
+    options.object_options.patch_interpolation_method = api.PatchInterpolationMethods.FOURIER
+
+Direct construction of ``PlanarPtychographyForwardModel`` accepts the same
+``shift_operator`` argument. Its ``resolved_shift_operator`` property reports the
+current selection, including after geometry changes; the requested option remains
+unchanged.
+
+Full-object sampling shifts each complete object slice periodically, then uses a
+fixed center crop or zero-padding to match the probe shape. For a probe larger
+than the object, pixels outside the shifted object support are zero. Features
+crossing an object boundary wrap to the opposite side. Choose the object support
+with this periodic boundary model in mind. The ``pad_for_shift`` option applies
+to patch sampling; full-object sampling uses the original object grid.
+
+The ``patch_interpolation_method`` setting selects Fourier, bilinear, or nearest
+interpolation in either branch. Full-object bilinear and nearest interpolation
+use spectral representations of circular interpolation kernels. All three have
+an exact additive adjoint. Full-object displacement is applied entirely to the
+object, and the shared probe-shift helpers act as identity operations.
+
+Position derivatives are evaluated on the complete object before cropping.
+Bilinear derivatives are piecewise defined, and nearest interpolation has zero
+position derivatives almost everywhere; use Fourier or bilinear interpolation
+for gradient-based position refinement. Cross-correlation position correction
+remains available where supported by the reconstructor.
+
+DM and RAAR retain normalized-adjoint object updates. These are approximate
+projections for fractional full-object interpolation, because the normal
+operator couples pixels. Their full-object normalization uses a denominator
+floor of 5% of its maximum to stabilize weakly illuminated pixels. Convergence
+can differ from patch sampling, particularly with cropped, nonuniform
+illumination.
+
+
 ParameterOptions
 ----------------
 

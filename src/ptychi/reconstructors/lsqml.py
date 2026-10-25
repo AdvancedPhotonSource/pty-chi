@@ -225,8 +225,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
     least-squares solver for generalized maximum-likelihood ptychography.
     Optics Express, 26(3), 3108–3123. doi:10.1364/oe.26.003108
 
-    This implementation uses automatic differentiation to get necessary gradients,
-    but other steps, including the solving of the step size, are done analytically.
+    The MATLAB implementation in PtychoShelves was consulted as a reference
+    for the algorithm. 
     """
 
     parameter_group: "pg.PlanarPtychographyParameterGroup"
@@ -1532,6 +1532,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             delta_o_patches,
             unique_probes,
             self.parameter_group.object.step_size,
+            object_gradients=lambda: self.forward_model.get_object_position_gradients(indices),
         )
         if getattr(self.forward_model, "resampling_enabled", False):
             delta_pos = self.forward_model.probe_displacements_to_object_pixels(delta_pos)

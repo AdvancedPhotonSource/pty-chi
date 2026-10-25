@@ -122,6 +122,8 @@ scipy==1.15.3
     #   ptychi (pyproject.toml)
     #   scikit-image
     #   scikit-learn
+setuptools==81.0.0
+    # via ptychi (pyproject.toml)
 six==1.17.0
     # via python-dateutil
 sympy==1.14.0

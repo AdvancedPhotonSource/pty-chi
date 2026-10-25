@@ -240,9 +240,11 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     def finish_object_projection(self, numerator: Tensor, denominator: Tensor) -> Tensor:
         tiny = torch.finfo(denominator.dtype).tiny
+        illuminated = denominator > tiny
+        denominator = self.stabilize_object_projection_denominator(denominator)
         projected_object = numerator / denominator.clamp_min(tiny)
         projected_object = torch.where(
-            denominator > tiny,
+            illuminated,
             projected_object,
             self.forward_model.get_probe_grid_object()[0],
         )
@@ -449,5 +451,6 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
             None,
             probe,
             None,
+            object_gradients=lambda: self.forward_model.get_object_position_gradients(indices),
         )
         return self.forward_model.probe_displacements_to_object_pixels(delta_pos)
