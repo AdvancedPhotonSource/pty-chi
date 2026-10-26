@@ -10,6 +10,7 @@ import cv2
 import ptychi.api as api
 from ptychi.api.task import PtychographyTask
 from ptychi.utils import get_suggested_object_size, get_default_complex_dtype
+from ptychi.propagate import FourierPropagator, get_intensity_scaling_factor
 
 # Add the folder containing "tests/" to the path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -107,7 +108,11 @@ object_guess = torch.ones(
 options.object_options.pixel_size_m = pixel_size_m
 options.object_options.optimizable = True
 
-options.probe_options.power_constraint.probe_power = np.sum(np.max(data, axis=-3), axis=(-2, -1))
+# Convert this far-field detector-count estimate to real-space probe power.
+options.probe_options.power_constraint.probe_power = (
+    np.sum(np.max(data, axis=-3), axis=(-2, -1))
+    / get_intensity_scaling_factor(FourierPropagator(), probe.shape[-2:])
+)
 options.probe_options.power_constraint.enabled = True
 options.probe_options.optimizable = True
 

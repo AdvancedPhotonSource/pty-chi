@@ -363,6 +363,12 @@ class Probe(dsbase.ReconstructParameter):
         object_: Optional["object.Object"] = None,
         opr_mode_weights: Optional[Union[Tensor, "oprweights.OPRModeWeights"]] = None,
     ) -> None:
+        """Enforce the real-space intensity sum specified by ``probe_power``.
+
+        Sum over pixels and incoherent modes of the probe composed with mean OPR
+        weights, or the zeroth OPR mode when weights are unavailable. Optionally
+        scale the object inversely to preserve the exit wave for a single slice.
+        """
         if self.probe_power <= 0.0:
             return
         if isinstance(opr_mode_weights, oprweights.OPRModeWeights):

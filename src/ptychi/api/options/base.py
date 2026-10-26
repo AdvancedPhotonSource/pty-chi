@@ -585,8 +585,13 @@ class ProbePowerConstraintOptions(FeatureOptions):
 
     probe_power: float = PydanticField(default=0.0, ge=0)
     """
-    The target probe power. The intensity of the probe and optionally the object will be 
-    scaled such that the power of the probe itself is `probe_power`.
+    Target real-space sum of squared probe magnitudes over pixels and incoherent
+    modes, without a pixel-area factor. With OPR, the probe is composed using the
+    mean OPR weights when available. The probe and optionally the object are
+    scaled to enforce this target. To convert detector counts under lossless
+    propagation, divide their sum by
+    ``ptychi.propagate.get_intensity_scaling_factor(propagator, probe_shape)``.
+    For the default Fourier propagator this divisor is ``height * width``.
     """
 
     scale_object: bool = True
