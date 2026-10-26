@@ -308,6 +308,9 @@ class MAGPIEReconstructor(PIEReconstructor):
         corrections = self.adjoint_shift_probe_update_direction(
             indices, probe_local - probe_old, first_mode_only=True
         )
+        # A singleton consensus is exactly its adjoint correction, without reduction roundoff.
+        if corrections.shape[0] == 1:
+            return corrections[0]
         fractional_shifts = self.forward_model.get_probe_grid_position_data()[2][indices]
         object_on_probe_grid = ip.shift_images(
             object_counterpart[:, 0],
@@ -318,8 +321,7 @@ class MAGPIEReconstructor(PIEReconstructor):
         )[:, None]
         confidence = object_on_probe_grid.abs().square()
         mean_correction = corrections.mean(dim=0)
-        # Centering preserves the direct adjoint for singleton minibatches and
-        # selects the ordinary mean wherever the total confidence is zero.
+        # Centering selects the ordinary mean wherever the total confidence is zero.
         return mean_correction + _safe_divide(
             (confidence * (corrections - mean_correction)).sum(dim=0),
             confidence.sum(dim=0),
