@@ -68,10 +68,7 @@ jobs:
     - name: Install dependencies
       run: |
         source .venv_pytest/bin/activate
-        uv pip install --upgrade pip
-        uv pip install pytest
-        uv pip install -r requirements.txt
-        uv pip install -e .
+        uv sync --active --locked
 
     - name: List build environment
       run: |
@@ -83,7 +80,7 @@ jobs:
         source .venv_pytest/bin/activate
         echo $(which python)
         cd tests
-        pytest -s --high-tol --save-timing
+        uv run --active --locked --with torch==2.12.1 --with torchvision pytest -s --high-tol --save-timing
 
     - name: Remove environment
       if: always()
