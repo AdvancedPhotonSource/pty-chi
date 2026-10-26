@@ -159,6 +159,44 @@ class WavefieldPropagator(ABC, torch.nn.Module):
         return self.propagate_forward(wavefield)
 
 
+def get_intensity_scaling_factor(
+    propagator: WavefieldPropagator | type[WavefieldPropagator],
+    shape: tuple[int, int],
+) -> float:
+    """Return the propagation normalization of the discrete sum of intensity.
+
+    For a wavefield on an ``(height, width)`` grid, this is the ratio
+    ``sum(abs(output)**2) / sum(abs(input)**2)`` when propagation is lossless.
+    Pixel areas are not included. Angular-spectrum propagation has unit
+    normalization on the propagating band; removing evanescent frequencies can
+    reduce the actual power further, depending on the input wavefield.
+
+    The angular-spectrum class is accepted with unit normalization. Pass an
+    instance for Fourier propagation to supply its FFT norm, or for Fresnel
+    and Fraunhofer propagation to supply their geometry-dependent prefactors.
+    """
+    n_pixels = shape[-2] * shape[-1]
+    if isinstance(propagator, type):
+        if issubclass(propagator, AngularSpectrumPropagator):
+            return 1.0
+        else:
+            raise TypeError("Pass a propagator instance to supply its normalization or geometry.")
+
+    if isinstance(propagator, FourierPropagator):
+        if propagator.norm is None or propagator.norm == "backward":
+            return float(n_pixels)
+        if propagator.norm == "ortho":
+            return 1.0
+        if propagator.norm == "forward":
+            return 1.0 / n_pixels
+        raise ValueError(f"Unknown FFT normalization: {propagator.norm}")
+    if isinstance(propagator, AngularSpectrumPropagator):
+        return 1.0
+    if isinstance(propagator, (FresnelTransformPropagator, FraunhoferPropagator)):
+        return n_pixels * abs(propagator._C0) ** 2
+    raise TypeError(f"Unsupported propagator: {type(propagator).__name__}")
+
+
 class FourierPropagator(WavefieldPropagator):
     def __init__(self, norm=None) -> None:
         super().__init__()

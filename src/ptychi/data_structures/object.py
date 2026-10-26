@@ -26,6 +26,7 @@ import ptychi.maps as maps
 
 if TYPE_CHECKING:
     import ptychi.api as api
+    from ptychi.propagate import WavefieldPropagator
     from ptychi.data_structures.probe_positions import ProbePositions
     
 logger = logging.getLogger(__name__)
@@ -710,6 +711,7 @@ class PlanarObject(Object):
         use_all_modes: bool = False,
         *,
         sampling: Optional["ip.ObjectSamplingParameters"] = None,
+        propagator: Optional["WavefieldPropagator | type[WavefieldPropagator]"] = None,
     ) -> None:
         """Update the preconditioner. This function reproduces the behavior
         of PtychoShelves in `ptycho_solver`: it averages the new illumination
@@ -728,11 +730,13 @@ class PlanarObject(Object):
             Whether to use the sum of all probe modes' intensities for the illumination map.
         sampling : ip.ObjectSamplingParameters, optional
             Sampling parameters passed to ``calculate_illumination_map``.
+        propagator : WavefieldPropagator or type[WavefieldPropagator], optional
+            Detector propagator passed to ``initialize_preconditioner``.
         """
         if self.preconditioner is None:
             self.initialize_preconditioner(
                 probe, probe_positions, patterns, use_all_modes=use_all_modes,
-                sampling=sampling,
+                sampling=sampling, propagator=propagator,
             )
         illum_map = self.calculate_illumination_map(
             probe, probe_positions, use_all_modes=use_all_modes,
@@ -748,6 +752,7 @@ class PlanarObject(Object):
         use_all_modes: bool = False,
         *,
         sampling: Optional["ip.ObjectSamplingParameters"] = None,
+        propagator: Optional["WavefieldPropagator | type[WavefieldPropagator]"] = None,
     ) -> None:
         """Initialize the preconditioner. This function reproduces the behavior
         of PtychoShelves in `init_solver` and `load_from_p`: the probe is first
@@ -766,9 +771,16 @@ class PlanarObject(Object):
             Whether to use the sum of all probe modes' intensities for the illumination map.
         sampling : ip.ObjectSamplingParameters, optional
             Sampling parameters passed to ``calculate_illumination_map``.
+        propagator : WavefieldPropagator or type[WavefieldPropagator], optional
+            Detector propagator used to infer probe-plane power from the data.
+            Defaults to Fourier propagation. The angular-spectrum class is
+            accepted; Fourier, Fresnel, and Fraunhofer propagation require an instance.
+            Assumes lossless propagation on the propagating band.
         """
         probe_data = probe.data
-        probe_renormalization_factor = get_probe_renormalization_factor(patterns)
+        probe_renormalization_factor = get_probe_renormalization_factor(patterns, propagator)
+        # sqrt(H*W) converts the inferred probe-plane power to RMS amplitude;
+        # propagation normalization is included in probe_renormalization_factor.
         probe_data = probe_data / (math.sqrt(probe.shape[-1] * probe.shape[-2]) * 2 * probe_renormalization_factor)
         probe_temp = ds.probe.Probe(data=probe_data, options=copy.deepcopy(probe.options))
         self.preconditioner = self.calculate_illumination_map(

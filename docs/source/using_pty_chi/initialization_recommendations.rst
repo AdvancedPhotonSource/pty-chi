@@ -55,6 +55,24 @@ Probe
 
 The probe should be initialized to be a complex array of ``[n_opr_modes, n_incoherent_modes, h, w]``.
 
+To match the initial probe intensity to the mean measured pattern, use
+:func:`ptychi.utils.rescale_probe` with the detector propagator::
+
+    probe = rescale_probe(probe, patterns, propagator=propagator)
+
+The default is an unnormalized far-field Fourier transform. Rescaling assumes
+unit object transmission when relating the probe to measured counts.
+The ``AngularSpectrumPropagator`` class *normally* suffices to calculate detector power
+directly from source-plane power, assuming conservation on the propagating band.
+Fourier propagation requires an instance to supply its FFT normalization;
+Fresnel and Fraunhofer propagation require an instance to supply the
+geometry-dependent intensity scale.
+
+One exception: If angular-spectrum propagation removes
+evanescent frequencies, the actual power loss depends on the probe and must be
+evaluated by propagation.
+Pass an angular-spectrum instance to ``rescale_probe`` to include this filtering.
+
 
 Incoherent probe modes
 ~~~~~~~~~~~~~~~~~~~~~~~~
