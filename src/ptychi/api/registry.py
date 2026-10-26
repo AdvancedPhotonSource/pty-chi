@@ -10,6 +10,7 @@ import ptychi.api.options.dm as dm
 import ptychi.api.options.lsqml as lsqml
 import ptychi.api.options.pie as pie
 import ptychi.api.options.raar as raar
+from ptychi.api.options import magpie
 
 
 __all__ = ["RECONSTRUCTOR_OPTIONS_MAP"]
@@ -64,6 +65,13 @@ RECONSTRUCTOR_OPTIONS_MAP = {
         "probe_position_options": pie.PIEProbePositionOptions,
         "opr_mode_weight_options": pie.PIEOPRModeWeightsOptions,
         "reconstructor_options": pie.RPIEReconstructorOptions,
+    },
+    enums.Reconstructors.MAGPIE: {
+        "object_options": magpie.MAGPIEObjectOptions,
+        "probe_options": magpie.MAGPIEProbeOptions,
+        "probe_position_options": magpie.MAGPIEProbePositionOptions,
+        "opr_mode_weight_options": magpie.MAGPIEOPRModeWeightsOptions,
+        "reconstructor_options": magpie.MAGPIEReconstructorOptions,
     },
     enums.Reconstructors.DM: {
         "object_options": dm.DMObjectOptions,

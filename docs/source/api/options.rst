@@ -248,6 +248,39 @@ PIE Options
    :undoc-members:
    :show-inheritance:
 
+GM-rPIE and GM-MAGPIE Options
+-----------------------------
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEReconstructorOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEObjectOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEProbeOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEProbePositionOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ptychi.api.options.magpie.MAGPIEOPRModeWeightsOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 LSQML Options
 -------------
 

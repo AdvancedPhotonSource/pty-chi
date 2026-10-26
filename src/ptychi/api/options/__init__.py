@@ -7,6 +7,7 @@ from .data import *
 from .ad_ptychography import *
 from .lsqml import *
 from .pie import *
+from .magpie import *
 from .dm import *
 from .raar import *
 from .bh import *
