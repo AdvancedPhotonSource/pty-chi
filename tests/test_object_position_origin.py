@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 import ptychi.api as api
@@ -14,10 +15,17 @@ def _make_object(shape, method):
     return PlanarObject(data=data.to(torch.complex64), options=options)
 
 
-def test_support_origin_extracts_even_patch_at_object_center():
-    object_ = _make_object((8, 10), api.ObjectPosOriginCoordsMethods.SUPPORT)
+@pytest.mark.parametrize(
+    "shape, origin, start",
+    [
+        ((8, 10), (3.5, 4.5), (2, 3)),
+        ((9, 11), (4.5, 5.5), (3, 4)),
+    ],
+)
+def test_support_origin_extracts_even_patch_at_object_center(shape, origin, start):
+    object_ = _make_object(shape, api.ObjectPosOriginCoordsMethods.SUPPORT)
 
-    expected_origin = object_.pos_origin_coords.new_tensor([3.5, 4.5])
+    expected_origin = object_.pos_origin_coords.new_tensor(origin)
     assert torch.equal(object_.pos_origin_coords, expected_origin)
 
     object_.update_pos_origin_coordinates()
@@ -28,7 +36,8 @@ def test_support_origin_extracts_even_patch_at_object_center():
     )
 
     assert torch.equal(object_.pos_origin_coords, expected_origin)
-    assert torch.equal(patch[0, 0], object_.data[0, 2:6, 3:7])
+    y, x = start
+    assert torch.equal(patch[0, 0], object_.data[0, y:y + 4, x:x + 4])
 
 
 def test_positions_origin_centers_scan_midpoint_in_object():
