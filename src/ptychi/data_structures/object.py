@@ -69,7 +69,7 @@ class Object(dsbase.ReconstructParameter):
         self.roi_bbox: dsbase.BoundingBox = None
         
         pos_origin_coords = torch.tensor(self.shape, device=torch.get_default_device()) / 2.0
-        pos_origin_coords = pos_origin_coords.round() - 0.5
+        pos_origin_coords = pos_origin_coords.ceil() - 0.5
         self.register_buffer("pos_origin_coords", pos_origin_coords)
 
     def extract_patches(self, positions, patch_shape, *args, **kwargs):
@@ -214,7 +214,7 @@ class PlanarObject(Object):
 
         # Initialize position origin coordinates.
         pos_origin_coords = torch.tensor(self.shape[1:], device=torch.get_default_device()) / 2.0
-        pos_origin_coords = pos_origin_coords.round() - 0.5
+        pos_origin_coords = pos_origin_coords.ceil() - 0.5
         self.register_buffer("pos_origin_coords", pos_origin_coords)
 
     @property
@@ -253,7 +253,7 @@ class PlanarObject(Object):
             self.pos_origin_coords = self.pos_origin_coords.round() - 0.5
         elif self.options.determine_position_origin_coords_by == enums.ObjectPosOriginCoordsMethods.SUPPORT:
             pos_origin_coords = torch.tensor(self.shape[1:], device=torch.get_default_device()) / 2.0
-            pos_origin_coords = pos_origin_coords.round() - 0.5
+            pos_origin_coords = pos_origin_coords.ceil() - 0.5
             self.pos_origin_coords = pos_origin_coords
         elif self.options.determine_position_origin_coords_by == enums.ObjectPosOriginCoordsMethods.SPECIFIED:
             if self.options.position_origin_coords is None:
