@@ -3,17 +3,32 @@
    :align: center
    :width: 200px
 
-.. epigraph::
-    Pty-Chi is actively maintained, and we welcome feature requests, bug reports, and contributions from the community.
-
-    If you need a new capability, or have implemented useful extensions in your own branch or derivative codebase, we strongly encourage you to consider contributing those changes back to Pty-Chi through an issue or pull request whenever practical, rather than maintaining a separate repository with overlapping functionality.
-
-    Keeping broadly useful improvements in the shared upstream project helps reduce fragmentation, preserves a clear development history, and makes new capabilities easier for the wider community to discover, maintain, and build upon.
-
 Welcome to the repository of Pty-chi, a PyTorch-based ptychography reconstruction library!
 
 .. image:: https://zenodo.org/badge/858453195.svg
   :target: https://doi.org/10.5281/zenodo.15277806
+
+
+=====================
+Repository navigation
+=====================
+
+Use the repository tabs to find the right place for your next step:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 70 30
+
+   * - I want to...
+     - Go to
+   * - Request a feature, report a bug, or propose a contribution
+     - `Issues <https://github.com/AdvancedPhotonSource/pty-chi/issues>`_
+   * - Contribute code
+     - `Pull Requests <https://github.com/AdvancedPhotonSource/pty-chi/pulls>`_
+   * - Read announcements about functionality or API changes (watch the repo to subscribe)
+     - `Discussions <https://github.com/AdvancedPhotonSource/pty-chi/discussions>`_
+   * - Read the developer's guide
+     - `Wiki <https://github.com/AdvancedPhotonSource/pty-chi/wiki>`_
 
 
 ============
