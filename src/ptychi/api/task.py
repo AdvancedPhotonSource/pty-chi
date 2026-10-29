@@ -771,8 +771,7 @@ class PtychographyTask(Task):
 
             # The intermediates (psi, psi_far, shifted probes, object patches) are rewritten by
             # every forward pass; discard them like the resampling caches instead of copying them.
-            forward_model = self.reconstructor.forward_model
-            forward_model.intermediate_variables = type(forward_model.intermediate_variables)()
+            self.reconstructor.forward_model.clear_intermediate_variables()
             self.reconstructor.forward_model.clear_resampling_caches()
 
         if device.type == "cpu":

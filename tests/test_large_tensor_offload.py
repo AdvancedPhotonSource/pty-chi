@@ -105,6 +105,11 @@ class TestLargeTensorOffload(tutils.BaseTester):
         fm.forward(indices)  # the next forward pass rebuilds them on the device
         assert fm.intermediate_variables.obj_patches.device.type == "cuda"
 
+        intermediates_type = type(fm.intermediate_variables)
+        fm.clear_intermediate_variables()
+        assert type(fm.intermediate_variables) is intermediates_type
+        assert fm.intermediate_variables.obj_patches is None
+
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA device required for offload test")
     def test_offload_round_trip_does_not_change_reconstruction(self):
         """Offloading between runs (as MultiscanSharedObjectWorkflow does) must not change the result."""
