@@ -86,6 +86,15 @@ class ForwardModel(torch.nn.Module):
         """Clear derived grid caches, if the forward model defines any."""
         return None
 
+    def clear_intermediate_variables(self):
+        """Discard the intermediate variables recorded by the last forward pass.
+
+        They are rewritten by every forward pass before they are read, so this frees
+        their memory without affecting the next forward pass or update.
+        """
+        if self.intermediate_variables is not None:
+            self.intermediate_variables = type(self.intermediate_variables)()
+
     def record_intermediate_variable(self, name, var):
         if self.retain_intermediates:
             if isinstance(self.intermediate_variables[name], list):

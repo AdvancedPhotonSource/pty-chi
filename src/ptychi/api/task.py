@@ -717,7 +717,8 @@ class PtychographyTask(Task):
         active on the accelerator at a time. Call it with ``device="cpu"`` to
         offload task tensors and optimizer/reconstructor state to system memory,
         and call it again before resuming the task to restore that state to the
-        accelerator.
+        accelerator. The forward model's intermediate variables are discarded
+        rather than moved: every forward pass rewrites them before they are read.
 
         Parameters
         ----------
@@ -768,7 +769,9 @@ class PtychographyTask(Task):
                         utils.move_nested_tensors_to_device(getattr(value, field.name), device),
                     )
 
-            self.reconstructor.forward_model.move_intermediate_variables_to_device(device)
+            # The intermediates (psi, psi_far, shifted probes, object patches) are rewritten by
+            # every forward pass; discard them like the resampling caches instead of copying them.
+            self.reconstructor.forward_model.clear_intermediate_variables()
             self.reconstructor.forward_model.clear_resampling_caches()
 
         if device.type == "cpu":
