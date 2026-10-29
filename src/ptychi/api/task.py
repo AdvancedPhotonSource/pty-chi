@@ -127,6 +127,14 @@ class PtychographyTask(Task):
         self.check_options()
         self.check_task_data()
         self.build()
+        self.print_user_announcement()
+
+    def print_user_announcement(self):
+        logger.info(
+            "Subscribe to Pty-Chi's GitHub Discussions for the latest announcements "
+            "about functionality and API changes: "
+            "https://github.com/AdvancedPhotonSource/pty-chi/discussions"
+        )
         
     def check_options(self):
         self.options.check()
