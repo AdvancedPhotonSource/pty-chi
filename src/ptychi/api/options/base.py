@@ -588,10 +588,10 @@ class ProbePowerConstraintOptions(FeatureOptions):
     Target real-space sum of squared probe magnitudes over pixels and incoherent
     modes, without a pixel-area factor. With OPR, the probe is composed using the
     mean OPR weights when available. The probe and optionally the object are
-    scaled to enforce this target. To convert detector counts under lossless
-    propagation, divide their sum by
-    ``ptychi.propagate.get_intensity_scaling_factor(propagator, probe_shape)``.
-    For the default Fourier propagator this divisor is ``height * width``.
+    scaled to enforce this target. Squared probe magnitudes represent photons
+    per pixel, so this target is the incident photon count per exposure when
+    the diffraction data are in photon counts. Under unit transmission and
+    lossless propagation, it equals the total detector count.
     """
 
     scale_object: bool = True

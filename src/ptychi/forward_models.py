@@ -1088,28 +1088,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
 
     @timer()
     def post_differentiation_hook(self, indices, y_true, **kwargs):
-        self.compensate_for_fft_scaler()
         self.scale_gradients(y_true)
-
-    @timer()        
-    def compensate_for_fft_scaler(self):
-        """
-        Compensate for the scaling of the FFT. If the normalization of FFT is "ortho",
-        nothing is done. If the normalization is "backward" (default in `torch.fft`),
-        all gradients are scaled by 1 / sqrt(N).
-        """
-        if (
-            isinstance(self.object, ptychi.data_structures.object.DIPObject) or 
-            isinstance(self.probe, ptychi.data_structures.probe.DIPProbe)
-        ):
-            return
-        if not isinstance(self.free_space_propagator, FourierPropagator):
-            return
-        if self.free_space_propagator.norm == "backward" or self.free_space_propagator.norm is None:
-            factor = self.probe.shape[-2] * self.probe.shape[-1]
-            for var in self.optimizable_parameters:
-                if var.get_grad() is not None:
-                    var.set_grad(var.get_grad() / factor)
 
     @timer()
     def scale_gradients(self, patterns):

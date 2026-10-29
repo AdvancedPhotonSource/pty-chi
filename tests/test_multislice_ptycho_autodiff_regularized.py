@@ -40,13 +40,15 @@ class TestMultislicePtychoAutodiffRegularized(tutils.BaseTester):
         probe_data = probe
         options.probe_options.optimizable = True
         options.probe_options.optimizer = api.Optimizers.ADAM
-        options.probe_options.step_size = 1e-3
+        amplitude_scale = (probe.shape[-2] * probe.shape[-1]) ** 0.5
+        options.probe_options.step_size = 1e-3 * amplitude_scale
+        options.probe_options.optimizer_params = {"eps": 1e-8 * amplitude_scale}
         
         probe_position_x_px = positions_px[:, 1]
         probe_position_y_px = positions_px[:, 0]
         options.probe_position_options.optimizable = True
         options.probe_position_options.optimizer = api.Optimizers.SGD
-        options.probe_position_options.step_size = 1e-1
+        options.probe_position_options.step_size = 1e-1 / (probe.shape[-2] * probe.shape[-1])
         
         options.reconstructor_options.forward_model_class = api.ForwardModels.PLANAR_PTYCHOGRAPHY
         options.reconstructor_options.loss_function = api.LossFunctions.MSE_SQRT
