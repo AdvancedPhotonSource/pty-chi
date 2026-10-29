@@ -85,7 +85,8 @@ class TestLargeTensorOffload(tutils.BaseTester):
         assert task.probe.update_buffer.device.type == "cpu"
         assert object_optimizer.state[object_parameter]["test_buffer"].device.type == "cpu"
         assert reconstructor_buffers.alpha_probe_all_pos.device.type == "cpu"
-        assert fm.intermediate_variables.obj_patches.device.type == "cpu"
+        # rewritten by every forward pass: discarded, not copied to the host
+        assert fm.intermediate_variables.obj_patches is None
 
         task.set_large_tensor_device()
 
@@ -100,7 +101,52 @@ class TestLargeTensorOffload(tutils.BaseTester):
         assert task.probe.update_buffer.device.type == "cuda"
         assert object_optimizer.state[object_parameter]["test_buffer"].device.type == "cuda"
         assert reconstructor_buffers.alpha_probe_all_pos.device.type == "cuda"
+        assert fm.intermediate_variables.obj_patches is None
+        fm.forward(indices)  # the next forward pass rebuilds them on the device
         assert fm.intermediate_variables.obj_patches.device.type == "cuda"
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA device required for offload test")
+    def test_offload_round_trip_does_not_change_reconstruction(self):
+        """Offloading between runs (as MultiscanSharedObjectWorkflow does) must not change the result."""
+        self.setup_ptychi(cpu_only=False)
+
+        def build_task():
+            torch.manual_seed(0)
+            n_side, size = 5, 16
+            grid = (torch.arange(n_side) - (n_side - 1) / 2) * 3.0
+            pos_y, pos_x = torch.meshgrid(grid, grid, indexing="ij")
+            yy, xx = torch.meshgrid(torch.arange(size) - size / 2, torch.arange(size) - size / 2, indexing="ij")
+            r2 = yy**2 + xx**2
+            probe = torch.stack([torch.exp(-r2 / 20) * torch.exp(1j * r2 / 15), 0.3 * torch.exp(-r2 / 30)])
+            options = api.LSQMLOptions()
+            options.object_options.pixel_size_m = 1e-6
+            options.object_options.optimizable = True
+            options.probe_options.optimizable = True
+            options.probe_position_options.optimizable = False
+            options.reconstructor_options.batch_size = 5
+            options.reconstructor_options.momentum_acceleration_gain = 0.5
+            options.reconstructor_options.random_seed = 0
+            return PtychographyTask(
+                options,
+                diffraction_data=torch.poisson(torch.full((n_side * n_side, size, size), 20.0)),
+                object_data=torch.ones((1, 40, 40), dtype=torch.complex64),
+                probe_data=probe[None].to(torch.complex64),
+                probe_position_x_px=pos_x.flatten(),
+                probe_position_y_px=pos_y.flatten(),
+            )
+
+        reference = build_task()
+        reference.run(2)
+        reference.run(2)
+
+        offloaded = build_task()
+        offloaded.run(2)
+        offloaded.set_large_tensor_device("cpu")
+        offloaded.set_large_tensor_device()
+        offloaded.run(2)
+
+        for name in ("object", "probe"):
+            assert torch.equal(offloaded.get_data(name), reference.get_data(name)), name
 
 
 if __name__ == '__main__':
