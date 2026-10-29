@@ -524,9 +524,6 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
                 patterns=self.dataset.patterns,
                 use_all_modes=self.parameter_group.object.options.build_preconditioner_with_all_modes,
                 sampling=sampling,
-                propagator=forward_model.free_space_propagator,
-                valid_pixel_mask=self.dataset.valid_pixel_mask,
-                detector_response=self.parameter_group.detector_response,
             )
 
     def run_pre_epoch_hooks(self) -> None:

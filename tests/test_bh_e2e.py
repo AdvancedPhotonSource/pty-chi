@@ -26,7 +26,7 @@ class Test2DPtychoBH(tutils.TungstenDataTester):
 
         probe_data = probe
         options.probe_options.optimizable = True
-        options.probe_options.rho = 0.1
+        options.probe_options.rho = 0.1 * (probe.shape[-2] * probe.shape[-1]) ** 0.5
 
         probe_position_x_px = positions_px[:, 1]
         probe_position_y_px = positions_px[:, 0]

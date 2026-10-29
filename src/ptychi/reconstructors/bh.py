@@ -413,9 +413,6 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         td = psi_far * model.intensity_to_detector_adjoint(
             residual, psi_far.shape[-2:]
         )[:, None]
-        # Compensate FFT normalization only for the far-field Fourier propagator.
-        if isinstance(self.forward_model.free_space_propagator, fm.FourierPropagator):
-            td *= psi_far.shape[-1] * psi_far.shape[-2]
         res = 2 * self.forward_model.free_space_propagator.propagate_backward(td)
         return res
 
