@@ -4,8 +4,10 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from threading import Lock
 from typing import TypeAlias
 import cmath
+import logging
 
 import torch
 from torch.fft import fftfreq
@@ -14,6 +16,8 @@ from ptychi.timing.timer_utils import timer
 import ptychi.maths as pmath
 import ptychi.utils as utils
 
+
+logger = logging.getLogger(__name__)
 
 BooleanTensor: TypeAlias = torch.Tensor
 ComplexTensor: TypeAlias = torch.Tensor
@@ -153,6 +157,24 @@ class WavefieldPropagator(ABC, torch.nn.Module):
     magnitudes by the pixel area of the corresponding plane to obtain counts
     per unit area. Filtering evanescent modes can reduce the total count.
     """
+
+    _normalization_warning_emitted = False
+    _normalization_warning_lock = Lock()
+
+    def __init__(self) -> None:
+        super().__init__()
+
+        # TODO: Remove this warning after version 2.5.0.
+        # Share the notice across all subclasses and concurrent initializations.
+        with WavefieldPropagator._normalization_warning_lock:
+            if not WavefieldPropagator._normalization_warning_emitted:
+                logger.warning(
+                    "Pty-Chi's propagator normalization has changed to a common "
+                    "counts-per-pixel convention. Saved probes, probe-power constraints, "
+                    "and optimizer settings may need adjustment. See the announcement: "
+                    "https://github.com/AdvancedPhotonSource/pty-chi/discussions/90"
+                )
+                WavefieldPropagator._normalization_warning_emitted = True
 
     @abstractmethod
     def propagate_forward(self, wavefield: ComplexTensor) -> ComplexTensor:
