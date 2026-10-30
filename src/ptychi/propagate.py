@@ -147,6 +147,13 @@ class WavefieldPropagatorParameters:
 
 
 class WavefieldPropagator(ABC, torch.nn.Module):
+    @property
+    def is_coordinate_shifted(self) -> bool:
+        """Whether forward propagation places the coordinate origin (direct transmission)
+        at the array corner rather than the center.
+        """
+        return False
+
     @abstractmethod
     def propagate_forward(self, wavefield: ComplexTensor) -> ComplexTensor:
         pass
@@ -201,6 +208,10 @@ class FourierPropagator(WavefieldPropagator):
     def __init__(self, norm=None) -> None:
         super().__init__()
         self.norm = norm
+
+    @property
+    def is_coordinate_shifted(self) -> bool:
+        return True
 
     @timer()
     def propagate_forward(self, wavefield: ComplexTensor) -> ComplexTensor:
