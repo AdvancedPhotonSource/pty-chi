@@ -1,4 +1,3 @@
-import math
 from types import SimpleNamespace
 
 import numpy as np
@@ -139,28 +138,36 @@ def test_autodiff_gradient_scaling_matches_amplitude_projection(propagator):
     )
 
 
-def test_preconditioner_is_independent_of_propagation_geometry(propagator):
-    probe_data = torch.randn(1, 2, 8, 12, dtype=torch.complex64)
-    probe = Probe(data=probe_data, options=obase.ProbeOptions())
-    obj = PlanarObject(data=torch.ones(1, 24, 28, dtype=torch.complex64), options=obase.ObjectOptions())
-    positions = ProbePositions(data=torch.zeros(1, 2), options=obase.ProbePositionOptions())
-    patterns = propagator(probe_data[0]).abs().square().sum(0)[None]
-    # Legacy far-field initialization, before converting its probe to photon
-    # amplitudes. Its illumination map must acquire the same factor of H*W.
-    old_probe = probe_data / math.sqrt(96)
-    old_patterns = torch.fft.fft2(old_probe[0]).abs().square().sum(0)[None]
-    old_renormalization = torch.sqrt(96 / old_patterns.sum())
-    reference_probe = Probe(
-        data=old_probe / (math.sqrt(96) * 2 * old_renormalization),
-        options=obase.ProbeOptions(),
+@pytest.mark.parametrize("scale", [1e-3, 1.0, 256.0])
+@pytest.mark.parametrize("use_all_modes", [False, True])
+def test_preconditioner_tracks_illumination_in_probe_units(scale, use_all_modes):
+    objects = [
+        PlanarObject(data=torch.ones(1, 24, 28, dtype=torch.complex64), options=obase.ObjectOptions())
+        for _ in range(2)
+    ]
+    positions = ProbePositions(
+        data=torch.tensor([[-2., 1.], [2., -1.]]), options=obase.ProbePositionOptions(),
     )
-    expected = 96 * obj.calculate_illumination_map(reference_probe, positions, use_all_modes=True)
-    obj.initialize_preconditioner(probe, positions, patterns, use_all_modes=True)
-    torch.testing.assert_close(obj.preconditioner, expected)
-    obj.preconditioner = None
-    obj.update_preconditioner(probe, positions, patterns, use_all_modes=True)
-    illumination = obj.calculate_illumination_map(probe, positions, use_all_modes=True)
-    torch.testing.assert_close(obj.preconditioner, (expected + illumination) / 2)
+    expected = None
+    for _ in range(3):
+        # Change the spatial profile as well as the amplitude between refreshes.
+        data = torch.randn(1, 2, 8, 12, dtype=torch.complex64)
+        probes = [Probe(data=data * s, options=obase.ProbeOptions()) for s in (1, scale)]
+        illumination = objects[0].calculate_illumination_map(
+            probes[0], positions, use_all_modes=use_all_modes,
+        )
+        if expected is None:
+            expected = illumination
+        else:
+            expected = (expected + illumination) / 2
+        for obj, probe in zip(objects, probes):
+            obj.update_preconditioner(probe, positions, use_all_modes=use_all_modes)
+        torch.testing.assert_close(objects[0].preconditioner, expected)
+        torch.testing.assert_close(objects[1].preconditioner / scale**2, expected)
+    objects[0].initialize_preconditioner(
+        probes[0], positions, use_all_modes=use_all_modes,
+    )
+    torch.testing.assert_close(objects[0].preconditioner, illumination)
 
 
 @pytest.mark.parametrize(
@@ -171,7 +178,7 @@ def test_preconditioner_is_independent_of_propagation_geometry(propagator):
         (0.0043, 1e-9, propagation.FresnelTransformPropagator),
     ],
 )
-def test_reconstructor_preconditioner_uses_photon_counts(distance, pixel_size, propagator_type):
+def test_reconstructor_preconditioner_uses_illumination(distance, pixel_size, propagator_type):
     options = api.EPIEOptions()
     options.reconstructor_options.default_device = api.Devices.CPU
     options.data_options.fft_shift = False
@@ -188,13 +195,9 @@ def test_reconstructor_preconditioner_uses_photon_counts(distance, pixel_size, p
     model = task.reconstructor.forward_model
     assert isinstance(model.free_space_propagator, propagator_type)
     with torch.no_grad():
-        patterns = model(torch.tensor([0]))
-        task.reconstructor.dataset.patterns.copy_(patterns)
         sampling = model.get_object_sampling_parameters()
-        task.object.update_preconditioner(
-            task.probe, task.probe_positions, patterns, sampling=sampling,
+        expected = task.object.calculate_illumination_map(
+            task.probe, task.probe_positions, sampling=sampling,
         )
-        expected = task.object.preconditioner.clone()
-        task.object.preconditioner = None
         task.reconstructor.update_preconditioners()
     torch.testing.assert_close(task.object.preconditioner, expected)

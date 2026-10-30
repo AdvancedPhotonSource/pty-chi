@@ -3,7 +3,6 @@
 
 from typing import Tuple, TYPE_CHECKING, Optional
 import logging
-import copy
 
 import torch
 from torch import Tensor
@@ -704,14 +703,13 @@ class PlanarObject(Object):
         self,
         probe: "ds.probe.Probe",
         probe_positions: "ds.probe_positions.ProbePositions",
-        patterns: Tensor = None,
         use_all_modes: bool = False,
         *,
         sampling: Optional["ip.ObjectSamplingParameters"] = None,
     ) -> None:
-        """Update the preconditioner. This function reproduces the behavior
-        of PtychoShelves in `ptycho_solver`: it averages the new illumination
-        map and the old preconditioner to reduce oscillations.
+        """Initialize from the illumination map, then average subsequent maps
+        with the previous preconditioner to reduce oscillations, as in
+        PtychoShelves' ``ptycho_solver``.
         
         Parameters
         ----------
@@ -719,9 +717,6 @@ class PlanarObject(Object):
             The probe to use for the illumination map.
         probe_positions : ds.probe_positions.ProbePositions
             The positions of the probe.
-        patterns : Tensor, optional
-            A (n_scan_points, h, w) tensor giving the diffraction patterns. Only needed
-            if the preconditioner does not exist and needs to be initialized.
         use_all_modes : bool, optional
             Whether to use the sum of all probe modes' intensities for the illumination map.
         sampling : ip.ObjectSamplingParameters, optional
@@ -729,9 +724,9 @@ class PlanarObject(Object):
         """
         if self.preconditioner is None:
             self.initialize_preconditioner(
-                probe, probe_positions, patterns, use_all_modes=use_all_modes,
-                sampling=sampling,
+                probe, probe_positions, use_all_modes=use_all_modes, sampling=sampling,
             )
+            return
         illum_map = self.calculate_illumination_map(
             probe, probe_positions, use_all_modes=use_all_modes,
             sampling=sampling,
@@ -742,15 +737,24 @@ class PlanarObject(Object):
         self, 
         probe: "ds.probe.Probe", 
         probe_positions: "ds.probe_positions.ProbePositions",
-        patterns: Tensor,
         use_all_modes: bool = False,
         *,
         sampling: Optional["ip.ObjectSamplingParameters"] = None,
     ) -> None:
-        """Initialize the preconditioner. This function reproduces the behavior
-        of PtychoShelves in `init_solver` and `load_from_p`: the probe is first
-        renormalized before being used to calculate the illumination map.
-        Diffraction patterns are needed to calculate the renormalization factor.
+        """Initialize ``C_0 = L``, the current probe illumination map.
+
+        Scaling the probe by ``s`` scales the seed by ``abs(s)**2``. Averaging
+        with subsequent illumination maps preserves this scaling and LSQML's
+        preconditioned object direction under a change of field units.
+
+        PtychoShelves' ``load_from_p`` divides the actual reconstruction probe
+        by ``2 * sqrt(H * W) * p.renorm`` to convert between CPU and GPU engine
+        units. Its ``init_solver`` builds the seed from that converted probe,
+        before optional initial probe rescaling. Pty-Chi already stores the
+        probe in its reconstruction units and builds the seed directly from it.
+        This replaces our earlier adaptation, which applied the conversion
+        only to a temporary probe used for the seed and introduced an extra
+        ``max_power / (4 * (H * W)**2)`` weight for the default far-field case.
         
         Parameters
         ----------
@@ -758,22 +762,13 @@ class PlanarObject(Object):
             The probe to use for the illumination map.
         probe_positions : ds.probe_positions.ProbePositions
             The positions of the probe.
-        patterns : ds.patterns.Patterns
-            A (n_scan_points, h, w) tensor giving the diffraction patterns.
         use_all_modes : bool, optional
             Whether to use the sum of all probe modes' intensities for the illumination map.
         sampling : ip.ObjectSamplingParameters, optional
             Sampling parameters passed to ``calculate_illumination_map``.
         """
-        probe_data = probe.data
-        # Preserve the initialization's weight relative to the illumination map
-        # when converting the legacy far-field probe to photon-per-pixel units.
-        # This heuristic weight is sqrt(max pattern counts) / (2 * H * W).
-        max_power = patterns.sum(dim=(-2, -1)).max()
-        probe_data = probe_data * torch.sqrt(max_power) / (2 * probe.shape[-2] * probe.shape[-1])
-        probe_temp = ds.probe.Probe(data=probe_data, options=copy.deepcopy(probe.options))
         self.preconditioner = self.calculate_illumination_map(
-            probe_temp, probe_positions, use_all_modes=use_all_modes,
+            probe, probe_positions, use_all_modes=use_all_modes,
             sampling=sampling,
         )
 

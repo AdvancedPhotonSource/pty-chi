@@ -776,7 +776,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         if delta_p_hat.shape[1] > 1:
             delta_p_hat = delta_p_hat[:, mode_slicer]
 
-        lambda_0 = 1.2e-7 / (probe.shape[-2] * probe.shape[-1])
         lambda_lsq = 0.1
 
         # Shape of delta_p_o/o_p:     (batch_size, n_probe_modes or 1, h, w)
@@ -784,15 +783,21 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_o_patches_p = delta_o_i[:, None, :, :] * probe
 
         # Shape of aij:               (batch_size,)
-        a11 = torch.sum((pmath.abs2(delta_o_patches_p) + lambda_0), dim=(-1, -2, -3))
+        # Relative diagonal damping scales with the squared field amplitude,
+        # so changing field units preserves the solved step sizes.
+        a11 = torch.sum(pmath.abs2(delta_o_patches_p), dim=(-1, -2, -3))
         a11 = a11 + lambda_lsq * torch.mean(a11, dim=0)
         a12 = torch.sum((delta_o_patches_p * delta_p_o.conj()), dim=(-1, -2, -3))
         a21 = a12.conj()
-        a22 = torch.sum((pmath.abs2(delta_p_o) + lambda_0), dim=(-1, -2, -3))
+        a22 = torch.sum(pmath.abs2(delta_p_o), dim=(-1, -2, -3))
         a22 = a22 + lambda_lsq * torch.mean(a22, dim=0)
         b1 = torch.sum(torch.real(delta_o_patches_p.conj() * chi), dim=(-1, -2, -3))
         b2 = torch.sum(torch.real(delta_p_o.conj() * chi), dim=(-1, -2, -3))
 
+        # An identically zero direction has a zero row, column, and RHS.
+        # Set its diagonal to one to obtain a zero step without a singular solve.
+        a11 = torch.where(a11 > 0, a11, 1)
+        a22 = torch.where(a22 > 0, a22, 1)
         a_mat = torch.stack([a11, a12, a21, a22], dim=1).view(-1, 2, 2)
         b_vec = torch.stack([b1, b2], dim=1).view(-1, 2).type(a_mat.dtype)
         alpha_vec = torch.linalg.solve(a_mat, b_vec)
@@ -832,7 +837,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         numerator = 0.5 * torch.sum(torch.real(delta_o_patches_p.conj() * chi), dim=(-1, -2, -3))
         denominator = torch.sum(pmath.abs2(delta_o_patches_p), dim=(-1, -2, -3))
 
-        alpha_o_i = numerator / denominator
+        # A zero-energy direction contributes no update.
+        alpha_o_i = numerator / torch.where(denominator > 0, denominator, 1)
         alpha_o_i = alpha_o_i * self.parameter_group.object.options.optimal_step_size_scaler
         alpha_o_i = alpha_o_i / self.parameter_group.object.n_slices
         if self.parameter_group.object.options.multimodal_update:
@@ -864,7 +870,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         numerator = 0.5 * torch.sum(torch.real(delta_p_o.conj() * chi), dim=(-1, -2, -3))
         denominator = torch.sum(pmath.abs2(delta_p_o), dim=(-1, -2, -3))
 
-        alpha_p_i = numerator / denominator
+        alpha_p_i = numerator / torch.where(denominator > 0, denominator, 1)
         alpha_p_i = alpha_p_i * self.parameter_group.probe.options.optimal_step_size_scaler
 
         alpha_p_i = alpha_p_i.clamp(0, None)
