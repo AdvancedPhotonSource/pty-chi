@@ -148,6 +148,33 @@ def test_fourier_propagator_backward_inverts_forward():
     torch.testing.assert_close(recovered, wavefield, rtol=1e-12, atol=1e-14)
 
 
+def test_saved_fourier_probe_migration_preserves_detector_counts():
+    old_probe = _random_wavefield((2, 3, 48, 63))
+    old_counts = torch.fft.fft2(old_probe).abs().square()
+    migrated_probe = old_probe * math.sqrt(48 * 63)
+    new_counts = FourierPropagator()(migrated_probe).abs().square()
+    torch.testing.assert_close(new_counts, old_counts, rtol=1e-11, atol=1e-11)
+
+
+@pytest.mark.parametrize("propagator_class", _SINGLE_FFT_PROPAGATORS)
+@pytest.mark.parametrize("distance", [0.01, -0.01])
+def test_saved_single_fft_probe_migration_preserves_field(propagator_class, distance):
+    parameters = _params(distance, width_px=63, height_px=48,
+                         pixel_width_m=50e-6, pixel_height_m=40e-6)
+    propagator = propagator_class(parameters)
+    old_probe = _random_wavefield((2, 3, 48, 63))
+    input_phase = propagator._B if propagator_class is FresnelTransformPropagator else 1
+    output_phase = (propagator._C1C2 if propagator_class is FresnelTransformPropagator
+                    else propagator._C1 * propagator._C2)
+    old_prefactor = parameters.fresnel_number / (1j * parameters.pixel_aspect_ratio)
+    centered = torch.fft.ifftshift(old_probe * input_phase, dim=(-2, -1))
+    spectrum = (torch.fft.fft2(centered) if distance > 0
+                else torch.fft.ifft2(centered, norm="forward"))
+    old_field = old_prefactor * output_phase * torch.fft.fftshift(spectrum, dim=(-2, -1))
+    migrated_probe = old_probe * (math.sqrt(48 * 63) * abs(old_prefactor))
+    torch.testing.assert_close(propagator(migrated_probe), old_field, rtol=1e-11, atol=1e-11)
+
+
 def test_angular_spectrum_backward_equals_forward_at_negated_distance():
     """Only true for the angular spectrum: its transfer function satisfies
     tf(-z) == conj(tf(z)). The single-FFT propagators swap which plane the stored pixel
@@ -179,22 +206,19 @@ def test_angular_spectrum_backward_is_the_adjoint():
     torch.testing.assert_close(forward_inner, backward_inner, rtol=1e-11, atol=1e-11)
 
 
-@pytest.mark.parametrize("propagator_class", _SINGLE_FFT_PROPAGATORS)
-def test_single_fft_backward_is_the_inverse_not_the_adjoint(propagator_class):
-    """`A * DFT * B` with an unnormalized DFT and |C0| != 1. Backward is the inverse; the
-    adjoint is that same operator scaled by N * M * |C0|**2. Both halves are asserted so
-    that "fixing" backward into the adjoint fails here."""
-    parameters = _params(1.0, width_px=64, height_px=48, pixel_width_m=50e-6, pixel_height_m=40e-6)
+@pytest.mark.parametrize("propagator_class", _PARAMETERIZED_PROPAGATORS)
+@pytest.mark.parametrize("distance", [1.0, -1.0])
+def test_backward_is_the_adjoint(propagator_class, distance):
+    parameters = _params(distance, width_px=63, height_px=48,
+                         pixel_width_m=50e-6, pixel_height_m=40e-6)
     propagator = propagator_class(parameters)
-    x = _random_wavefield((48, 64), seed=1)
-    y = _random_wavefield((48, 64), seed=2)
+    x = _random_wavefield((48, 63), seed=1)
+    y = _random_wavefield((48, 63), seed=2)
 
     forward_inner = torch.vdot(propagator.propagate_forward(x).ravel(), y.ravel())
     backward_inner = torch.vdot(x.ravel(), propagator.propagate_backward(y).ravel())
-    scale = 64 * 48 * abs(propagator._C0) ** 2
 
-    torch.testing.assert_close(forward_inner, backward_inner * scale, rtol=1e-11, atol=1e-11)
-    assert not torch.allclose(forward_inner, backward_inner, rtol=1e-3)
+    torch.testing.assert_close(forward_inner, backward_inner, rtol=1e-11, atol=1e-11)
 
 
 # --------------------------------------------------------------------------------------
@@ -225,50 +249,21 @@ def test_angular_spectrum_is_contractive_with_evanescent_modes():
     assert 0.0 < propagated_norm < 0.99 * source_norm
 
 
-@pytest.mark.parametrize("propagator_class", _SINGLE_FFT_PROPAGATORS)
-def test_single_fft_conserves_physical_energy(propagator_class):
-    """The output grid has pitch lambda|z|/(N dx), so energy is conserved once the change
-    of pixel area is accounted for -- exactly, not approximately."""
-    width_px, height_px = 64, 48
-    pixel_width_m, pixel_height_m = 50e-6, 40e-6
-    propagation_distance_m = 1.0
-    parameters = _params(
-        propagation_distance_m,
-        width_px=width_px,
-        height_px=height_px,
-        pixel_width_m=pixel_width_m,
-        pixel_height_m=pixel_height_m,
-    )
-    propagator = propagator_class(parameters)
-    wavefield = _random_wavefield((height_px, width_px))
-
-    propagated = propagator.propagate_forward(wavefield)
-    numerator_m2 = _WAVELENGTH_M * abs(propagation_distance_m)
-    output_pixel_width_m = numerator_m2 / (width_px * pixel_width_m)
-    output_pixel_height_m = numerator_m2 / (height_px * pixel_height_m)
-
-    source_energy = float((wavefield.abs() ** 2).sum()) * pixel_width_m * pixel_height_m
-    output_energy = (
-        float((propagated.abs() ** 2).sum()) * output_pixel_width_m * output_pixel_height_m
-    )
-
-    assert output_energy == pytest.approx(source_energy, rel=1e-12)
-
-
-def test_fresnel_transform_does_not_conserve_the_raw_l2_norm():
-    """Pins the C0 amplitude prefactor, which the physical-energy test alone would not."""
-    parameters = _params(1.0, width_px=64, height_px=48, pixel_width_m=50e-6, pixel_height_m=40e-6)
-    propagator = FresnelTransformPropagator(parameters)
-    wavefield = _random_wavefield((48, 64))
-
-    ratio = float(
-        torch.linalg.norm(propagator.propagate_forward(wavefield))
-        / torch.linalg.norm(wavefield)
-    )
-    expected = abs(propagator._C0) * math.sqrt(64 * 48)
-
-    assert ratio == pytest.approx(expected, rel=1e-12)
-    assert not math.isclose(expected, 1.0, rel_tol=0.1)
+@pytest.mark.parametrize("propagator_class", (FourierPropagator, *_PARAMETERIZED_PROPAGATORS))
+@pytest.mark.parametrize("distance", [0.01, -0.01, 1.0, -1.0])
+@pytest.mark.parametrize("shape", [(48, 64), (65, 63)])
+def test_propagation_conserves_photon_count(propagator_class, distance, shape):
+    parameters = _params(distance, width_px=shape[1], height_px=shape[0],
+                         pixel_width_m=50e-6, pixel_height_m=40e-6)
+    propagator = (FourierPropagator() if propagator_class is FourierPropagator
+                  else propagator_class(parameters))
+    wavefield = _random_wavefield((2, 3, *shape))
+    for operation in (propagator.propagate_forward, propagator.propagate_backward):
+        propagated = operation(wavefield)
+        torch.testing.assert_close(
+            propagated.abs().square().sum(dim=(-2, -1)),
+            wavefield.abs().square().sum(dim=(-2, -1)), rtol=1e-12, atol=1e-12,
+        )
 
 
 # --------------------------------------------------------------------------------------
@@ -544,7 +539,7 @@ def test_fraunhofer_of_a_rect_aperture_matches_the_dirichlet_kernel():
         torch.full_like(modes, float(aperture_px)),
         torch.sin(math.pi * aperture_px * modes / num_px) / torch.sin(math.pi * modes / num_px),
     )
-    expected = abs(parameters.fresnel_number / parameters.pixel_aspect_ratio) * (
+    expected = (1 / num_px) * (
         dirichlet[:, None] * dirichlet[None, :]
     ).abs()
 

@@ -1,4 +1,4 @@
-import math
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -13,6 +13,7 @@ from ptychi.api.options import base as obase
 from ptychi.data_structures.object import PlanarObject
 from ptychi.data_structures.probe import Probe
 from ptychi.data_structures.probe_positions import ProbePositions
+from ptychi.reconstructors.bh import BHReconstructor
 
 
 @pytest.fixture(autouse=True)
@@ -31,11 +32,10 @@ def cpu_defaults():
     torch.set_default_device(device)
 
 
-@pytest.fixture(params=["fourier", "ortho", "forward", "angular", "fresnel", "fraunhofer"])
+@pytest.fixture(params=["fourier", "angular", "fresnel", "fraunhofer"])
 def propagator(request):
-    if request.param in ("fourier", "ortho", "forward"):
-        norm = None if request.param == "fourier" else request.param
-        return propagation.FourierPropagator(norm=norm)
+    if request.param == "fourier":
+        return propagation.FourierPropagator()
     parameters = propagation.WavefieldPropagatorParameters.create_simple(
         wavelength_m=1e-10, width_px=12, height_px=8,
         pixel_width_m=2e-8, pixel_height_m=3e-8, propagation_distance_m=-0.0043,
@@ -46,13 +46,6 @@ def propagator(request):
         "fraunhofer": propagation.FraunhoferPropagator,
     }[request.param]
     return cls(parameters)
-
-
-def test_intensity_scaling_matches_propagation(propagator):
-    probe = torch.randn(2, 8, 12, dtype=torch.complex64)
-    measured = propagator(probe).abs().square().sum() / probe.abs().square().sum()
-    factor = propagation.get_intensity_scaling_factor(propagator, probe.shape[-2:])
-    assert measured.item() == pytest.approx(factor, rel=2e-6)
 
 
 @pytest.mark.parametrize("as_numpy", [False, True])
@@ -72,7 +65,7 @@ def test_rescale_probe_matches_detector_power(propagator, as_numpy, layout):
     patterns = propagator(composed).abs().square().sum(0)[None]
     if as_numpy:
         probe, patterns = probe.numpy(), patterns.numpy()
-    scaled = utils.rescale_probe(probe * 0.25, patterns, weights, propagator)
+    scaled = utils.rescale_probe(probe * 0.25, patterns, weights)
     np.testing.assert_allclose(utils.to_numpy(scaled), utils.to_numpy(probe), rtol=2e-6)
     assert type(scaled) is type(probe)
 
@@ -89,59 +82,11 @@ def test_rescale_probe_uses_evanescent_filter():
     torch.testing.assert_close(utils.rescale_probe(probe, patterns, propagator=propagator), probe)
 
 
-@pytest.mark.parametrize("layout", ["modes", "single_opr", "weighted_opr"])
-def test_rescale_probe_accepts_class_without_propagating(layout, monkeypatch):
-    propagator_type = propagation.AngularSpectrumPropagator
-    parameters = propagation.WavefieldPropagatorParameters.create_simple(
-        wavelength_m=1e-10, width_px=12, height_px=8,
-        pixel_width_m=3e-7, pixel_height_m=3e-7, propagation_distance_m=0.0043,
-    )
-    propagator = propagator_type(parameters)
-    probe = torch.randn(2, 8, 12, dtype=torch.complex64)
-    weights = None
-    composed = probe
-    if layout == "single_opr":
-        probe = probe[None]
-    elif layout == "weighted_opr":
-        probe = probe[:, None]
-        weights = torch.tensor([[0.8, 0.2], [0.8, 0.2]])
-        composed = (probe * weights.mean(0)[:, None, None, None]).sum(0)
-    patterns = propagator(composed).abs().square().sum(0)[None]
-
-    def unexpected_propagation(*args, **kwargs):
-        pytest.fail("Class-based probe rescaling should use source-plane power.")
-
-    monkeypatch.setattr(propagator_type, "propagate_forward", unexpected_propagation)
-    monkeypatch.setattr(propagator_type, "__init__", unexpected_propagation)
-    scaled = utils.rescale_probe(probe * 0.25, patterns, weights, propagator_type)
-    torch.testing.assert_close(scaled, probe)
-
-
-def test_parameter_independent_classes_and_far_field_defaults():
-    patterns = torch.ones(2, 8, 12)
-    cls = propagation.AngularSpectrumPropagator
-    assert propagation.get_intensity_scaling_factor(cls, (8, 12)) == 1
-    assert utils.get_probe_renormalization_factor(patterns, cls) == pytest.approx(1 / math.sqrt(96))
-    assert utils.get_probe_renormalization_factor(patterns) == 1
-    probe = torch.ones(1, 8, 12, dtype=torch.complex64)
-    torch.testing.assert_close(utils.rescale_probe(probe, patterns), probe / math.sqrt(96))
-    for cls in (propagation.FourierPropagator, propagation.FresnelTransformPropagator,
-                propagation.FraunhoferPropagator):
-        with pytest.raises(TypeError, match="instance"):
-            propagation.get_intensity_scaling_factor(cls, (8, 12))
-        with pytest.raises(TypeError, match="instance"):
-            utils.get_probe_renormalization_factor(patterns, cls)
-        with pytest.raises(TypeError, match="instance"):
-            utils.rescale_probe(probe, patterns, propagator=cls)
-
-
-def test_power_conversion_preserves_transmission(propagator):
+def test_detector_power_constraint_preserves_transmission(propagator):
     probe_data = torch.randn(1, 2, 8, 12, dtype=torch.complex64)
     detector_power = propagator(probe_data[0]).abs().square().sum().item()
     options = obase.ProbeOptions()
-    options.power_constraint.probe_power = detector_power / propagation.get_intensity_scaling_factor(
-        propagator, (8, 12)
-    )
+    options.power_constraint.probe_power = detector_power
     probe = Probe(data=probe_data, options=options)
     obj = PlanarObject(data=torch.ones(1, 8, 12, dtype=torch.complex64), options=obase.ObjectOptions())
     with torch.no_grad():
@@ -150,25 +95,79 @@ def test_power_conversion_preserves_transmission(propagator):
     torch.testing.assert_close(obj.data, torch.ones_like(obj.data))
 
 
-def test_preconditioner_matches_far_field_reference_across_geometries(propagator):
-    probe_data = torch.randn(1, 2, 8, 12, dtype=torch.complex64)
-    probe = Probe(data=probe_data, options=obase.ProbeOptions())
-    obj = PlanarObject(data=torch.ones(1, 24, 28, dtype=torch.complex64), options=obase.ObjectOptions())
-    positions = ProbePositions(data=torch.zeros(1, 2), options=obase.ProbePositionOptions())
-    patterns = propagator(probe_data[0]).abs().square().sum(0)[None]
-    fourier_patterns = torch.fft.fft2(probe_data[0]).abs().square().sum(0)[None]
-    # Original far-field formula, evaluated independently of the new helper.
-    renorm = torch.sqrt(96 / fourier_patterns.sum())
-    reference_probe = Probe(
-        data=probe_data / (math.sqrt(96) * 2 * renorm), options=obase.ProbeOptions(),
+def test_bh_gradient_matches_autograd_for_every_geometry(propagator):
+    wavefield = torch.randn(2, 3, 8, 12, dtype=torch.complex64, requires_grad=True)
+    field = propagator(wavefield)
+    data = torch.rand(2, 1, 8, 12) + 0.5
+    loss = (field.abs().square().sum(1, keepdim=True).sqrt() - data).square().sum()
+    expected = torch.autograd.grad(loss, wavefield)[0]
+    reconstructor = object.__new__(BHReconstructor)
+    reconstructor.eps = 0.0
+    reconstructor.current_constrained_pixel_mask = torch.ones_like(data, dtype=torch.bool)
+    reconstructor.forward_model = SimpleNamespace(free_space_propagator=propagator)
+    actual = reconstructor.gradientF(field.detach(), data)
+    torch.testing.assert_close(actual, expected, atol=2e-6, rtol=2e-5)
+
+
+def test_autodiff_gradient_scaling_matches_amplitude_projection(propagator):
+    options = api.AutodiffPtychographyOptions()
+    options.reconstructor_options.default_device = api.Devices.CPU
+    options.data_options.fft_shift = False
+    options.object_options.pixel_size_m = 2e-8
+    options.probe_options.optimizable = False
+    options.probe_position_options.optimizable = False
+    task = PtychographyTask(
+        options, diffraction_data=torch.ones(1, 8, 12),
+        object_data=torch.ones(1, 8, 12, dtype=torch.complex64),
+        probe_data=torch.ones(1, 1, 8, 12, dtype=torch.complex64),
+        probe_position_x_px=torch.zeros(1), probe_position_y_px=torch.zeros(1),
     )
-    expected = obj.calculate_illumination_map(reference_probe, positions, use_all_modes=True)
-    obj.initialize_preconditioner(probe, positions, patterns, use_all_modes=True, propagator=propagator)
-    torch.testing.assert_close(obj.preconditioner, expected)
-    obj.preconditioner = None
-    obj.update_preconditioner(probe, positions, patterns, use_all_modes=True, propagator=propagator)
-    illumination = obj.calculate_illumination_map(probe, positions, use_all_modes=True)
-    torch.testing.assert_close(obj.preconditioner, (expected + illumination) / 2)
+    model = task.reconstructor.forward_model
+    model.free_space_propagator = propagator
+    indices = torch.tensor([0])
+    prediction = model(indices)
+    measured = prediction.detach() * 0.81
+    loss = task.reconstructor.loss_function(prediction, measured)
+    loss.backward()
+    model.post_differentiation_hook(indices, measured)
+    # Amplitude residual is 0.1 * propagated field. The unitary adjoint brings
+    # it back to 0.1 * exit wave; differentiating squared error supplies 2.
+    torch.testing.assert_close(
+        task.object.get_grad(), torch.full_like(task.object.data, 0.2),
+        rtol=2e-5, atol=2e-6,
+    )
+
+
+@pytest.mark.parametrize("scale", [1e-3, 1.0, 256.0])
+@pytest.mark.parametrize("use_all_modes", [False, True])
+def test_preconditioner_tracks_illumination_in_probe_units(scale, use_all_modes):
+    objects = [
+        PlanarObject(data=torch.ones(1, 24, 28, dtype=torch.complex64), options=obase.ObjectOptions())
+        for _ in range(2)
+    ]
+    positions = ProbePositions(
+        data=torch.tensor([[-2., 1.], [2., -1.]]), options=obase.ProbePositionOptions(),
+    )
+    expected = None
+    for _ in range(3):
+        # Change the spatial profile as well as the amplitude between refreshes.
+        data = torch.randn(1, 2, 8, 12, dtype=torch.complex64)
+        probes = [Probe(data=data * s, options=obase.ProbeOptions()) for s in (1, scale)]
+        illumination = objects[0].calculate_illumination_map(
+            probes[0], positions, use_all_modes=use_all_modes,
+        )
+        if expected is None:
+            expected = illumination
+        else:
+            expected = (expected + illumination) / 2
+        for obj, probe in zip(objects, probes):
+            obj.update_preconditioner(probe, positions, use_all_modes=use_all_modes)
+        torch.testing.assert_close(objects[0].preconditioner, expected)
+        torch.testing.assert_close(objects[1].preconditioner / scale**2, expected)
+    objects[0].initialize_preconditioner(
+        probes[0], positions, use_all_modes=use_all_modes,
+    )
+    torch.testing.assert_close(objects[0].preconditioner, illumination)
 
 
 @pytest.mark.parametrize(
@@ -179,7 +178,7 @@ def test_preconditioner_matches_far_field_reference_across_geometries(propagator
         (0.0043, 1e-9, propagation.FresnelTransformPropagator),
     ],
 )
-def test_reconstructor_passes_detector_propagator(distance, pixel_size, propagator_type):
+def test_reconstructor_preconditioner_uses_illumination(distance, pixel_size, propagator_type):
     options = api.EPIEOptions()
     options.reconstructor_options.default_device = api.Devices.CPU
     options.data_options.fft_shift = False
@@ -196,14 +195,9 @@ def test_reconstructor_passes_detector_propagator(distance, pixel_size, propagat
     model = task.reconstructor.forward_model
     assert isinstance(model.free_space_propagator, propagator_type)
     with torch.no_grad():
-        patterns = model(torch.tensor([0]))
-        task.reconstructor.dataset.patterns.copy_(patterns)
         sampling = model.get_object_sampling_parameters()
-        task.object.update_preconditioner(
-            task.probe, task.probe_positions, patterns, sampling=sampling,
-            propagator=model.free_space_propagator,
+        expected = task.object.calculate_illumination_map(
+            task.probe, task.probe_positions, sampling=sampling,
         )
-        expected = task.object.preconditioner.clone()
-        task.object.preconditioner = None
         task.reconstructor.update_preconditioners()
     torch.testing.assert_close(task.object.preconditioner, expected)

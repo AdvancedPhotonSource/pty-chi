@@ -33,7 +33,7 @@ def rescale_probe(
     probe: Union[ndarray, Tensor],
     patterns: Union[ndarray, Tensor],
     weights: Optional[Union[ndarray, Tensor]] = None,
-    propagator: Optional["propagate.WavefieldPropagator | type[propagate.WavefieldPropagator]"] = None,
+    propagator: Optional["propagate.WavefieldPropagator"] = None,
 ) -> Union[ndarray, Tensor]:
     """
     Scale probe so that the sum of intensity matches that of the diffraction patterns.
@@ -46,23 +46,17 @@ def rescale_probe(
         A (n, h, w) tensor of diffraction patterns.
     weights : Tensor, optional
         A (n_points, n_opr_modes) tensor of weights for each OPR mode.
-    propagator : WavefieldPropagator or type[WavefieldPropagator], optional
-        Detector propagator, defaulting to the unnormalized Fourier transform.
-        The angular-spectrum class assumes conserved power on the propagating
-        band. Fourier propagation requires an instance for its FFT norm;
-        Fresnel and Fraunhofer propagation require an instance for their
-        geometry-dependent intensity scale. An angular-spectrum instance evaluates
-        propagation to account for evanescent filtering. Other built-in propagators
-        use the source-plane power and their intensity scaling factor directly.
+    propagator : WavefieldPropagator, optional
+        Propagator to evaluate when propagation filters the wavefield, such as
+        angular-spectrum propagation with evanescent modes. By default, use
+        source-plane power, assuming lossless propagation and unit object
+        transmission. Squared probe magnitudes and patterns are counts per pixel.
 
     Returns
     -------
     scaled_probe : Tensor
         The scaled probe.
     """
-    if propagator is None:
-        propagator = propagate.FourierPropagator()
-
     probe_tensor = torch.tensor(probe)
     
     if probe_tensor.ndim == 4:
@@ -74,15 +68,8 @@ def rescale_probe(
         weights = weights.mean(dim=0) 
         probe_tensor = (probe_tensor * weights[:, None, None, None]).sum(0)
 
-    if isinstance(propagator, type) or isinstance(
-        propagator,
-        (propagate.FourierPropagator, propagate.FresnelTransformPropagator,
-         propagate.FraunhoferPropagator),
-    ):
-        intensity_scale = propagate.get_intensity_scaling_factor(
-            propagator, probe_tensor.shape[-2:]
-        )
-        i_probe = torch.abs(probe_tensor).square().sum() * intensity_scale
+    if propagator is None:
+        i_probe = torch.abs(probe_tensor).square().sum()
     else:
         i_probe = torch.abs(propagator.propagate_forward(probe_tensor)).square().sum()
     i_probe = i_probe.detach().cpu().numpy()
@@ -186,40 +173,6 @@ def generate_secondary_probe_modes_hermite(probe: Tensor, m: int, n: int) -> Ten
             counter += 1
     return h
 
-
-@timer()
-def get_probe_renormalization_factor(
-    patterns: Tensor | ndarray,
-    propagator: Optional["propagate.WavefieldPropagator | type[propagate.WavefieldPropagator]"] = None,
-) -> float:
-    """
-    Calculate the inverse square root of the maximum probe-plane power inferred
-    from the diffraction patterns, assuming lossless propagation.
-    
-    Parameters
-    ----------
-    patterns : Tensor | ndarray
-        A (n, h, w) buffer of diffraction patterns.
-    propagator : WavefieldPropagator or type[WavefieldPropagator], optional
-        Propagator used to convert detector sums to probe-plane sums. Defaults
-        to Fourier propagation. The angular-spectrum class is accepted;
-        Fourier, Fresnel, and Fraunhofer propagation require an instance.
-        See :func:`ptychi.propagate.get_intensity_scaling_factor` for the
-        normalization and propagating-band assumption.
-    
-    Returns
-    -------
-    float
-        ``sqrt(intensity_scaling_factor / max_detector_power)``.
-    """
-    if isinstance(patterns, Tensor):
-        patterns = patterns.detach().cpu().numpy()
-    if propagator is None:
-        propagator = propagate.FourierPropagator()
-    intensity_scale = propagate.get_intensity_scaling_factor(propagator, patterns.shape[-2:])
-    max_power = np.max(np.sum((patterns), axis=(1, 2))) / intensity_scale
-    return np.sqrt(1 / max_power)
-            
 
 def generate_initial_object(shape: tuple[int, ...], method: Literal["random"] = "random") -> Tensor:
     if method == "random":

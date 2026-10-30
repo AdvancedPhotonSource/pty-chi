@@ -72,7 +72,10 @@ class Test2dPtychoDetectorSize(tutils.TungstenDataTester):
         probe_data = probe
         options.probe_options.optimizable = True
         options.probe_options.optimizer = api.Optimizers.ADAM
-        options.probe_options.step_size = 1e-2
+        # Adam steps and epsilon follow the change in probe amplitude units.
+        amplitude_scale = (probe.shape[-2] * probe.shape[-1]) ** 0.5
+        options.probe_options.step_size = 1e-2 * amplitude_scale
+        options.probe_options.optimizer_params = {"eps": 1e-8 * amplitude_scale}
 
         probe_position_x_px = positions_px[:, 1]
         probe_position_y_px = positions_px[:, 0]

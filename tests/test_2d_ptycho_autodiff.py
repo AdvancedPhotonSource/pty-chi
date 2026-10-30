@@ -74,7 +74,8 @@ class Test2dPtychoAutodiff(tutils.TungstenDataTester):
         probe_position_x_px = positions_px[:, 1]
         probe_position_y_px = positions_px[:, 0]
         options.probe_position_options.optimizable = True
-        options.probe_position_options.step_size = 10
+        # Position gradients no longer include the legacy division by H*W.
+        options.probe_position_options.step_size = 10 / (probe.shape[-2] * probe.shape[-1])
         options.probe_position_options.correction_options.update_magnitude_limit = None
         options.probe_position_options.correction_options.clip_update_magnitude_by_mad = False
         options.probe_position_options.correction_options.differentiation_method = api.ImageGradientMethods.GAUSSIAN

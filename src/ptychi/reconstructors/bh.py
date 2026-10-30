@@ -396,9 +396,6 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         td = d * (psi_far / A)
         td = psi_far - td
         td = td * self.current_constrained_pixel_mask
-        # Compensate FFT normalization only for the far-field Fourier propagator.
-        if isinstance(self.forward_model.free_space_propagator, fm.FourierPropagator):
-            td *= psi_far.shape[-1] * psi_far.shape[-2]
         res = 2 * self.forward_model.free_space_propagator.propagate_backward(td)
         return res
 

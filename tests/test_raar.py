@@ -33,7 +33,7 @@ def make_synthetic_data():
         ]
         exit_waves.append(object_patch * true_probe)
     exit_waves = torch.stack(exit_waves)
-    diffraction_data = torch.fft.fft2(exit_waves).abs() ** 2
+    diffraction_data = torch.fft.fft2(exit_waves, norm="ortho").abs() ** 2
     return diffraction_data, true_probe, positions
 
 

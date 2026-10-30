@@ -1,7 +1,6 @@
 import argparse
 
 import torch
-import numpy as np
 
 import ptychi.api as api
 from ptychi.api.task import PtychographyTask
@@ -28,10 +27,6 @@ class Test2DPtychoDM(tutils.TungstenDataTester):
         options.object_options.optimizable = True
 
         probe_data = probe
-        options.probe_options.power_constraint.probe_power = np.sum(
-            np.max(data, axis=-3), axis=(-2, -1)
-        )
-        options.probe_options.power_constraint.enabled = True
         options.probe_options.optimizable = True
 
         probe_position_x_px = positions_px[:, 1]
@@ -73,10 +68,6 @@ class Test2DPtychoDMPositionCorrection(tutils.TungstenDataTester):
         options.object_options.optimizable = True
 
         probe_data = probe
-        options.probe_options.power_constraint.probe_power = np.sum(
-            np.max(data, axis=-3), axis=(-2, -1)
-        )
-        options.probe_options.power_constraint.enabled = True
         options.probe_options.optimizable = True
 
         probe_position_x_px = positions_px[:, 1]

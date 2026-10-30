@@ -48,7 +48,7 @@ def test_gradientF_matches_autograd(reconstructor, random_complex, data, n_modes
     wavefield = random_complex((2, n_modes, 3, 5)).requires_grad_()
     if propagation == "fourier":
         propagator = FourierPropagator()
-        field = torch.fft.fft2(wavefield)
+        field = torch.fft.fft2(wavefield, norm="ortho")
     else:
         propagator = SimpleNamespace(propagate_backward=lambda value: value)
         field = wavefield
