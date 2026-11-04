@@ -89,7 +89,7 @@ def test_mixed_dtype_placement(device, method, batch, patch_dtype, image_dtype):
 
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("shape", [(5, 6), (6, 5)])
-@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest"])
+@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest", "cubic"])
 def test_shared_patch_matches_expanded_batch(device, shape, method):
     # Include batch == patch height, which must still interpret a 2D input as shared.
     image = torch.zeros(20, 22, dtype=torch.complex64, device=device)
@@ -126,7 +126,7 @@ def test_bilinear_batch_preserves_scalar_weight_precision(dtype):
     assert batched.dtype == image.dtype
 
 
-@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest"])
+@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest", "cubic"])
 def test_spatial_and_spectral_translation_agree_interior(method):
     image = torch.randn(2, 13, 15, dtype=torch.complex128, device="cpu")
     shifts = torch.tensor([[0.3, -0.4], [-1.2, 1.7]], dtype=torch.float64, device="cpu")
@@ -167,7 +167,8 @@ def test_image_shift_preserves_float32_upper_neighbor_rounding():
     )
 
 
-def test_batched_bilinear_uses_one_gather_and_accumulation(monkeypatch):
+@pytest.mark.parametrize("method", ["bilinear", "cubic"])
+def test_batched_sampling_uses_one_gather_and_accumulation(monkeypatch, method):
     calls = []
     batch_slice, batch_put = ip.batch_slice, ip.batch_put
 
@@ -183,7 +184,7 @@ def test_batched_bilinear_uses_one_gather_and_accumulation(monkeypatch):
     monkeypatch.setattr(ip, "batch_put", accumulate)
     image = torch.randn(30, 32, device="cpu")
     positions = torch.tensor([[10.2, 11.7]], device="cpu").repeat(16, 1)
-    sampler = ip.ObjectPatchSampler(method="bilinear")
+    sampler = ip.ObjectPatchSampler(method=method)
     patches = sampler.extract(image, positions, (6, 7))
     sampler.place(torch.zeros_like(image), positions, patches)
     assert calls == [("extract", 16), ("place", 16)]

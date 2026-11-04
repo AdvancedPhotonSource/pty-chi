@@ -131,18 +131,32 @@ Full-object sampling shifts each complete object slice periodically, then uses a
 fixed center crop or zero-padding to match the probe shape. For a probe larger
 than the object, pixels outside the shifted object support are zero. Features
 crossing an object boundary wrap to the opposite side. Choose the object support
-with this periodic boundary model in mind. The ``pad_for_shift`` option applies
-to patch sampling; full-object sampling uses the original object grid.
+with this periodic boundary model in mind. The ``pad_for_shift`` option controls
+local Fourier halos and probe-shift padding; full-object sampling uses the
+original object grid.
 
-The ``patch_interpolation_method`` setting selects Fourier, bilinear, or nearest
-interpolation in either branch. Full-object bilinear and nearest interpolation
-use spectral representations of circular interpolation kernels. All three have
-an exact additive adjoint. Full-object displacement is applied entirely to the
+The ``patch_interpolation_method`` setting selects Fourier, bilinear, nearest,
+or cubic interpolation in either branch. Full-object interpolation uses spectral
+representations of periodic interpolation kernels. All methods have an exact
+additive adjoint. Full-object displacement is applied entirely to the
 object, and the shared probe-shift helpers act as identity operations.
+
+Set ``options.object_options.patch_interpolation_method = api.PatchInterpolationMethods.CUBIC``
+to use an interpolating cardinal cubic B-spline. Both operators use a periodic
+coefficient prefilter over the complete object, so integer sample coordinates
+reproduce the original pixels. Local sampling gathers four coefficients per
+axis with periodic boundary wrapping. Its adjoint scatters coefficient updates
+and applies the prefilter adjoint once to their sum. Full-object sampling folds
+the prefilter into its spectral multiplier and retains the fixed crop/pad policy.
+Local cubic sampling therefore requires whole-object FFT work, in addition to
+patch interpolation. Coefficients are computed once per extraction batch. Cubic
+probe shifts use a periodic prefilter on the image grid, including any explicitly
+requested replication padding. As with other cubic interpolators, spline
+interpolation can overshoot the range of the input samples.
 
 Position derivatives are evaluated on the complete object before cropping.
 Bilinear derivatives are piecewise defined, and nearest interpolation has zero
-position derivatives almost everywhere; use Fourier or bilinear interpolation
+position derivatives almost everywhere; use Fourier, bilinear, or cubic interpolation
 for gradient-based position refinement. Cross-correlation position correction
 remains available where supported by the reconstructor.
 

@@ -164,10 +164,11 @@ class MAGPIEObjectOptions(pie.PIEObjectOptions):
         if self.patch_interpolation_method not in (
             enums.PatchInterpolationMethods.FOURIER,
             enums.PatchInterpolationMethods.BILINEAR,
+            enums.PatchInterpolationMethods.CUBIC,
         ):
             raise MAGPIECapabilityError(
                 "GM-rPIE/GM-MAGPIE use native subpixel shifts; "
-                "patch_interpolation_method must be FOURIER or BILINEAR."
+                "patch_interpolation_method must be FOURIER, BILINEAR, or CUBIC."
             )
         if self.slice_spacing_options.optimizable or self.multislice_regularization.enabled:
             raise MAGPIEMultisliceError(

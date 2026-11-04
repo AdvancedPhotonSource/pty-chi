@@ -483,7 +483,9 @@ class ObjectOptions(ParameterOptions):
     )
     """
     Selects interpolation for object patch sampling and probe subpixel shifts.
-    Full-object sampling supports Fourier, bilinear, and nearest interpolation.
+    Both sampling operators support Fourier, bilinear, nearest, and cubic
+    interpolation. CUBIC uses an interpolating cubic B-spline with a periodic
+    coefficient prefilter over the complete object.
     """
     
     remove_object_probe_ambiguity: RemoveObjectProbeAmbiguityOptions = field(

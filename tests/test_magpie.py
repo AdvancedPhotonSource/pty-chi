@@ -306,7 +306,8 @@ def test_object_synthesis_is_counterpart_weighted_overlap_average(dtype):
 
 
 @pytest.mark.parametrize(
-    "method", [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR]
+    "method", [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR,
+     api.PatchInterpolationMethods.CUBIC]
 )
 @pytest.mark.parametrize("dtype", [torch.complex64, torch.complex128])
 @pytest.mark.parametrize("confidence_case", ["normal", "zero", "underflow"])
@@ -329,7 +330,8 @@ def test_probe_consensus_singleton_is_bit_exact_native_adjoint(method, dtype, co
 
 
 @pytest.mark.parametrize(
-    "method", [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR]
+    "method", [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR,
+     api.PatchInterpolationMethods.CUBIC]
 )
 @pytest.mark.parametrize("dtype", [torch.complex64, torch.complex128])
 @pytest.mark.parametrize("confidence_case", ["zero", "underflow"])
@@ -356,7 +358,8 @@ def test_probe_consensus_zero_confidence_falls_back_to_native_adjoint_mean(
 
 @pytest.mark.parametrize(
     "method",
-    [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR],
+    [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR,
+     api.PatchInterpolationMethods.CUBIC],
 )
 @pytest.mark.parametrize("batch_size", [1, 3])
 def test_probe_consensus_minimizes_surrogate_quadratic(method, batch_size):
@@ -399,7 +402,8 @@ def test_probe_consensus_minimizes_surrogate_quadratic(method, batch_size):
 
 @pytest.mark.parametrize(
     "method",
-    [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR],
+    [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR,
+     api.PatchInterpolationMethods.CUBIC],
 )
 def test_probe_confidence_preserves_constant_patches_at_padded_boundaries(method):
     dtype = torch.complex128
@@ -425,7 +429,8 @@ def test_probe_confidence_preserves_constant_patches_at_padded_boundaries(method
 
 @pytest.mark.parametrize(
     "method",
-    [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR],
+    [api.PatchInterpolationMethods.FOURIER, api.PatchInterpolationMethods.BILINEAR,
+     api.PatchInterpolationMethods.CUBIC],
 )
 def test_probe_confidence_has_no_floor_for_high_contrast_patches(method):
     dtype = torch.complex128
