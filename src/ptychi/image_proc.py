@@ -688,10 +688,16 @@ class ObjectSamplingParameters(NamedTuple):
 
 
 class ObjectPatchInterpolator:
+    """Bilinear patches centered at absolute (y, x) positions in pixels.
+
+    The first sample on each axis is at ``position - (size - 1) / 2``.
+    The object must contain the support needed for bilinear interpolation.
+    """
+
     def __init__(self, object_: ComplexTensor, position_px: RealTensor, size: torch.Size) -> None:
         # top left corner of object support
-        xmin = position_px[-1] - size[-1] / 2
-        ymin = position_px[-2] - size[-2] / 2
+        xmin = position_px[-1] - (size[-1] - 1) / 2
+        ymin = position_px[-2] - (size[-2] - 1) / 2
 
         # whole components (pixel indexes)
         xmin_wh = xmin.int()
