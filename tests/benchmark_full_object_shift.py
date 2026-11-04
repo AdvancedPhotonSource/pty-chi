@@ -23,10 +23,8 @@ def measure(queue, device, size, ratio, batch, operator):
     image = torch.randn(size, size, device=device, dtype=torch.complex64)
     positions = (size - 1) / 2 + torch.rand(batch, 2, device=device) * 4 - 2
     patches = torch.randn(batch, *shape, device=device, dtype=torch.complex64)
-    if operator == "full_object":
-        extract, place = ip.extract_patches_full_object, ip.place_patches_full_object
-    else:
-        extract, place = ip.extract_patches_fourier_shift, ip.place_patches_fourier_shift
+    sampler = ip.ObjectPatchSampler(operator=operator, method="fourier", pad=1)
+    extract, place = sampler.extract, sampler.place
     arguments = dict(image=image, positions=positions, shape=shape, patches=patches,
                      extract=extract, place=place, torch=torch)
     with torch.no_grad():

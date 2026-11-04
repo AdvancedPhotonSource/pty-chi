@@ -8,7 +8,7 @@ from ptychi.forward_models import PlanarPtychographyForwardModel
 from ptychi.reconstructors.base import AnalyticalIterativePtychographyReconstructor
 
 
-@pytest.mark.parametrize("method", ["bilinear", "fourier"])
+@pytest.mark.parametrize("method", ["bilinear", "fourier", "nearest"])
 @pytest.mark.parametrize("pad", [None, 0, 1, 3])
 @pytest.mark.parametrize("shape", [(2, 5, 6), (2, 1, 1)])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64, torch.complex64, torch.complex128])
@@ -31,7 +31,7 @@ def test_image_shift_adjoint(method, pad, shape, dtype):
     )
 
 
-@pytest.mark.parametrize("method", ["bilinear", "fourier"])
+@pytest.mark.parametrize("method", ["bilinear", "fourier", "nearest"])
 @pytest.mark.parametrize("pad", [0, 1, 3])
 @pytest.mark.parametrize("first_mode_only", [False, True])
 def test_probe_shift_adjoint_uses_forward_padding(method, pad, first_mode_only):

@@ -229,14 +229,6 @@ class PlanarObject(Object):
     def lateral_shape(self):
         return self.shape[1:]
 
-    @property
-    def extract_patches_function(self) -> "ip.ExtractPatchesProtocol":
-        return maps.get_patch_extractor_function_by_name(self.options.patch_interpolation_method)
-
-    @property
-    def place_patches_function(self) -> "ip.PlacePatchesProtocol":
-        return maps.get_patch_placer_function_by_name(self.options.patch_interpolation_method)
-    
     def update_pos_origin_coordinates(self, positions: Tensor = None):
         """Update the coordinates of the center pixel based on probe positions.
 
@@ -320,17 +312,14 @@ class PlanarObject(Object):
             )
 
         positions = positions + self.pos_origin_coords
+        sampler = ip.ObjectPatchSampler(
+            method=self.options.patch_interpolation_method, pad=pad_for_shift
+        )
         patches_all_slices = []
         for i_slice in range(self.n_slices):
-            if integer_mode:
-                patches = ip.extract_patches_integer(
-                    object_array[i_slice], positions, patch_shape
-                )
-            else:
-                patches = self.extract_patches_function(
-                    object_array[i_slice], positions, patch_shape, pad=pad_for_shift
-                )
-            patches_all_slices.append(patches)
+            patches_all_slices.append(sampler.extract(
+                object_array[i_slice], positions, patch_shape, integer_mode=integer_mode
+            ))
         patches_all_slices = torch.stack(patches_all_slices, dim=1)
         return patches_all_slices
 
@@ -361,18 +350,15 @@ class PlanarObject(Object):
             (for forward mode) before applying subpixel shifts.
         """
         positions = positions + self.pos_origin_coords
+        sampler = ip.ObjectPatchSampler(
+            method=self.options.patch_interpolation_method, pad=pad_for_shift
+        )
         updated_slices = []
         for i_slice in range(self.n_slices):
-            if integer_mode:
-                image = ip.place_patches_integer(
-                    self.get_slice(i_slice), positions, patches[:, i_slice, ...], op="add"
-                )
-            else:
-                image = self.place_patches_function(
-                    self.get_slice(i_slice), positions, patches[:, i_slice, ...], op="add",
-                    pad=pad_for_shift,
-                )
-            updated_slices.append(image)
+            updated_slices.append(sampler.place(
+                self.get_slice(i_slice), positions, patches[:, i_slice, ...],
+                integer_mode=integer_mode,
+            ))
         updated_slices = torch.stack(updated_slices, dim=0)
         self.tensor.set_data(updated_slices)
 
@@ -411,13 +397,10 @@ class PlanarObject(Object):
         image = torch.zeros(
             self.lateral_shape, dtype=get_default_complex_dtype(), device=self.tensor.data.device
         )
-        if integer_mode:
-            image = ip.place_patches_integer(image, positions, patches, op="add")
-        else:
-            image = self.place_patches_function(
-                image, positions, patches, op="add", pad=pad_for_shift
-            )
-        return image
+        sampler = ip.ObjectPatchSampler(
+            method=self.options.patch_interpolation_method, pad=pad_for_shift
+        )
+        return sampler.place(image, positions, patches, integer_mode=integer_mode)
     
     def get_object_in_roi(self):
         bbox = self.roi_bbox.get_bbox_with_top_left_origin()
