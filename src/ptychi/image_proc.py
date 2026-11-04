@@ -40,9 +40,22 @@ def _patch_linear_indices(
     return start_offsets[:, None] + patch_offsets[None, :]
 
 
+def _periodic_patch_indices(sy, sx, patch_size, image_shape):
+    """Linear indices for batched windows on a periodic (H, W) image.
+
+    Origins may be outside the image and windows may exceed its size.
+    Each axis wraps independently; repeated indices accumulate in placement.
+    """
+    h, w = image_shape
+    y = (sy.long()[:, None] + torch.arange(patch_size[0], device=sy.device)) % h
+    x = (sx.long()[:, None] + torch.arange(patch_size[1], device=sx.device)) % w
+    return (y[:, :, None] * w + x[:, None, :]).reshape(len(sy), -1)
+
+
 @timer()
 def batch_slice(
-    image: Tensor, sy: Tensor, sx: Tensor, patch_size: Tuple[int, int], check_bounds: bool = True
+    image: Tensor, sy: Tensor, sx: Tensor, patch_size: Tuple[int, int], check_bounds: bool = True,
+    *, periodic: bool = False,
 ) -> Tensor:
     """
     Slice patches from an image at given window positions. The patch size is determined
@@ -59,6 +72,8 @@ def batch_slice(
         A (N,) tensor of integers giving the starting x-coordinates of the patches.
     patch_size : tuple of int
         A tuple giving the patch shape in pixels.
+    periodic : bool
+        Wrap both axes periodically, allowing out-of-bounds window origins.
 
     Returns
     -------
@@ -66,7 +81,7 @@ def batch_slice(
         A tensor of shape (N, h, w) containing the extracted patches.
     """
     h, w = image.shape[-2:]
-    if check_bounds and (
+    if check_bounds and not periodic and (
         sy.min() < 0 
         or sy.max() + patch_size[0] > image.shape[-2] 
         or sx.min() < 0 
@@ -74,7 +89,10 @@ def batch_slice(
     ):
         raise ValueError("Patch indices are out of bounds.")
     
-    if torch.is_grad_enabled() and image.requires_grad:
+    if periodic:
+        inds = _periodic_patch_indices(sy, sx, patch_size, image.shape)
+        patches = image.reshape(-1)[inds].reshape(len(sy), *patch_size)
+    elif torch.is_grad_enabled() and image.requires_grad:
         # Indexing an unfolded view would allocate its full shape during backward.
         inds = _patch_linear_indices(sy, sx, patch_size, w)
         patches = image.reshape(-1)[inds.reshape(-1)]
@@ -95,6 +113,7 @@ def batch_put(
     sx: Tensor, 
     op: Literal["add", "set"] = "add",
     check_bounds: bool = True,
+    *, periodic: bool = False,
 ) -> Tensor:
     """
     Slice patches from an image at given window positions. The patch size is assumed 
@@ -113,6 +132,9 @@ def batch_put(
     op : Literal["add", "set"]
         The operation to perform. "add" adds the patches to the image, 
         "set" sets the patches to the image replacing the existing values.
+    periodic : bool
+        Wrap both axes periodically; repeated indices receive all additive
+        contributions, including when patches exceed the image size.
     
     Returns
     -------
@@ -120,7 +142,7 @@ def batch_put(
         A tensor of shape (H, W) containing the image with patches added or set.
     """
     h, w = image.shape[-2:]
-    if check_bounds and (
+    if check_bounds and not periodic and (
         sy.min() < 0 
         or sy.max() + patches.shape[-2] > image.shape[-2] 
         or sx.min() < 0 
@@ -129,7 +151,7 @@ def batch_put(
         raise ValueError("Patch indices are out of bounds.")
     
     patch_size = patches.shape[-2:]
-    if op == "add":
+    if op == "add" and not periodic:
         result = try_accumulate_patches(
             image, patches, sy, sx, deterministic=True,
         )
@@ -138,7 +160,8 @@ def batch_put(
             if not check_bounds:
                 AcceleratorModuleWrapper.get_module().synchronize()
             return image
-    inds = _patch_linear_indices(sy, sx, patch_size, w)
+    inds = (_periodic_patch_indices(sy, sx, patch_size, image.shape) if periodic
+            else _patch_linear_indices(sy, sx, patch_size, w))
     image = image.reshape(-1)
     
     try:
@@ -391,6 +414,8 @@ class ObjectPatchSampler:
     a symmetric halo and periodic translation within that support. Bilinear
     uses one extra row/column and requires its support to lie inside the image.
     Local nearest retains center rounding followed by bilinear evaluation.
+    Cubic uses periodic prefiltered B-spline coefficients, gathering four
+    neighbors per axis; placement includes the global prefilter adjoint.
     Full-object sampling translates the complete periodic object before cropping.
     """
 
@@ -405,7 +430,7 @@ class ObjectPatchSampler:
     def _local_geometry(self, positions, shape, adjoint_mode=True):
         if self.method == "nearest":
             positions = positions.round().to(int)
-        elif self.method not in ("fourier", "bilinear"):
+        elif self.method not in ("fourier", "bilinear", "cubic"):
             raise ValueError(f"Invalid interpolation method: {self.method}")
         if self.method != "fourier":
             dtype = positions.dtype if positions.is_floating_point() else torch.get_default_dtype()
@@ -415,9 +440,11 @@ class ObjectPatchSampler:
                 center = positions.new_tensor([(shape[0] - 1) / 2, (shape[1] - 1) / 2], dtype=dtype)
                 _PATCH_CENTER_CACHE[key] = center
             starts = positions - center
-            integer_starts = starts.int()
+            integer_starts = starts.floor().int() if self.method == "cubic" else starts.int()
             shifts = integer_starts - starts
             sy, sx = integer_starts.unbind(-1)
+            if self.method == "cubic":
+                return sy - 1, sx - 1, shifts, (shape[0] + 3, shape[1] + 3)
             return sy, sx, shifts, (shape[0] + 1, shape[1] + 1)
         y = positions[:, 0] - (shape[0] - 1.0) / 2
         x = positions[:, 1] - (shape[1] - 1.0) / 2
@@ -445,6 +472,8 @@ class ObjectPatchSampler:
         translates it, and crops the halo; missing object pixels are zero.
         Local bilinear support must fit inside the image, including its extra
         bottom/right pixel. Local nearest rounds centers before interpolation.
+        Cubic prefilters the periodic object once, then gathers coefficient
+        windows with one pixel before and two after each sampled interval.
 
         For local sampling, ``integer_mode=True`` selects rounded integer
         windows without interpolation, replicating image edges when needed.
@@ -458,7 +487,10 @@ class ObjectPatchSampler:
         sy, sx, shifts, support_shape = self._local_geometry(positions, shape)
         if self.method == "fourier":
             image, sy, sx, _ = self._pad_image(image, sy, sx, support_shape)
-        if self.method != "fourier" and len(positions) == 1:
+        if self.method == "cubic":
+            image = interpolation.spline_coefficients(image)
+            supports = batch_slice(image, sy, sx, support_shape, check_bounds=False, periodic=True)
+        elif self.method != "fourier" and len(positions) == 1:
             y, x = sy[0], sx[0]
             supports = image[y:y + support_shape[0], x:x + support_shape[1]][None]
         else:
@@ -468,7 +500,8 @@ class ObjectPatchSampler:
                 supports = interpolation.translate(supports, shifts, self.method)
             return supports[:, self.pad:supports.shape[-2] - self.pad,
                             self.pad:supports.shape[-1] - self.pad]
-        return interpolation.translate(supports, shifts, "bilinear", valid_shape=shape)
+        method = "bilinear" if self.method == "nearest" else self.method
+        return interpolation.translate(supports, shifts, method, valid_shape=shape)
 
     def place(self, image, positions, patches, integer_mode=False, *,
               op="add", adjoint_mode=True):
@@ -485,7 +518,9 @@ class ObjectPatchSampler:
         unpadded patches and crops their borders to discard wrap-around values.
         This mode serves ordinary placement rather than gradient accumulation.
         ``op="set"`` replaces pixels for local Fourier or integer placement.
-        Bilinear, nearest and full-object placement support addition.
+        Bilinear, nearest, cubic and full-object placement support addition.
+        Cubic scatters periodic coefficient gradients, then applies the
+        global prefilter adjoint once before adding to the image.
         ``adjoint_mode`` affects local Fourier sampling.
         """
         if self.operator == "full_object":
@@ -508,11 +543,12 @@ class ObjectPatchSampler:
                 patches = patches[:, self.pad:patches.shape[-2] - self.pad,
                                   self.pad:patches.shape[-1] - self.pad]
         else:
-            if len(positions) == 1:
+            method = "bilinear" if self.method == "nearest" else self.method
+            if len(positions) == 1 and self.method != "cubic":
                 y, x = sy[0], sx[0]
                 support = image[y:y + support_shape[0], x:x + support_shape[1]]
                 interpolation.translate(
-                    patches, shifts, "bilinear", adjoint=True,
+                    patches, shifts, method, adjoint=True,
                     valid_shape=shape, out=support,
                 )
                 return image
@@ -521,8 +557,13 @@ class ObjectPatchSampler:
             support = (image.new_zeros((len(positions), *support_shape))
                        if patches.dtype != image.dtype else None)
             patches = interpolation.translate(
-                patches, shifts, "bilinear", adjoint=True, valid_shape=shape, out=support
+                patches, shifts, method, adjoint=True, valid_shape=shape, out=support
             )
+        if self.method == "cubic":
+            coefficients = batch_put(torch.zeros_like(image), patches, sy, sx,
+                                     check_bounds=False, periodic=True)
+            image.add_(interpolation.spline_coefficients(coefficients))
+            return image
         inline_timer = InlineTimer("add or set patches on image")
         inline_timer.start()
         result = batch_put(image, patches, sy, sx, op=op, check_bounds=False)
@@ -553,7 +594,7 @@ class ObjectSamplingParameters(NamedTuple):
 def shift_images(
     images: Tensor, 
     shifts: Tensor, 
-    method: Literal["bilinear", "fourier", "nearest"] = "bilinear",
+    method: Literal["bilinear", "fourier", "nearest", "cubic"] = "bilinear",
     adjoint: bool = False,
     pad: Optional[int] = 0,
 ) -> Tensor:
@@ -566,8 +607,9 @@ def shift_images(
     shifts : Tensor
         A [N, 2] tensor of shifts in pixels. Use the same shift values as the
         forward shift operation even if `adjoint` is True; do not flip the sign.
-    method : Literal["bilinear", "fourier", "nearest"]
-        The method to use for shifting.
+    method : Literal["bilinear", "fourier", "nearest", "cubic"]
+        The method to use for shifting. Cubic is an interpolating B-spline
+        with a periodic coefficient prefilter on the padded image grid.
     adjoint : bool
         If True, the adjoint of the shift operation is performed. For Fourier
         shift, it shifts the image by `-shifts`. For bilinear shift, it computes

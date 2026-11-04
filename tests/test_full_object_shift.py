@@ -21,7 +21,7 @@ def restore_defaults():
     set_default_complex_dtype(complex_dtype)
 
 
-@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest"])
+@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest", "cubic"])
 @pytest.mark.parametrize("source,target", [
     ((7, 8), (5, 6)), ((5, 6), (5, 6)), ((5, 6), (8, 9)),
     ((7, 4), (4, 7)), ((1, 1), (2, 3)),
@@ -47,10 +47,10 @@ def test_adjoint(method, source, target, dtype):
     )
 
 
-@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest"])
+@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest", "cubic"])
 def test_periodic_roll_reference_and_padding(method):
     image = torch.arange(30.).reshape(5, 6).to(torch.complex128)
-    shift = torch.tensor([1., -2.]) if method == "fourier" else torch.tensor([1.3, -2.4])
+    shift = torch.tensor([1., -2.]) if method in ("fourier", "cubic") else torch.tensor([1.3, -2.4])
     center = torch.tensor([2., 2.5])
     result = ip.extract_patches_full_object(image, (center - shift)[None], (5, 6), method)[0]
     if method == "bilinear":
@@ -74,7 +74,7 @@ def test_periodic_roll_reference_and_padding(method):
         ip.place_patches_full_object(image, center[None], image, op="set", method=method)
 
 
-@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest"])
+@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest", "cubic"])
 def test_position_derivatives(method):
     torch.manual_seed(913)
     image = torch.randn(7, 8, dtype=torch.complex128)
@@ -179,7 +179,7 @@ def test_selection_overrides_and_serialization():
 
 
 @pytest.mark.parametrize("origin", list(api.ObjectPosOriginCoordsMethods))
-@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest"])
+@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest", "cubic"])
 def test_model_adjoint_and_identity_probe_shift(origin, method):
     options = api.EPIEOptions()
     options.object_options.determine_position_origin_coords_by = origin
@@ -204,12 +204,18 @@ def test_model_adjoint_and_identity_probe_shift(origin, method):
     api.EPIEOptions, api.RPIEOptions, api.LSQMLOptions,
     api.DMOptions, api.RAAROptions, api.BHOptions, api.AutodiffPtychographyOptions,
 ])
-@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest"])
-def test_reconstructors_reduce_synthetic_error(factory, method):
+@pytest.mark.parametrize("method,operator", [
+    ("fourier", "full_object"), ("bilinear", "full_object"),
+    ("nearest", "full_object"), ("cubic", "full_object"), ("cubic", "patch"),
+])
+def test_reconstructors_reduce_synthetic_error(factory, method, operator):
     options = factory()
     options.object_options.step_size = 0.1
+    options.reconstructor_options.forward_model_options.shift_operator = operator
     task = make_task(options, probe_shape=(9, 10), method=method)
     model = task.reconstructor.forward_model
+    if operator == "patch":
+        model.apply_subpixel_shifts_on_probe = False
     indices = torch.arange(3)
     initial = task.object.data.clone()
     with torch.no_grad():
@@ -259,7 +265,7 @@ def test_full_object_path_does_not_construct_patch_indices(monkeypatch):
     assert inverse_calls == [torch.Size([7, 8])]
 
 
-@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest"])
+@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest", "cubic"])
 @pytest.mark.parametrize("resample", [False, True])
 def test_bh_gradients_and_joint_curvature(method, resample):
     options = api.BHOptions()
@@ -370,7 +376,7 @@ def test_fixed_resize_parity_uses_absolute_patch_centers():
         torch.testing.assert_close(actual, expected, atol=1e-12, rtol=1e-12)
 
 
-@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest"])
+@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest", "cubic"])
 @pytest.mark.parametrize("resample", [False, True])
 @pytest.mark.parametrize("use_all_modes", [False, True])
 def test_illumination_map_matches_selected_adjoint(method, resample, use_all_modes):
@@ -458,7 +464,7 @@ def test_selected_slice_gradients_match_full_derivatives(resample, monkeypatch):
     assert calls == [(1, 0), (0, 1)]
 
 
-@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest"])
+@pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest", "cubic"])
 def test_sampling_derivative_units_on_anisotropic_grid(method):
     options = api.EPIEOptions()
     options.reconstructor_options.forward_model_options.shift_operator = api.ShiftOperators.FULL_OBJECT

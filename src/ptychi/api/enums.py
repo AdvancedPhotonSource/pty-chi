@@ -97,6 +97,7 @@ class PatchInterpolationMethods(StrEnum):
     FOURIER = auto()
     BILINEAR = auto()
     NEAREST = auto()
+    CUBIC = auto()
 
 
 class ShiftOperators(StrEnum):
