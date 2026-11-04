@@ -21,7 +21,7 @@ DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(
 @pytest.mark.parametrize("source,shape", [((9, 10), (5, 6)), ((5, 6), (8, 9)), ((1, 1), (2, 3))])
 def test_cubic_matches_scipy(device, dtype, operator, source, shape):
     generator = torch.Generator(device="cpu").manual_seed(173)
-    image = torch.randn(source, dtype=dtype, generator=generator).to(device)
+    image = torch.randn(source, dtype=dtype, device="cpu", generator=generator).to(device)
     positions = torch.tensor([[4.3, 5.7], [-2.4, 20.1], [2., 2.5]],
                              dtype=image.real.dtype, device=device)
     sampler = ip.ObjectPatchSampler(operator=operator, method=api.PatchInterpolationMethods.CUBIC)
