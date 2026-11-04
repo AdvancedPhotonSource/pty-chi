@@ -17,7 +17,7 @@ DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(
 @pytest.mark.parametrize("strided", [False, True])
 def test_bilinear_sampling_matches_grid_sample(device, dtype, batch, strided):
     generator = torch.Generator(device="cpu").manual_seed(44)
-    image = torch.randn(17, 19, dtype=dtype, generator=generator).to(device)
+    image = torch.randn(17, 19, dtype=dtype, device="cpu", generator=generator).to(device)
     if strided:
         image = image.T
     image.requires_grad_()
@@ -40,7 +40,7 @@ def test_bilinear_sampling_matches_grid_sample(device, dtype, batch, strided):
     tol = 1e-5 if image.real.dtype == torch.float32 else 1e-10
     torch.testing.assert_close(actual, expected, rtol=tol, atol=tol)
 
-    cotangent = torch.randn(batch, *shape, dtype=dtype, generator=generator).to(device)
+    cotangent = torch.randn(batch, *shape, dtype=dtype, device="cpu", generator=generator).to(device)
     expected_gradients = torch.autograd.grad(expected, (image, positions), cotangent)
     actual_gradients = torch.autograd.grad(actual, (image, positions), cotangent)
     for observed, reference in zip(actual_gradients, expected_gradients):
@@ -63,8 +63,8 @@ def test_bilinear_sampling_matches_grid_sample(device, dtype, batch, strided):
 ])
 def test_mixed_dtype_placement(device, method, batch, patch_dtype, image_dtype):
     generator = torch.Generator(device="cpu").manual_seed(45)
-    image = torch.randn(17, 19, dtype=image_dtype, generator=generator).to(device)
-    patches = torch.randn(batch, 5, 6, dtype=patch_dtype, generator=generator).to(device)
+    image = torch.randn(17, 19, dtype=image_dtype, device="cpu", generator=generator).to(device)
+    patches = torch.randn(batch, 5, 6, dtype=patch_dtype, device="cpu", generator=generator).to(device)
     positions = torch.tensor(
         [[7.3, 8.7], [8.1, 9.2], [7.8, 8.4]], dtype=torch.float64, device=device
     )[:batch]
