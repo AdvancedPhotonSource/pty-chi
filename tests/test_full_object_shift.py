@@ -251,7 +251,12 @@ def test_full_object_path_does_not_construct_patch_indices(monkeypatch):
     positions = torch.rand(3, 2)
     patches = ip.extract_patches_full_object(image, positions, (6, 7))
     assert calls == [torch.Size([7, 8])]
+    inverse_calls = []
+    ifft = ip.pmath.ifft2_precise
+    monkeypatch.setattr(ip.pmath, "ifft2_precise",
+                        lambda x: (inverse_calls.append(x.shape), ifft(x))[1])
     ip.place_patches_full_object(torch.zeros_like(image), positions, patches)
+    assert inverse_calls == [torch.Size([7, 8])]
 
 
 @pytest.mark.parametrize("method", ["fourier", "bilinear", "nearest"])

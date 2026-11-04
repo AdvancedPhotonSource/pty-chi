@@ -2,7 +2,6 @@
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
 from typing import Type
-from functools import partial
 
 import torch
 
@@ -11,7 +10,6 @@ from ptychi.metrics import MSELossOfSqrt
 import ptychi.reconstructors as reconstructors
 import ptychi.forward_models as fm
 from ptychi.reconstructors.base import Reconstructor
-import ptychi.image_proc as ip
 import ptychi.reconstructors.nn as pnn
 from ptychi.device import AcceleratorModuleWrapper
 
@@ -91,34 +89,6 @@ def get_dtype_by_enum(key: enums.Dtypes) -> torch.dtype:
         enums.Dtypes.FLOAT16: torch.float16,
         enums.Dtypes.FLOAT32: torch.float32,
         enums.Dtypes.FLOAT64: torch.float64,
-    }[key]
-
-
-def get_patch_placer_function_by_name(
-    key: enums.PatchInterpolationMethods,
-) -> "ip.PlacePatchesProtocol":
-    return {
-        enums.PatchInterpolationMethods.FOURIER: ip.place_patches_fourier_shift,
-        enums.PatchInterpolationMethods.BILINEAR: partial(
-            ip.place_patches_bilinear_shift, round_positions=False
-        ),
-        enums.PatchInterpolationMethods.NEAREST: partial(
-            ip.place_patches_bilinear_shift, round_positions=True
-        ),
-    }[key]
-
-
-def get_patch_extractor_function_by_name(
-    key: enums.PatchInterpolationMethods,
-) -> "ip.ExtractPatchesProtocol":
-    return {
-        enums.PatchInterpolationMethods.FOURIER: ip.extract_patches_fourier_shift,
-        enums.PatchInterpolationMethods.BILINEAR: partial(
-            ip.extract_patches_bilinear_shift, round_positions=False
-        ),
-        enums.PatchInterpolationMethods.NEAREST: partial(
-            ip.extract_patches_bilinear_shift, round_positions=True
-        ),
     }[key]
 
 

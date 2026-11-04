@@ -1,7 +1,7 @@
 # Copyright © 2025 UChicago Argonne, LLC All right reserved
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
-from typing import Tuple, Literal, Optional, Protocol, NamedTuple
+from typing import Tuple, Literal, Optional, NamedTuple
 import math
 import logging
 
@@ -11,25 +11,15 @@ import torch.signal
 
 import ptychi.maths as pmath
 from ptychi.triton.patches import try_accumulate_patches
-from ptychi.api.types import ComplexTensor, RealTensor
+from ptychi.api.enums import PatchInterpolationMethods
+import ptychi.interpolation as interpolation
 from ptychi.device import AcceleratorModuleWrapper
 from ptychi.timing.timer_utils import timer, InlineTimer
-
-class PlacePatchesProtocol(Protocol):
-    def __call__(
-        self, image: Tensor, positions: Tensor, patches: Tensor, op: Literal["add", "set"] = "add"
-    ) -> Tensor: ...
-
-
-class ExtractPatchesProtocol(Protocol):
-    def __call__(self, image: Tensor, positions: Tensor, shape: Tuple[int, int]) -> Tensor: ...
-
 
 logger = logging.getLogger(__name__)
 
 _PATCH_OFFSET_CACHE: dict[tuple[torch.device, int, int, int], Tensor] = {}
-_FFT_FREQ_GRID_CACHE: dict[tuple[torch.device, torch.dtype, int, int], tuple[Tensor, Tensor]] = {}
-_SPATIAL_GRID_CACHE: dict[tuple[torch.device, int, int], tuple[Tensor, Tensor]] = {}
+_PATCH_CENTER_CACHE: dict[tuple[torch.device, torch.dtype, int, int], Tensor] = {}
 
 
 def _patch_linear_indices(
@@ -48,33 +38,6 @@ def _patch_linear_indices(
         _PATCH_OFFSET_CACHE[cache_key] = patch_offsets
     start_offsets = sy * image_width + sx
     return start_offsets[:, None] + patch_offsets[None, :]
-
-
-def _fft_frequency_grid(device: torch.device, height: int, width: int) -> tuple[Tensor, Tensor]:
-    dtype = torch.get_default_dtype()
-    cache_key = (device, dtype, height, width)
-    grid = _FFT_FREQ_GRID_CACHE.get(cache_key)
-    if grid is None:
-        grid = torch.meshgrid(
-            torch.fft.fftfreq(height, device=device),
-            torch.fft.fftfreq(width, device=device),
-            indexing="ij",
-        )
-        _FFT_FREQ_GRID_CACHE[cache_key] = grid
-    return grid
-
-
-def _spatial_grid(device: torch.device, height: int, width: int) -> tuple[Tensor, Tensor]:
-    cache_key = (device, height, width)
-    grid = _SPATIAL_GRID_CACHE.get(cache_key)
-    if grid is None:
-        grid = torch.meshgrid(
-            torch.arange(height, device=device),
-            torch.arange(width, device=device),
-            indexing="ij",
-        )
-        _SPATIAL_GRID_CACHE[cache_key] = grid
-    return grid
 
 
 @timer()
@@ -308,171 +271,6 @@ def place_patches_integer(
     return image
 
 
-@timer()
-def extract_patches_fourier_shift(
-    image: Tensor, positions: Tensor, shape: Tuple[int, int], pad: Optional[int] = 1
-) -> Tensor:
-    """
-    Extract patches from 2D object. If a patch's footprint goes outside the image,
-    the image is padded with zeros to account for the missing pixels.
-
-    Parameters
-    ----------
-    image : Tensor
-        The whole image.
-    positions : Tensor
-        A tensor of shape (N, 2) giving the center positions of the patches in pixels.
-        The origin of the given positions are assumed to be the TOP LEFT corner of the image.
-    shape : tuple of int
-        A tuple giving the patch shape in pixels.
-    pad : Optional[int]
-        If given, patches with larger size than the intended size by this amount are cropped
-        out from the patches before shifting.
-
-    Returns
-    -------
-    Tensor
-        A tensor of shape (N, H, W) containing the extracted patches.
-    """
-    # Floating point ranges over which interpolations should be done
-    sys_float = positions[:, 0] - (shape[0] - 1.0) / 2.0
-    sxs_float = positions[:, 1] - (shape[1] - 1.0) / 2.0
-
-    # Crop one more pixel each side for Fourier shift
-    sys = sys_float.floor().int() - pad
-    eys = sys + shape[0] + 2 * pad
-    sxs = sxs_float.floor().int() - pad
-    exs = sxs + shape[1] + 2 * pad
-
-    fractional_shifts = torch.stack([sys_float - sys - pad, sxs_float - sxs - pad], -1)
-
-    pad_lengths = [
-        max(-sxs.min(), 0),
-        max(exs.max() - image.shape[1], 0),
-        max(-sys.min(), 0),
-        max(eys.max() - image.shape[0], 0),
-    ]
-    image = torch.nn.functional.pad(image, pad_lengths)
-    sys = sys + pad_lengths[2]
-    eys = eys + pad_lengths[2]
-    sxs = sxs + pad_lengths[0]
-    exs = exs + pad_lengths[0]
-
-    patches = batch_slice(
-        image, sys, sxs, patch_size=[shape[i] + 2 * pad for i in range(2)], check_bounds=False
-    )
-
-    # Apply Fourier shift to account for fractional shifts
-    if not torch.allclose(fractional_shifts, torch.zeros_like(fractional_shifts), atol=1e-7):
-        patches = fourier_shift(patches, -fractional_shifts)
-    patches = patches[:, pad : patches.shape[-2] - pad, pad : patches.shape[-1] - pad]
-    return patches
-
-
-@timer()
-def place_patches_fourier_shift(
-    image: Tensor, 
-    positions: Tensor, 
-    patches: Tensor, 
-    op: Literal["add", "set"] = "add",
-    adjoint_mode: bool = True,
-    pad: Optional[int] = 1,
-) -> Tensor:
-    """
-    Place patches into a 2D object. If a patch's footprint goes outside the image,
-    the image is padded with zeros to account for the missing pixels.
-
-    Parameters
-    ----------
-    image : Tensor
-        The whole image.
-    positions : Tensor
-        A tensor of shape (N, 2) giving the center positions of the patches in pixels.
-        The origin of the given positions are assumed to be the TOP LEFT corner of the image.
-    patches : Tensor
-        A (N, H, W) or (H, W) tensor of image patches.
-    op : Literal["add", "set"]
-        The operation to perform. "add" adds the patches to the image, 
-        "set" sets the patches to the image replacing the existing values.
-    adjoint_mode : bool
-        If True, this function performs the exact adjoint operation of `extract_patches_fourier_shift`.
-        This means it will run the adjoint operation of every step of the extraction 
-        function in reverse order: it first zero-pads the patches, shifts them back, 
-        and puts them back into the image. Turn it on if this function is used in
-        backpropagating the gradient. Note that due to the zero-padding, ripple
-        artifacts may appear around the borders of each patch, so it is not suitable
-        for placing patches that are not gradients. In that case, set this to False,
-        and it will skip the zero-padding and crop the patches before placing them
-        to remove Fourier shift wrap-arounds.
-    pad : Optional[int]
-        If given, patches are padded (or cropped) by this amount before shifting. 
-        The actual operations depend on `adjoint_mode`: when `adjoint_mode` is True, 
-        the patches are padded with zeros; otherwise, pathces are cropped by this amount
-        after shifting to remove the wrap-around portions.
-
-    Returns
-    -------
-    Tensor
-        A tensor with the same shape as the object with patches added onto it.
-    """
-    # If the input is a single patch, add the third dimension
-    # and expand it to the correct number of patches
-    if len(patches.shape) == 2:
-        patches = patches[None].expand(len(positions), -1, -1)
-
-    shape = patches.shape[-2:]
-    
-    if adjoint_mode:
-        patch_padding = pad
-        patches = torch.nn.functional.pad(patches, [patch_padding] * 4)
-    else:
-        patch_padding = -pad
-
-    sys_float = positions[:, 0] - (shape[0] - 1.0) / 2.0
-    sxs_float = positions[:, 1] - (shape[1] - 1.0) / 2.0
-
-    # Crop one more pixel each side for Fourier shift
-    sys = sys_float.floor().int() - patch_padding
-    eys = sys + shape[0] + 2 * patch_padding
-    sxs = sxs_float.floor().int() - patch_padding
-    exs = sxs + shape[1] + 2 * patch_padding
-
-    fractional_shifts = torch.stack([sys_float - sys - patch_padding, sxs_float - sxs - patch_padding], -1)
-
-    pad_lengths = [
-        max(-sxs.min(), 0),
-        max(exs.max() - image.shape[1], 0),
-        max(-sys.min(), 0),
-        max(eys.max() - image.shape[0], 0),
-    ]
-    image = torch.nn.functional.pad(image, pad_lengths)
-    sys = sys + pad_lengths[2]
-    eys = eys + pad_lengths[2]
-    sxs = sxs + pad_lengths[0]
-    exs = exs + pad_lengths[0]
-
-    if not torch.allclose(fractional_shifts, torch.zeros_like(fractional_shifts), atol=1e-7):
-        patches = fourier_shift(patches, fractional_shifts)
-    if not adjoint_mode:
-        patches = patches[
-            :, 
-            abs(patch_padding) : patches.shape[-2] - abs(patch_padding), 
-            abs(patch_padding) : patches.shape[-1] - abs(patch_padding)
-        ]
-
-    inline_timer = InlineTimer("add or set patches on image")
-    inline_timer.start()
-    image = batch_put(image, patches, sys, sxs, op=op, check_bounds=False)
-    inline_timer.end()
-
-    # Undo padding
-    image = image[
-        pad_lengths[2] : image.shape[0] - pad_lengths[3],
-        pad_lengths[0] : image.shape[1] - pad_lengths[1],
-    ]
-    return image
-
-
 def resolve_shift_operator(requested, distance, object_shape, probe_shape):
     """Resolve sampling using dimensions represented on the same pixel grid."""
     if requested == "auto":
@@ -495,67 +293,6 @@ def _fixed_patch_geometry(object_shape, patch_shape):
     target = tuple(slice(b, b + n) for b, n in zip(target_start, overlap))
     center = tuple(a - b + (p - 1) / 2 for a, b, p in zip(source_start, target_start, patch_shape))
     return source, target, center
-
-
-def _full_object_shift_multiplier(positions, object_shape, patch_shape, method, derivative=(0, 0)):
-    r"""Return the periodic shift multiplier or its patch-center derivatives.
-
-    For each axis, the shift is :math:`s=c-q`, where :math:`q` is the absolute
-    patch center and :math:`c=a-b+(p-1)/2` uses the fixed source/target crop
-    starts :math:`a,b` and patch size :math:`p`. With signed FFT frequency
-    :math:`f` in cycles per pixel, Fourier interpolation uses
-
-    .. math::
-
-        M(q,f)=\exp(-2\pi i f s), \qquad
-        \partial_q^r M=(2\pi i f)^r M.
-
-    Bilinear interpolation is separable. On each interval with constant
-    :math:`j=\lfloor s\rfloor`, let :math:`\alpha=s-j` and
-    :math:`E_j=\exp(-2\pi i f j)`. Its one-axis factors are
-
-    .. math::
-
-        M=(1-\alpha)E_j+\alpha E_{j+1}, \qquad
-        \partial_q M=E_j-E_{j+1}, \qquad \partial_q^r M=0\quad(r\geq2).
-
-    These are piecewise derivatives; classical derivatives need not exist
-    at interpolation knots. Nearest uses :math:`M=\exp(-2\pi i f\,\mathrm{round}(s))`
-    and zero derivatives almost everywhere (also returned at ties).
-    For ``derivative=(m, n)``, multiply the y-axis order-m and x-axis order-n
-    factors. Thus bilinear mixed second derivatives can be nonzero even
-    though its pure second derivatives vanish between knots.
-    """
-    _, _, center = _fixed_patch_geometry(object_shape, patch_shape)
-    shifts = positions.new_tensor(center) - positions
-    factors = []
-    for axis, (size, order) in enumerate(zip(object_shape, derivative)):
-        frequency = torch.fft.fftfreq(size, device=positions.device, dtype=positions.dtype)
-        omega = 2j * torch.pi * frequency[None]
-        shift = shifts[:, axis, None]
-        if method == "fourier":
-            factor = torch.exp(-omega * shift) * omega ** order
-        elif method == "bilinear":
-            lower = shift.floor()
-            fraction = shift - lower
-            left = torch.exp(-omega * lower)
-            right = torch.exp(-omega * (lower + 1))
-            if order == 0:
-                factor = (1 - fraction) * left + fraction * right
-            elif order == 1:
-                factor = left - right
-            else:
-                factor = (left + right) * 0
-        elif method == "nearest":
-            factor = torch.exp(-omega * shift.round())
-            # Keep a zero-valued position dependency for autograd.
-            factor = factor + shift * 0
-            if order:
-                factor = factor * 0
-        else:
-            raise ValueError(f"Invalid interpolation method: {method}")
-        factors.append(factor)
-    return factors[0][:, :, None] * factors[1][:, None, :]
 
 
 def _fixed_patch_resize(image, shape):
@@ -581,7 +318,7 @@ def extract_patches_full_object(
     outside the image-sized shifted support are zero when the patch is larger.
 
     Let :math:`\widehat O_{kl}` be the image FFT, :math:`N_y,N_x` its shape,
-    and :math:`M_y,M_x` the factors from ``_full_object_shift_multiplier``.
+    and :math:`M_y,M_x` the factors from ``interpolation.translation_multiplier``.
     For ``derivative=(m, n)``, compute the complete periodic field
 
     .. math::
@@ -596,7 +333,11 @@ def extract_patches_full_object(
     """
     positions = positions.to(device=image.device, dtype=image.real.dtype)
     spectrum = pmath.fft2_precise(image)
-    multiplier = _full_object_shift_multiplier(positions, image.shape, shape, method, derivative)
+    _, _, center = _fixed_patch_geometry(image.shape, shape)
+    shifts = positions.new_tensor(center) - positions
+    multiplier = interpolation.translation_multiplier(shifts, image.shape, method, derivative)
+    if sum(derivative) % 2:
+        multiplier = -multiplier
     shifted = pmath.ifft2_precise(spectrum[None] * multiplier)
     if not image.is_complex():
         shifted = shifted.real
@@ -621,9 +362,9 @@ def place_patches_full_object(
             \exp\left[2\pi i(f_{y,k}r_y+f_{x,l}r_x)\right].
 
     Contributions are summed in Fourier space before the inverse FFT.
-    Conjugating the bilinear multiplier gives its adjoint, which generally
-    differs from interpolation with a reversed shift. Real image buffers
-    receive the real part. A 2D patch is shared across all positions;
+    Conjugating the multiplier gives the adjoint periodic translation;
+    the fixed crop/pad is reversed separately. Real image buffers receive
+    the real part. A 2D patch is shared across all positions;
     batched patches have shape ``(batch_size, patch_height, patch_width)``.
     Only additive placement is supported.
     """
@@ -633,9 +374,9 @@ def place_patches_full_object(
         patches = patches[None].expand(len(positions), -1, -1)
     positions = positions.to(device=patches.device, dtype=patches.real.dtype)
     expanded = _fixed_patch_resize(patches, image.shape)
-    multiplier = _full_object_shift_multiplier(
-        positions, image.shape, patches.shape[-2:], method
-    )
+    _, _, center = _fixed_patch_geometry(image.shape, patches.shape[-2:])
+    shifts = positions.new_tensor(center) - positions
+    multiplier = interpolation.translation_multiplier(shifts, image.shape, method)
     spectrum = (pmath.fft2_precise(expanded) * multiplier.conj()).sum(0)
     update = pmath.ifft2_precise(spectrum)
     if not image.is_complex():
@@ -644,35 +385,156 @@ def place_patches_full_object(
 
 
 class ObjectPatchSampler:
-    """Dispatch patch operations without changing reconstruction update rules."""
+    """Own support selection, translation and accumulation on one pixel grid.
 
-    def __init__(self, operator="patch", method="fourier", pad=0):
+    Positions are absolute patch centers in (y, x) pixels. Local Fourier uses
+    a symmetric halo and periodic translation within that support. Bilinear
+    uses one extra row/column and requires its support to lie inside the image.
+    Local nearest retains center rounding followed by bilinear evaluation.
+    Full-object sampling translates the complete periodic object before cropping.
+    """
+
+    def __init__(self, operator="patch", method: PatchInterpolationMethods | str = "fourier", pad=0):
         self.operator = operator
         self.method = method
-        self.pad = pad
+        self.pad = pad or 0
 
     def integer_mode(self, requested):
         return requested and self.operator == "patch"
 
+    def _local_geometry(self, positions, shape, adjoint_mode=True):
+        if self.method == "nearest":
+            positions = positions.round().to(int)
+        elif self.method not in ("fourier", "bilinear"):
+            raise ValueError(f"Invalid interpolation method: {self.method}")
+        if self.method != "fourier":
+            dtype = positions.dtype if positions.is_floating_point() else torch.get_default_dtype()
+            key = (positions.device, dtype, *shape)
+            center = _PATCH_CENTER_CACHE.get(key)
+            if center is None:
+                center = positions.new_tensor([(shape[0] - 1) / 2, (shape[1] - 1) / 2], dtype=dtype)
+                _PATCH_CENTER_CACHE[key] = center
+            starts = positions - center
+            integer_starts = starts.int()
+            shifts = integer_starts - starts
+            sy, sx = integer_starts.unbind(-1)
+            return sy, sx, shifts, (shape[0] + 1, shape[1] + 1)
+        y = positions[:, 0] - (shape[0] - 1.0) / 2
+        x = positions[:, 1] - (shape[1] - 1.0) / 2
+        margin = self.pad if adjoint_mode else -self.pad
+        sy, sx = y.floor().int() - margin, x.floor().int() - margin
+        fractions = torch.stack((y - sy - margin, x - sx - margin), -1)
+        extra = 2 * margin
+        return sy, sx, -fractions, (shape[0] + extra, shape[1] + extra)
+
+    @staticmethod
+    def _pad_image(image, sy, sx, shape):
+        padding = [
+            max(-sx.min(), 0), max(sx.max() + shape[1] - image.shape[1], 0),
+            max(-sy.min(), 0), max(sy.max() + shape[0] - image.shape[0], 0),
+        ]
+        return (torch.nn.functional.pad(image, padding),
+                sy + padding[2], sx + padding[0], padding)
+
     def extract(self, image, positions, shape, integer_mode=False):
+        """Extract (N, h, w) patches from an (H, W) image.
+
+        ``positions`` gives absolute (y, x) centers in pixels, and ``shape``
+        is (h, w). The first sample is at ``center - (size - 1) / 2`` on each
+        axis. Local Fourier sampling gathers a halo of ``self.pad`` pixels,
+        translates it, and crops the halo; missing object pixels are zero.
+        Local bilinear support must fit inside the image, including its extra
+        bottom/right pixel. Local nearest rounds centers before interpolation.
+
+        For local sampling, ``integer_mode=True`` selects rounded integer
+        windows without interpolation, replicating image edges when needed.
+        Full-object sampling always translates the periodic object and then
+        applies the fixed center crop/pad.
+        """
         if self.operator == "full_object":
             return extract_patches_full_object(image, positions, shape, self.method)
         if integer_mode:
             return extract_patches_integer(image, positions, shape)
-        from ptychi.maps import get_patch_extractor_function_by_name
-        return get_patch_extractor_function_by_name(self.method)(
-            image, positions, shape, pad=self.pad
-        )
+        sy, sx, shifts, support_shape = self._local_geometry(positions, shape)
+        if self.method == "fourier":
+            image, sy, sx, _ = self._pad_image(image, sy, sx, support_shape)
+        if self.method != "fourier" and len(positions) == 1:
+            y, x = sy[0], sx[0]
+            supports = image[y:y + support_shape[0], x:x + support_shape[1]][None]
+        else:
+            supports = batch_slice(image, sy, sx, support_shape, check_bounds=False)
+        if self.method == "fourier":
+            if not torch.allclose(shifts, torch.zeros_like(shifts), atol=1e-7):
+                supports = interpolation.translate(supports, shifts, self.method)
+            return supports[:, self.pad:supports.shape[-2] - self.pad,
+                            self.pad:supports.shape[-1] - self.pad]
+        return interpolation.translate(supports, shifts, "bilinear", valid_shape=shape)
 
-    def place(self, image, positions, patches, integer_mode=False):
+    def place(self, image, positions, patches, integer_mode=False, *,
+              op="add", adjoint_mode=True):
+        """Place patches at absolute (y, x) centers and return the updated image.
+
+        ``image`` is (H, W), ``positions`` is (N, 2), and ``patches`` is
+        (N, h, w) or a shared (h, w) patch. Default interpolated placement
+        accumulates the extraction adjoint with the same forward centers.
+        Local integer mode uses rounded windows and discards contributions
+        outside the image; full-object placement uses periodic translation.
+
+        Local Fourier placement zero-pads patches by ``self.pad`` before
+        adjoint translation. With ``adjoint_mode=False``, it instead translates
+        unpadded patches and crops their borders to discard wrap-around values.
+        This mode serves ordinary placement rather than gradient accumulation.
+        ``op="set"`` replaces pixels for local Fourier or integer placement.
+        Bilinear, nearest and full-object placement support addition.
+        ``adjoint_mode`` affects local Fourier sampling.
+        """
         if self.operator == "full_object":
-            return place_patches_full_object(image, positions, patches, method=self.method)
+            return place_patches_full_object(image, positions, patches, op=op, method=self.method)
         if integer_mode:
-            return place_patches_integer(image, positions, patches)
-        from ptychi.maps import get_patch_placer_function_by_name
-        return get_patch_placer_function_by_name(self.method)(
-            image, positions, patches, pad=self.pad
-        )
+            return place_patches_integer(image, positions, patches, op=op)
+        if self.method != "fourier" and op == "set":
+            raise NotImplementedError('"set" operation is not supported.')
+        if patches.ndim == 2:
+            patches = patches[None].expand(len(positions), -1, -1)
+        shape = patches.shape[-2:]
+        sy, sx, shifts, support_shape = self._local_geometry(positions, shape, adjoint_mode)
+        if self.method == "fourier":
+            if adjoint_mode:
+                patches = torch.nn.functional.pad(patches, [self.pad] * 4)
+            image, sy, sx, padding = self._pad_image(image, sy, sx, support_shape)
+            if not torch.allclose(shifts, torch.zeros_like(shifts), atol=1e-7):
+                patches = interpolation.translate(patches, shifts, self.method, adjoint=True)
+            if not adjoint_mode:
+                patches = patches[:, self.pad:patches.shape[-2] - self.pad,
+                                  self.pad:patches.shape[-1] - self.pad]
+        else:
+            if len(positions) == 1:
+                y, x = sy[0], sx[0]
+                support = image[y:y + support_shape[0], x:x + support_shape[1]]
+                interpolation.translate(
+                    patches, shifts, "bilinear", adjoint=True,
+                    valid_shape=shape, out=support,
+                )
+                return image
+            # Accumulate in the destination precision, retaining patch precision
+            # for multiplication by interpolation weights.
+            support = (image.new_zeros((len(positions), *support_shape))
+                       if patches.dtype != image.dtype else None)
+            patches = interpolation.translate(
+                patches, shifts, "bilinear", adjoint=True, valid_shape=shape, out=support
+            )
+        inline_timer = InlineTimer("add or set patches on image")
+        inline_timer.start()
+        result = batch_put(image, patches, sy, sx, op=op, check_bounds=False)
+        if self.method != "fourier" and not image.is_contiguous():
+            image.copy_(result)
+        else:
+            image = result
+        inline_timer.end()
+        if self.method == "fourier":
+            image = image[padding[2]:image.shape[0] - padding[3],
+                          padding[0]:image.shape[1] - padding[1]]
+        return image
 
 
 class ObjectSamplingParameters(NamedTuple):
@@ -687,120 +549,11 @@ class ObjectSamplingParameters(NamedTuple):
     shape: Tuple[int, int]
 
 
-class ObjectPatchInterpolator:
-    """Bilinear patches centered at absolute (y, x) positions in pixels.
-
-    The first sample on each axis is at ``position - (size - 1) / 2``.
-    The object must contain the support needed for bilinear interpolation.
-    """
-
-    def __init__(self, object_: ComplexTensor, position_px: RealTensor, size: torch.Size) -> None:
-        # top left corner of object support
-        xmin = position_px[-1] - (size[-1] - 1) / 2
-        ymin = position_px[-2] - (size[-2] - 1) / 2
-
-        # whole components (pixel indexes)
-        xmin_wh = xmin.int()
-        ymin_wh = ymin.int()
-
-        # fractional (subpixel) components
-        xmin_fr = xmin - xmin_wh
-        ymin_fr = ymin - ymin_wh
-
-        # bottom right corner of object patch support
-        xmax_wh = xmin_wh + size[-1] + 1
-        ymax_wh = ymin_wh + size[-2] + 1
-
-        # reused quantities
-        xmin_fr_c = 1.0 - xmin_fr
-        ymin_fr_c = 1.0 - ymin_fr
-
-        # barycentric interpolant weights
-        self._weight00 = ymin_fr_c * xmin_fr_c
-        self._weight01 = ymin_fr_c * xmin_fr
-        self._weight10 = ymin_fr * xmin_fr_c
-        self._weight11 = ymin_fr * xmin_fr
-
-        # extract patch support region from full object
-        self._object_support = object_[ymin_wh:ymax_wh, xmin_wh:xmax_wh]
-
-    @timer()
-    def get_patch(self) -> ComplexTensor:
-        """interpolate object support to extract patch"""
-        object_patch = self._weight00 * self._object_support[:-1, :-1]
-        object_patch += self._weight01 * self._object_support[:-1, 1:]
-        object_patch += self._weight10 * self._object_support[1:, :-1]
-        object_patch += self._weight11 * self._object_support[1:, 1:]
-        return object_patch
-
-    @timer()
-    def update_patch(self, object_update: ComplexTensor) -> None:
-        """add patch update to object support"""
-        self._object_support[:-1, :-1] += self._weight00 * object_update
-        self._object_support[:-1, 1:] += self._weight01 * object_update
-        self._object_support[1:, :-1] += self._weight10 * object_update
-        self._object_support[1:, 1:] += self._weight11 * object_update
-
-
-@timer()
-def extract_patches_bilinear_shift(
-    image: Tensor,
-    positions: Tensor,
-    shape: Tuple[int, int],
-    round_positions: bool = False,
-    *args, **kwargs,
-) -> Tensor:
-    if round_positions:
-        positions = torch.round(positions).to(int)
-
-    obj_patches = torch.zeros((len(positions), *shape), dtype=image.dtype)
-    for i in range(len(positions)):
-        interpolator = ObjectPatchInterpolator(
-            image,
-            positions[i],
-            shape,
-        )
-        obj_patches[i] = interpolator.get_patch()
-    return obj_patches
-
-
-@timer()
-def place_patches_bilinear_shift(
-    image: Tensor,
-    positions: Tensor,
-    patches: Tensor,
-    op: Literal["add", "set"] = "add",
-    round_positions: bool = False,
-    *args, **kwargs,
-) -> Tensor:
-    if op == "set":
-        raise NotImplementedError("\"set\" operation is not supported.")
-
-    if round_positions:
-        positions = torch.round(positions).to(int)
-
-    for i in range(len(positions)):
-        if patches.shape[0] == len(positions):
-            patch_input = patches[i]
-        elif len(patches.shape) == 2:
-            patch_input = patches
-        else:
-            raise ValueError("Incorrect patch size.")
-
-        interpolator = ObjectPatchInterpolator(
-            image,
-            positions[i],
-            patch_input.shape,
-        )
-        interpolator.update_patch(patch_input)
-    return image
-
-
 @timer()
 def shift_images(
     images: Tensor, 
     shifts: Tensor, 
-    method: Literal["bilinear", "fourier"] = "bilinear",
+    method: Literal["bilinear", "fourier", "nearest"] = "bilinear",
     adjoint: bool = False,
     pad: Optional[int] = 0,
 ) -> Tensor:
@@ -813,7 +566,7 @@ def shift_images(
     shifts : Tensor
         A [N, 2] tensor of shifts in pixels. Use the same shift values as the
         forward shift operation even if `adjoint` is True; do not flip the sign.
-    method : Literal["bilinear", "fourier"]
+    method : Literal["bilinear", "fourier", "nearest"]
         The method to use for shifting.
     adjoint : bool
         If True, the adjoint of the shift operation is performed. For Fourier
@@ -832,18 +585,7 @@ def shift_images(
     if pad is not None and pad > 0:
         mode = "constant" if adjoint else "replicate"
         images = torch.nn.functional.pad(images, (pad, pad, pad, pad), mode=mode)
-    if method == "bilinear":
-        if adjoint:
-            images = adjoint_bilinear_shift(images, shifts)
-        else:
-            images = bilinear_shift(images, shifts)
-    elif method == "fourier":
-        if adjoint:
-            images = fourier_shift(images, -shifts)
-        else:
-            images = fourier_shift(images, shifts)
-    else:
-        raise ValueError(f"Invalid shift method: {method}")
+    images = interpolation.translate(images, shifts, method, adjoint=adjoint)
     if pad is not None and pad > 0:
         if adjoint:
             # Fold columns first, then rows, so corner contributions are included.
@@ -885,118 +627,11 @@ def fourier_shift(images: Tensor, shifts: Tensor, strictly_preserve_zeros: bool 
         zero_mask = images == 0
         zero_mask = zero_mask.float()
         zero_mask_shifted = fourier_shift(zero_mask, shifts, strictly_preserve_zeros=False)
-    ft_images = pmath.fft2_precise(images)
-    freq_y, freq_x = _fft_frequency_grid(ft_images.device, images.shape[-2], images.shape[-1])
-    mult = torch.exp(
-        1j
-        * -2
-        * torch.pi
-        * (
-            freq_x[None] * shifts[:, 1].to(ft_images.device).view(-1, 1, 1)
-            + freq_y[None] * shifts[:, 0].to(ft_images.device).view(-1, 1, 1)
-        )
-    )
-    ft_images = ft_images * mult
-    shifted_images = pmath.ifft2_precise(ft_images)
-    if not images.dtype.is_complex:
-        shifted_images = shifted_images.real
+    shifted_images = interpolation.translate(images, shifts, "fourier")
     if strictly_preserve_zeros:
         shifted_images[zero_mask_shifted > 0] = 0
     return shifted_images
 
-
-def bilinear_shift(images: Tensor, shifts: Tensor) -> Tensor:
-    """
-    Apply bilinear shift to a batch of images.
-    
-    Parameters
-    ----------
-    images : Tensor
-        A [N, H, W] tensor of images.
-    shifts : Tensor
-        A [N, 2] tensor of shifts in pixels.
-
-    Returns
-    -------
-    Tensor
-        Shifted images.
-    """
-    if torch.allclose(shifts, torch.zeros_like(shifts)):
-        return images
-    y, x = _spatial_grid(images.device, images.shape[-2], images.shape[-1])
-    
-    # We want to sample the image at these positions.
-    y = y[None] - shifts[:, 0].to(images.device).view(-1, 1, 1)
-    x = x[None] - shifts[:, 1].to(images.device).view(-1, 1, 1)
-    
-    y_f = y.floor().int()
-    y_c = (y + 1).floor().int()
-    x_f = x.floor().int()
-    x_c = (x + 1).floor().int()
-    
-    w_00 = (y_c - y) * (x_c - x)
-    w_01 = (y_c - y) * (x - x_f)
-    w_10 = (y - y_f) * (x_c - x)
-    w_11 = (y - y_f) * (x - x_f)
-    
-    y_f = y_f.clip(0, images.shape[-2] - 1).view(-1)
-    y_c = y_c.clip(0, images.shape[-2] - 1).view(-1)
-    x_f = x_f.clip(0, images.shape[-1] - 1).view(-1)
-    x_c = x_c.clip(0, images.shape[-1] - 1).view(-1)
-    
-    orig_shape = images.shape
-    batch_inds = torch.arange(images.shape[0], device=images.device).repeat_interleave(
-        images.shape[-1] * images.shape[-2]
-    )
-    images = \
-        w_00.reshape(-1) * images[batch_inds, y_f, x_f] + \
-        w_01.reshape(-1) * images[batch_inds, y_f, x_c] + \
-        w_10.reshape(-1) * images[batch_inds, y_c, x_f] + \
-        w_11.reshape(-1) * images[batch_inds, y_c, x_c]
-    images = images.reshape(orig_shape)
-    return images
-
-
-def adjoint_bilinear_shift(images: Tensor, shifts: Tensor) -> Tensor:
-    """
-    Adjoint of bilinear shift.
-    """
-    if torch.allclose(shifts, torch.zeros_like(shifts)):
-        return images
-    y, x = _spatial_grid(images.device, images.shape[-2], images.shape[-1])
-    
-    # We want to sample the image at these positions.
-    y = y[None] - shifts[:, 0].to(images.device).view(-1, 1, 1)
-    x = x[None] - shifts[:, 1].to(images.device).view(-1, 1, 1)
-    
-    y_f = y.floor().int()
-    y_c = (y + 1).floor().int()
-    x_f = x.floor().int()
-    x_c = (x + 1).floor().int()
-    
-    w_00 = (y_c - y) * (x_c - x)
-    w_01 = (y_c - y) * (x - x_f)
-    w_10 = (y - y_f) * (x_c - x)
-    w_11 = (y - y_f) * (x - x_f)
-    
-    y_f = y_f.clip(0, images.shape[-2] - 1).view(-1)
-    y_c = y_c.clip(0, images.shape[-2] - 1).view(-1)
-    x_f = x_f.clip(0, images.shape[-1] - 1).view(-1)
-    x_c = x_c.clip(0, images.shape[-1] - 1).view(-1)
-    
-    orig_shape = images.shape
-    batch_inds = torch.arange(images.shape[0], device=images.device).repeat_interleave(
-        images.shape[-1] * images.shape[-2]
-    )
-    
-    adjoint = torch.zeros_like(images)
-    adjoint.index_put_((batch_inds, y_f, x_f), (w_00 * images).reshape(-1), accumulate=True)
-    adjoint.index_put_((batch_inds, y_f, x_c), (w_01 * images).reshape(-1), accumulate=True)
-    adjoint.index_put_((batch_inds, y_c, x_f), (w_10 * images).reshape(-1), accumulate=True)
-    adjoint.index_put_((batch_inds, y_c, x_c), (w_11 * images).reshape(-1), accumulate=True)
-    adjoint = adjoint.reshape(orig_shape)
-    return adjoint
-    
 
 @timer()
 def nearest_neighbor_gradient(

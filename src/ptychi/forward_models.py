@@ -595,7 +595,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         Fourier derivatives use factors :math:`(2\pi i f_y)^m(2\pi i f_x)^n`.
         Bilinear derivatives are piecewise, with zero pure second derivatives
         and potentially nonzero mixed derivatives. Nearest derivatives are
-        zero almost everywhere. See ``_full_object_shift_multiplier`` for
+        zero almost everywhere. See ``interpolation.translation_multiplier`` for
         the interpolation-specific formulas.
 
         ``object_array`` optionally supplies a native-grid object or update

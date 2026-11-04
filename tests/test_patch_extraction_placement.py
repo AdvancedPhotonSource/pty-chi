@@ -14,8 +14,9 @@ class TestPatchExtractionPlacement(tutils.BaseTester):
         positions = torch.rand(10, 2) * 64 + 32
         image = torch.rand(128, 128)
         
-        patches = ip.extract_patches_fourier_shift(image, positions, (32, 32))
-        image_replaced = ip.place_patches_fourier_shift(torch.zeros_like(image), positions, patches, op="set", adjoint_mode=False)
+        sampler = ip.ObjectPatchSampler(method="fourier", pad=1)
+        patches = sampler.extract(image, positions, (32, 32))
+        image_replaced = sampler.place(torch.zeros_like(image), positions, patches, op="set", adjoint_mode=False)
         
         mask = image_replaced > 0
         orig_sum = torch.sum(image[mask])
@@ -45,8 +46,9 @@ class TestPatchExtractionPlacement(tutils.BaseTester):
         nonzero_rad = 15
         image[64 - nonzero_rad:64 + nonzero_rad, 64 - nonzero_rad:64 + nonzero_rad] = torch.rand(2 * nonzero_rad, 2 * nonzero_rad)
         
-        patches = ip.extract_patches_fourier_shift(image, positions, (32, 32))
-        image_replaced = ip.place_patches_fourier_shift(torch.zeros_like(image), positions, patches, op="add", adjoint_mode=True)
+        sampler = ip.ObjectPatchSampler(method="fourier", pad=1)
+        patches = sampler.extract(image, positions, (32, 32))
+        image_replaced = sampler.place(torch.zeros_like(image), positions, patches, op="add", adjoint_mode=True)
                 
         if self.debug:
             import matplotlib.pyplot as plt
@@ -69,8 +71,9 @@ class TestPatchExtractionPlacement(tutils.BaseTester):
         positions = torch.tensor([[5, 5], [20, 20], [15, 20]]) + 0.5
         image = torch.arange(32 * 32).reshape(32, 32)
         
-        patches = ip.extract_patches_integer(image, positions, (8, 8))
-        image_replaced = ip.place_patches_integer(torch.zeros_like(image), positions, patches, op="add")
+        sampler = ip.ObjectPatchSampler()
+        patches = sampler.extract(image, positions, (8, 8), integer_mode=True)
+        image_replaced = sampler.place(torch.zeros_like(image), positions, patches, integer_mode=True)
                 
         ax_y = torch.sum(patches.abs() ** 2)
         x_ahy = torch.sum(image_replaced * image)
