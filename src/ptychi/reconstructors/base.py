@@ -19,6 +19,7 @@ import ptychi.forward_models as fm
 import ptychi.api.enums as enums
 import ptychi.io_handles as io
 import ptychi.image_proc as ip
+from ptychi.metrics import MSELossOfSqrt
 from ptychi.parallel import MultiprocessMixin
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
@@ -354,6 +355,44 @@ class IterativeReconstructor(Reconstructor):
         """
         raise NotImplementedError
 
+    def compute_optimizer_loss(self, input_data, y_true):
+        """Evaluate the scalar objective used by automatic optimizer closures."""
+        return self.loss_function(self.forward_model(*input_data), y_true)
+
+    def prepare_optimizer_closures(self, input_data, y_true):
+        """Bind closure-enabled parameters to this batch's fixed objective.
+
+        Trial evaluations preserve forward-model intermediates used by analytical
+        updates. Each optimizer receives exact derivatives of the data-fitting
+        objective, independent of the update directions supplied by the algorithm.
+        """
+        for parameter in self.parameter_group.get_all_reconstruct_parameters():
+            if (not parameter.optimization_enabled(self.current_epoch)
+                    or not parameter.uses_optimizer_closure
+                    or parameter.optimizer_closure is not None):
+                continue
+            if dist.is_initialized():
+                raise NotImplementedError(
+                    "Automatic optimizer closures currently require a single process. "
+                    "Supply a custom optimizer_closure to define distributed loss and gradients."
+                )
+
+            def objective():
+                model = self.forward_model
+                intermediates = getattr(model, "intermediate_variables", None)
+                try:
+                    return self.compute_optimizer_loss(input_data, y_true)
+                finally:
+                    if hasattr(model, "intermediate_variables"):
+                        model.intermediate_variables = intermediates
+
+            parameter.make_optimizer_closure(objective, store=True)
+
+    def clear_optimizer_closures(self):
+        """Release the batch data retained by automatic closures."""
+        for parameter in self.parameter_group.get_all_reconstruct_parameters():
+            parameter._automatic_optimizer_closure = None
+
     def run_pre_run_hooks(self) -> None:
         pass
 
@@ -385,10 +424,16 @@ class IterativeReconstructor(Reconstructor):
             for batch_data in self.dataloader:
                 input_data, y_true = self.prepare_batch_data(batch_data)
                 self.run_pre_update_hooks()
-                self.run_minibatch(input_data, y_true)
+                try:
+                    self.run_minibatch(input_data, y_true)
+                finally:
+                    self.clear_optimizer_closures()
                 self.run_post_update_hooks()
                 self.current_minibatch += 1
-            self.run_post_epoch_hooks()
+            try:
+                self.run_post_epoch_hooks()
+            finally:
+                self.clear_optimizer_closures()
             self.step_all_step_size_schedulers()
             self.loss_tracker.conclude_epoch(epoch=self.current_epoch)
             self.loss_tracker.print_latest()
@@ -684,6 +729,12 @@ class AnalyticalIterativePtychographyReconstructor(
             shift_operator=self.options.forward_model_options.shift_operator,
             diffraction_pattern_blur_sigma=self.options.forward_model_options.diffraction_pattern_blur_sigma,
         )
+
+    def compute_optimizer_loss(self, input_data, y_true):
+        """Use the masked mean squared amplitude residual for projection algorithms."""
+        y_pred = self.forward_model(*input_data)
+        mask = self.get_constrained_pixel_mask(y_true)
+        return MSELossOfSqrt()(y_pred[mask], y_true[mask])
 
     def stabilize_object_projection_denominator(self, denominator: Tensor) -> Tensor:
         """Floor full-object projection weights at 5% of their maximum.

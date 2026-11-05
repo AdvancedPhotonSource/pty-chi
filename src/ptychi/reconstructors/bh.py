@@ -87,6 +87,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
             raise NotImplementedError("The BH does not support multiple OPR modes yet.")
 
     def run_minibatch(self, input_data, y_true, *args, **kwargs):
+        self.prepare_optimizer_closures(input_data, y_true)
         (delta_o, delta_p, delta_pos), y_pred = self.compute_updates(*input_data, y_true)
         self.apply_updates(delta_o, delta_p, delta_pos)
         self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
@@ -120,15 +121,15 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         if delta_o is not None:
             object_.set_grad(-delta_o)
-            object_.optimizer.step()
+            object_.step_optimizer()
 
         if delta_p is not None:
             probe.set_grad(-delta_p)
-            probe.optimizer.step()
+            probe.step_optimizer()
 
         if delta_pos is not None:
             probe_positions.set_grad(-delta_pos)
-            probe_positions.optimizer.step()
+            probe_positions.step_optimizer(clip_update=False)
 
         if self.parameter_group.real_space_scaling.optimization_enabled(self.current_epoch):
             self.parameter_group.real_space_scaling.step_optimizer()

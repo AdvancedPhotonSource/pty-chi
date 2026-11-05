@@ -295,11 +295,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         return self.momentum_accelerator
 
     def check_inputs(self, *args, **kwargs):
-        if self.parameter_group.opr_mode_weights.optimizer is not None:
-            logger.warning(
-                "Selecting optimizer for OPRModeWeights is not supported for "
-                "LSQMLReconstructor and will be disregarded."
-            )
         if (
             self.parameter_group.opr_mode_weights.n_opr_modes > 1
             and self.parameter_group.opr_mode_weights.data[:, 1:].abs().max() < 1e-9
@@ -313,6 +308,12 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         super().build()
         self.build_cached_variables()
         self.build_noise_model()
+
+    def compute_optimizer_loss(self, input_data, y_true):
+        """Evaluate the masked likelihood of the configured noise model."""
+        y_pred = self.forward_model(*input_data)
+        mask = self.get_constrained_pixel_mask(y_true)
+        return self.noise_model.nll(y_pred[mask], y_true[mask])
 
     def build_loss_tracker(self):
         f = (
@@ -973,7 +974,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             alpha_p_i = alpha_p_i / len(self.dataloader)
         alpha_p_mean = torch.mean(alpha_p_i)
         self.parameter_group.probe.set_grad(-delta_p_hat * alpha_p_mean, slicer=(0, mode_slicer))
-        self.parameter_group.probe.optimizer.step()
+        self.parameter_group.probe.step_optimizer()
 
     @timer()
     def _apply_probe_momentum(
@@ -1447,7 +1448,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         if delta_o_hat is None:
             delta_o_hat = -self.parameter_group.object.get_grad()
         self.parameter_group.object.set_grad(-alpha_o_mean_all_slices[:, None, None] * delta_o_hat)
-        self.parameter_group.object.optimizer.step()
+        self.parameter_group.object.step_optimizer()
 
     @timer()
     def _apply_object_momentum(
@@ -1637,6 +1638,10 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 # each slice to use as the step size for updating the object.
                 alpha_object_all_slices = self._calculate_final_object_update_step_size()
                 delta_o_hat_full = self._precondition_accumulated_object_update_direction()
+                if self.parameter_group.object.uses_optimizer_closure:
+                    indices = torch.arange(len(self.dataset), device="cpu")
+                    input_data, y_true = self.prepare_batch_data(self.dataset[indices])
+                    self.prepare_optimizer_closures(input_data, y_true)
                 self._apply_object_update(alpha_object_all_slices, delta_o_hat_full)
 
                 if self.options.momentum_acceleration_gain > 0:
@@ -1658,6 +1663,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     @timer()
     def run_minibatch(self, input_data, y_true, *args, **kwargs) -> None:
+        self.prepare_optimizer_closures(input_data, y_true)
         indices = input_data[0]
         self.indices.append(indices)
         y_pred = self.forward_model(*input_data)
@@ -1693,6 +1699,7 @@ class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
         input_data[0] = indices
         
         y_true = self.get_chunk_of_current_rank(y_true)
+        self.prepare_optimizer_closures(input_data, y_true)
         
         y_pred = self.forward_model(*input_data)
         

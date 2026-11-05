@@ -60,6 +60,13 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.options: DMReconstructorOptions = self.options
 
     def check_inputs(self, *args, **kwargs):
+        for name in ('object', 'probe', 'opr_mode_weights'):
+            parameter = getattr(self.parameter_group, name)
+            if parameter.optimizable and parameter.uses_optimizer_closure:
+                raise ValueError(
+                    f"{type(self).__name__} does not step an optimizer for {name}; "
+                    "optimizer closures require an optimizer-based update for that parameter."
+                )
         if self.parameter_group.object.is_multislice:
             raise NotImplementedError("DMReconstructor only supports 2D objects.")
         if self.parameter_group.probe.has_multiple_opr_modes:
@@ -97,6 +104,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     @timer()
     def run_minibatch(self, input_data, y_true, *args, **kwargs):
+        self.prepare_optimizer_closures(input_data, y_true)
         dm_error_squared = self.compute_updates(y_true)
         self.loss_tracker.update_batch_loss(loss=dm_error_squared.sqrt())
 

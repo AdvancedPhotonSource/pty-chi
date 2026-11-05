@@ -572,8 +572,6 @@ class ObjectOptions(ParameterOptions):
                     "`SPECIFIED`."
                 )
 
-        if self.optimizer == enums.Optimizers.LBFGS and "Autodiff" not in options.__class__.__name__:
-            raise ValueError("LBFGS optimizer is currently only supported for Autodiff reconstructors.")
 
 @dataclass
 class ProbePowerConstraintOptions(FeatureOptions):
@@ -798,8 +796,6 @@ class ProbeOptions(ParameterOptions):
                 "are both enabled, which may lead to unexpected results. Ambiguity removal is executed "
                 "after power constraint; as such, it may deviate the probe power from the desired value."
             )
-        if self.optimizer == enums.Optimizers.LBFGS and "Autodiff" not in options.__class__.__name__:
-            raise ValueError("LBFGS optimizer is currently only supported for Autodiff reconstructors.")
 
     def get_non_data_fields(self) -> dict:
         d = super().get_non_data_fields()
@@ -995,8 +991,6 @@ class ProbePositionOptions(ParameterOptions):
         super().check(options)
         self.affine_transform_constraint.check(options)
         
-        if self.optimizer == enums.Optimizers.LBFGS and "Autodiff" not in options.__class__.__name__:
-            raise ValueError("LBFGS optimizer is currently only supported for Autodiff reconstructors.")
 
 
 @dataclass
@@ -1014,8 +1008,6 @@ class RealSpaceScalingOptions(ParameterOptions):
         super().check(options)
         if self.initial_guess <= 0:
             raise ValueError("`real_space_scaling_options.initial_guess` must be positive.")
-        if self.optimizer == enums.Optimizers.LBFGS and "Autodiff" not in options.__class__.__name__:
-            raise ValueError("LBFGS optimizer is currently only supported for Autodiff reconstructors.")
         affine_constraint = options.probe_position_options.affine_transform_constraint
         if (
             self.optimizable
@@ -1141,8 +1133,6 @@ class OPRModeWeightsOptions(ParameterOptions):
                     "optimize_intensity_variation and optimize_eigenmode_weights "
                     "should be set to True."
                 )
-        if self.optimizer == enums.Optimizers.LBFGS and "Autodiff" not in options.__class__.__name__:
-            raise ValueError("LBFGS optimizer is currently only supported for Autodiff reconstructors.")
 
     def get_non_data_fields(self) -> dict:
         d = super().get_non_data_fields()
