@@ -150,7 +150,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                     w = self.parameter_group.probe.options.alpha * (z_max - z)
                     z_plus_w = torch.swapaxes(z + w, 0, 1)
                     
-                    delta_exwv = self.adjoint_shift_probe_update_direction(indices, delta_exwv_i, first_mode_only=True)
+                    delta_exwv = self.adjoint_shift_probe_update_direction(indices, delta_exwv_i)
                     delta_exwv = torch.sum(delta_exwv, 0)
                     delta_exwv = torch.reshape( delta_exwv, (n_scpm, rc)).T
                     
@@ -185,7 +185,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                     delta_p_i = step_weight * delta_exwv_i # get delta p at each position
                     
                     # Undo subpixel shift in probe update directions.
-                    delta_p_i = self.adjoint_shift_probe_update_direction(indices, delta_p_i, first_mode_only=True)
+                    delta_p_i = self.adjoint_shift_probe_update_direction(indices, delta_p_i)
                         
                 # Calculate and apply opr mode updates
                 if self.parameter_group.opr_mode_weights.optimization_enabled(self.current_epoch):
