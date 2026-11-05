@@ -107,6 +107,14 @@ class OPRModeWeights(dsbase.ReconstructParameter):
         super().step_optimizer(*args, **kwargs)
         self.apply_primary_mode_weight_floor()
 
+    def process_optimizer_gradients(self) -> None:
+        if self.tensor.grad is None:
+            return
+        if not self.optimize_intensity_variation:
+            self.tensor.grad[:, 0] = 0
+        if not self.optimize_eigenmode_weights:
+            self.tensor.grad[:, 1:] = 0
+
     @timer()
     def update_variable_probe(
         self,

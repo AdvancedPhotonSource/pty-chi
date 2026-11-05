@@ -295,11 +295,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         return self.momentum_accelerator
 
     def check_inputs(self, *args, **kwargs):
-        if self.parameter_group.opr_mode_weights.optimizer is not None:
-            logger.warning(
-                "Selecting optimizer for OPRModeWeights is not supported for "
-                "LSQMLReconstructor and will be disregarded."
-            )
         if (
             self.parameter_group.opr_mode_weights.n_opr_modes > 1
             and self.parameter_group.opr_mode_weights.data[:, 1:].abs().max() < 1e-9
@@ -313,6 +308,12 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         super().build()
         self.build_cached_variables()
         self.build_noise_model()
+
+    def compute_optimizer_loss(self, input_data, y_true):
+        """Evaluate the masked likelihood of the configured noise model."""
+        y_pred = self.forward_model(*input_data)
+        mask = self.get_constrained_pixel_mask(y_true)
+        return self.noise_model.nll(y_pred[mask], y_true[mask])
 
     def build_loss_tracker(self):
         f = (
@@ -382,7 +383,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.alpha_psi_far = self.get_psi_far_step_size(y_pred, y_true, indices)
         psi_far = psi_far_0 - self.alpha_psi_far.view(-1, 1, 1, 1) * dl_dpsi_far  # Eq. 14
 
-        psi_opt = self.forward_model.free_space_propagator.propagate_backward(psi_far)
+        psi_opt = self.propagate_detector_wave_to_exit_adjoint(psi_far)
         return psi_opt
 
     @timer()
@@ -431,6 +432,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         self._initialize_object_gradient()
         self.parameter_group.probe.initialize_grad()
         self.parameter_group.probe_positions.initialize_grad()
+        self.parameter_group.real_space_scaling.initialize_grad()
         self.parameter_group.opr_mode_weights.initialize_grad()
         self._initialize_object_step_size_buffer()
         self._initialize_probe_step_size_buffer()
@@ -518,6 +520,19 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                     apply_updates=False,
                 )
 
+            if (
+                self.parameter_group.real_space_scaling.optimization_enabled(self.current_epoch)
+                and i_slice == self.parameter_group.probe_positions.get_slice_for_correction(
+                    object_.n_slices
+                )
+            ):
+                self.update_real_space_scaling(
+                    chi,
+                    obj_patches[:, i_slice : i_slice + 1],
+                    self.forward_model.intermediate_variables.shifted_unique_probes[i_slice],
+                    apply_updates=False,
+                )
+
             # Set chi to conjugate-modulated wavefield.
             chi = delta_p_i_before_adj_shift
 
@@ -554,6 +569,14 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             self.parameter_group.probe_positions.step_optimizer(
                 clip_update=self.parameter_group.probe_positions.options.momentum_acceleration_gain <= 0
             )
+
+        real_space_scaling = getattr(self.parameter_group, "real_space_scaling", None)
+        if (
+            real_space_scaling is not None
+            and real_space_scaling.optimization_enabled(self.current_epoch)
+        ):
+            real_space_scaling.step_optimizer()
+            real_space_scaling.post_update_hook()
             
         # Update OPR modes and weights.
         if self.parameter_group.opr_mode_weights.optimization_enabled(self.current_epoch):
@@ -951,7 +974,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             alpha_p_i = alpha_p_i / len(self.dataloader)
         alpha_p_mean = torch.mean(alpha_p_i)
         self.parameter_group.probe.set_grad(-delta_p_hat * alpha_p_mean, slicer=(0, mode_slicer))
-        self.parameter_group.probe.optimizer.step()
+        self.parameter_group.probe.step_optimizer()
 
     @timer()
     def _apply_probe_momentum(
@@ -1425,7 +1448,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         if delta_o_hat is None:
             delta_o_hat = -self.parameter_group.object.get_grad()
         self.parameter_group.object.set_grad(-alpha_o_mean_all_slices[:, None, None] * delta_o_hat)
-        self.parameter_group.object.optimizer.step()
+        self.parameter_group.object.step_optimizer()
 
     @timer()
     def _apply_object_momentum(
@@ -1615,6 +1638,10 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 # each slice to use as the step size for updating the object.
                 alpha_object_all_slices = self._calculate_final_object_update_step_size()
                 delta_o_hat_full = self._precondition_accumulated_object_update_direction()
+                if self.parameter_group.object.uses_optimizer_closure:
+                    indices = torch.arange(len(self.dataset), device="cpu")
+                    input_data, y_true = self.prepare_batch_data(self.dataset[indices])
+                    self.prepare_optimizer_closures(input_data, y_true)
                 self._apply_object_update(alpha_object_all_slices, delta_o_hat_full)
 
                 if self.options.momentum_acceleration_gain > 0:
@@ -1636,6 +1663,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     @timer()
     def run_minibatch(self, input_data, y_true, *args, **kwargs) -> None:
+        self.prepare_optimizer_closures(input_data, y_true)
         indices = input_data[0]
         self.indices.append(indices)
         y_pred = self.forward_model(*input_data)
@@ -1671,6 +1699,7 @@ class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
         input_data[0] = indices
         
         y_true = self.get_chunk_of_current_rank(y_true)
+        self.prepare_optimizer_closures(input_data, y_true)
         
         y_pred = self.forward_model(*input_data)
         

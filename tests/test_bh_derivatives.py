@@ -52,7 +52,10 @@ def test_gradientF_matches_autograd(reconstructor, random_complex, data, n_modes
     else:
         propagator = SimpleNamespace(propagate_backward=lambda value: value)
         field = wavefield
-    reconstructor.forward_model = SimpleNamespace(free_space_propagator=propagator)
+    reconstructor.forward_model = SimpleNamespace(
+        free_space_propagator=propagator,
+        apply_real_space_scaling_adjoint=lambda value: value,
+    )
 
     loss = amplitude_loss(field, data, reconstructor.current_constrained_pixel_mask)
     expected = torch.autograd.grad(loss, wavefield)[0]

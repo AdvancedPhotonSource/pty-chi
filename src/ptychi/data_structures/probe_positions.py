@@ -256,7 +256,7 @@ class ProbePositions(dsbase.ReconstructParameter):
             limit_user = None
         data0 = self.data
             
-        self.optimizer.step()
+        super().step_optimizer(*args, **kwargs)
         
         if not self.options.correction_options.clip_update_magnitude_by_mad and limit_user is None:
             return

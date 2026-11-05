@@ -102,7 +102,14 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
         This function calculates the regularization terms and backpropagates them. Since the gradients
         of the parameters haven't been zeroed, the regularizers' gradients will be added to them.
         """
-        reg = super().apply_regularizers()
+        reg = self.compute_regularization_loss()
+        if reg.requires_grad:
+            reg.backward()
+        return reg
+
+    def compute_regularization_loss(self):
+        """Return the differentiable regularization objective at current parameters."""
+        reg = torch.tensor(0.0)
 
         object_ = self.parameter_group.object
         if object_.options.l1_norm_constraint.is_enabled_on_this_epoch(self.current_epoch):
@@ -118,10 +125,13 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
             obj_data = object_.tensor.data[..., 0] + 1j * object_.tensor.data[..., 1]
             reg = reg + object_.options.total_variation.weight * metrics.TotalVariationLoss(reduction="mean")(obj_data)
             
-        if reg.requires_grad:
-            reg.backward()
         return reg
-    
+
+    def compute_optimizer_loss(self, input_data, y_true):
+        y_pred = self.forward_model(*input_data)
+        mask = self.get_constrained_pixel_mask(y_true)
+        return self.loss_function(y_pred[mask], y_true[mask]) + self.compute_regularization_loss()
+
     def get_retain_graph(self) -> bool:
         """Determines whether `loss.backward()` should have `retain_graph=True`.
         Since regularizers' gradients are computed after `loss.backward()`, we need to

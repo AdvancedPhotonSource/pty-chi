@@ -19,6 +19,7 @@ import ptychi.forward_models as fm
 import ptychi.api.enums as enums
 import ptychi.io_handles as io
 import ptychi.image_proc as ip
+from ptychi.metrics import MSELossOfSqrt
 from ptychi.parallel import MultiprocessMixin
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
@@ -354,6 +355,44 @@ class IterativeReconstructor(Reconstructor):
         """
         raise NotImplementedError
 
+    def compute_optimizer_loss(self, input_data, y_true):
+        """Evaluate the scalar objective used by automatic optimizer closures."""
+        return self.loss_function(self.forward_model(*input_data), y_true)
+
+    def prepare_optimizer_closures(self, input_data, y_true):
+        """Bind closure-enabled parameters to this batch's fixed objective.
+
+        Trial evaluations preserve forward-model intermediates used by analytical
+        updates. Each optimizer receives exact derivatives of the data-fitting
+        objective, independent of the update directions supplied by the algorithm.
+        """
+        for parameter in self.parameter_group.get_all_reconstruct_parameters():
+            if (not parameter.optimization_enabled(self.current_epoch)
+                    or not parameter.uses_optimizer_closure
+                    or parameter.optimizer_closure is not None):
+                continue
+            if dist.is_initialized():
+                raise NotImplementedError(
+                    "Automatic optimizer closures currently require a single process. "
+                    "Supply a custom optimizer_closure to define distributed loss and gradients."
+                )
+
+            def objective():
+                model = self.forward_model
+                intermediates = getattr(model, "intermediate_variables", None)
+                try:
+                    return self.compute_optimizer_loss(input_data, y_true)
+                finally:
+                    if hasattr(model, "intermediate_variables"):
+                        model.intermediate_variables = intermediates
+
+            parameter.make_optimizer_closure(objective, store=True)
+
+    def clear_optimizer_closures(self):
+        """Release the batch data retained by automatic closures."""
+        for parameter in self.parameter_group.get_all_reconstruct_parameters():
+            parameter._automatic_optimizer_closure = None
+
     def run_pre_run_hooks(self) -> None:
         pass
 
@@ -385,10 +424,16 @@ class IterativeReconstructor(Reconstructor):
             for batch_data in self.dataloader:
                 input_data, y_true = self.prepare_batch_data(batch_data)
                 self.run_pre_update_hooks()
-                self.run_minibatch(input_data, y_true)
+                try:
+                    self.run_minibatch(input_data, y_true)
+                finally:
+                    self.clear_optimizer_closures()
                 self.run_post_update_hooks()
                 self.current_minibatch += 1
-            self.run_post_epoch_hooks()
+            try:
+                self.run_post_epoch_hooks()
+            finally:
+                self.clear_optimizer_closures()
             self.step_all_step_size_schedulers()
             self.loss_tracker.conclude_epoch(epoch=self.current_epoch)
             self.loss_tracker.print_latest()
@@ -685,6 +730,12 @@ class AnalyticalIterativePtychographyReconstructor(
             diffraction_pattern_blur_sigma=self.options.forward_model_options.diffraction_pattern_blur_sigma,
         )
 
+    def compute_optimizer_loss(self, input_data, y_true):
+        """Use the masked mean squared amplitude residual for projection algorithms."""
+        y_pred = self.forward_model(*input_data)
+        mask = self.get_constrained_pixel_mask(y_true)
+        return MSELossOfSqrt()(y_pred[mask], y_true[mask])
+
     def stabilize_object_projection_denominator(self, denominator: Tensor) -> Tensor:
         """Floor full-object projection weights at 5% of their maximum.
 
@@ -757,6 +808,43 @@ class AnalyticalIterativePtychographyReconstructor(
         if constrained_pixel_mask is not None:
             return torch.where(constrained_pixel_mask[:, None], psi_prime, psi)
         return psi_prime
+
+    @timer()
+    def propagate_exit_wave_to_detector(self, psi: Tensor) -> Tensor:
+        """Apply real-space scaling and propagate an exit wave to the detector.
+
+        Parameters
+        ----------
+        psi : Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``.
+
+        Returns
+        -------
+        Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``
+            at the detector plane.
+        """
+        psi = self.forward_model.apply_real_space_scaling(psi)
+        return self.forward_model.free_space_propagator.propagate_forward(psi)
+
+    @timer()
+    def propagate_detector_wave_to_exit_adjoint(self, psi_far: Tensor) -> Tensor:
+        """Apply the detector-to-exit-wave adjoint propagation.
+
+        Parameters
+        ----------
+        psi_far : Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``
+            at the detector plane.
+
+        Returns
+        -------
+        Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``
+            at the exit plane.
+        """
+        psi = self.forward_model.free_space_propagator.propagate_backward(psi_far)
+        return self.forward_model.apply_real_space_scaling_adjoint(psi)
         
     @timer()
     def adjoint_shift_probe_update_direction(self, indices, delta_p, first_mode_only=None):
@@ -805,3 +893,34 @@ class AnalyticalIterativePtychographyReconstructor(
         else:
             delta_p = delta_p_shifted.reshape(orig_shape)
         return delta_p
+
+    @timer()
+    def update_real_space_scaling(
+        self,
+        chi: Tensor,
+        obj_patches: Tensor,
+        unique_probes: Tensor,
+        apply_updates: bool = True,
+    ) -> None:
+        """Update the global real-space scaling parameter.
+
+        Parameters
+        ----------
+        chi : Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``
+            giving the current exit-wave update.
+        obj_patches : Tensor
+            A complex tensor of shape ``(batch_size, n_slices, h, w)``.
+        unique_probes : Tensor
+            A complex tensor of shape ``(batch_size, n_probe_modes, h, w)``
+            giving the incident wavefields used for the update.
+        apply_updates : bool
+            If True, apply the optimizer step immediately. Otherwise, only
+            populate the gradient tensor of shape ``(1,)``.
+        """
+        scaling = self.parameter_group.real_space_scaling
+        delta_scale = scaling.get_update(chi, obj_patches, unique_probes)
+        scaling.set_grad(-delta_scale)
+        if apply_updates:
+            scaling.step_optimizer()
+            scaling.post_update_hook()
