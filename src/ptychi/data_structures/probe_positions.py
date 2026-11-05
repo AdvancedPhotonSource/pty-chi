@@ -193,13 +193,13 @@ class ProbePositions(dsbase.ReconstructParameter):
         
         scale, asymmetry, rotation, shear = pmath.decompose_2x2_affine_transform_matrix(a_mat)
         if enums.AffineDegreesOfFreedom.SCALE not in dofs:
-            scale = 1.0
+            scale = torch.ones_like(scale)
         if enums.AffineDegreesOfFreedom.ASYMMETRY not in dofs:
-            asymmetry = 0.0
+            asymmetry = torch.zeros_like(asymmetry)
         if enums.AffineDegreesOfFreedom.ROTATION not in dofs:
-            rotation = 0.0
+            rotation = torch.zeros_like(rotation)
         if enums.AffineDegreesOfFreedom.SHEAR not in dofs:
-            shear = 0.0
+            shear = torch.zeros_like(shear)
         
         a_mat = pmath.compose_2x2_affine_transform_matrix(
             scale, asymmetry, rotation, shear
