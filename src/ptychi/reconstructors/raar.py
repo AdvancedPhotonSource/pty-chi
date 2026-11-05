@@ -221,7 +221,7 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
             indices, always_return_probe_batch=True
         )
         shifted_probe = self.forward_model.shift_unique_probes(
-            indices, shifted_probe, first_mode_only=True
+            indices, shifted_probe
         )
         numerator.copy_(
             numerator + self.forward_model.place_object_patches_on_probe_grid(
@@ -305,7 +305,7 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
             indices, always_return_probe_batch=True
         )
         shifted_probe = self.forward_model.shift_unique_probes(
-            indices, shifted_probe, first_mode_only=True
+            indices, shifted_probe
         )
         return obj_patches[:, None] * shifted_probe
 
@@ -353,7 +353,7 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         delta_p_i = obj_patches.conj() * exit_wave_update
         delta_p_i = self.adjoint_shift_probe_update_direction(
-            indices, delta_p_i, first_mode_only=True
+            indices, delta_p_i
         )
         delta_p_hat = delta_p_i.mean(0)
         opr_mode_weights.update_variable_probe(
@@ -397,10 +397,10 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
             numerator_update = obj_patches.conj() * self.psi[start_pt:end_pt]
             denominator_update = obj_patches.abs() ** 2
             numerator_update = self.adjoint_shift_probe_update_direction(
-                indices, numerator_update, first_mode_only=True
+                indices, numerator_update
             )
             denominator_update = self.adjoint_shift_probe_update_direction(
-                indices, denominator_update, first_mode_only=True
+                indices, denominator_update
             )
             numerator += numerator_update.sum(0)
             denominator += denominator_update.sum(0)
@@ -444,7 +444,7 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
     ) -> Tensor:
         probe_positions = self.parameter_group.probe_positions
         probe = self.forward_model.get_unique_probes(indices, always_return_probe_batch=True)
-        probe = self.forward_model.shift_unique_probes(indices, probe, first_mode_only=True)
+        probe = self.forward_model.shift_unique_probes(indices, probe)
         delta_pos = probe_positions.position_correction.get_update(
             chi,
             obj_patches,

@@ -47,7 +47,7 @@ def test_probe_shift_adjoint_uses_forward_padding(method, pad, first_mode_only):
     reconstructor = SimpleNamespace(parameter_group=parameter_group, forward_model=forward_model)
     indices = torch.tensor([2, 0], device="cpu")
     generator = torch.Generator(device="cpu").manual_seed(78)
-    shape = (2, 3 if first_mode_only else 1, 5, 6)
+    shape = (2, 3, 5, 6)
     probe = torch.randn(
         shape, dtype=torch.complex128, device="cpu", generator=generator, requires_grad=True
     )

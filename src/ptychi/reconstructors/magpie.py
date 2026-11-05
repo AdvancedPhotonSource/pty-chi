@@ -306,7 +306,7 @@ class MAGPIEReconstructor(PIEReconstructor):
         make it approximate; descent of the original objective is not assured.
         """
         corrections = self.adjoint_shift_probe_update_direction(
-            indices, probe_local - probe_old, first_mode_only=True
+            indices, probe_local - probe_old
         )
         # A singleton consensus is exactly its adjoint correction, without reduction roundoff.
         if corrections.shape[0] == 1:

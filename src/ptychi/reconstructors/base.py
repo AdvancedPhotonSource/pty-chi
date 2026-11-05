@@ -679,6 +679,7 @@ class AnalyticalIterativePtychographyReconstructor(
             wavelength_m=self.dataset.wavelength_m,
             free_space_propagation_distance_m=self.dataset.free_space_propagation_distance_m,
             pad_for_shift=self.options.forward_model_options.pad_for_shift,
+            subpixel_shift_all_probe_modes=self.options.forward_model_options.subpixel_shift_all_probe_modes,
             low_memory_mode=self.options.forward_model_options.low_memory_mode,
             shift_operator=self.options.forward_model_options.shift_operator,
             diffraction_pattern_blur_sigma=self.options.forward_model_options.diffraction_pattern_blur_sigma,
@@ -758,7 +759,7 @@ class AnalyticalIterativePtychographyReconstructor(
         return psi_prime
         
     @timer()
-    def adjoint_shift_probe_update_direction(self, indices, delta_p, first_mode_only=False):
+    def adjoint_shift_probe_update_direction(self, indices, delta_p, first_mode_only=None):
         """
         Apply the adjoint operator of the subpixel shift to the probe done in forward model.
         
@@ -768,8 +769,10 @@ class AnalyticalIterativePtychographyReconstructor(
             Indices of diffraction patterns in the current batch.
         delta_p : Tensor
             A (batch_size, n_probe_modes, h, w) tensor giving the probe update direction.
-        first_mode_only : bool
-            If True, only the first mode is shifted.
+        first_mode_only : bool, optional
+            If True, only the first mode is shifted; if False, all modes are shifted.
+            If None, this is determined by `self.forward_model.subpixel_shift_all_probe_modes`
+            so that the adjoint matches the forward model.
 
         Returns
         -------
@@ -778,6 +781,8 @@ class AnalyticalIterativePtychographyReconstructor(
         """
         if not getattr(self.forward_model, "apply_subpixel_shifts_on_probe", True):
             return delta_p
+        if first_mode_only is None:
+            first_mode_only = not self.forward_model.subpixel_shift_all_probe_modes
         orig_shape = delta_p.shape
         fractional_shifts = self.forward_model.get_probe_grid_position_data()[2][indices]
         
@@ -785,6 +790,7 @@ class AnalyticalIterativePtychographyReconstructor(
             delta_p_to_shift = delta_p[..., 0, :, :]
         else:
             delta_p_to_shift = delta_p.reshape(delta_p.shape[0] * delta_p.shape[1], *delta_p.shape[2:])
+            fractional_shifts = fractional_shifts.repeat_interleave(delta_p.shape[1], dim=0)
         
         delta_p_shifted = ip.shift_images(
             delta_p_to_shift, 

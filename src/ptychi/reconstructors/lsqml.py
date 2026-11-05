@@ -465,7 +465,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
                 chi, obj_patches=obj_patches, slice_index=i_slice, probe_mode_index=None
             )  # Eq. 24a
             delta_p_i = self.adjoint_shift_probe_update_direction(
-                indices, delta_p_i_before_adj_shift, first_mode_only=True
+                indices, delta_p_i_before_adj_shift
             )
             delta_p_hat = self._precondition_probe_update_direction(delta_p_i)  # Eq. 25a
             self._record_probe_gradient(delta_p_hat)

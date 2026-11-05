@@ -1135,6 +1135,14 @@ class ForwardModelOptions(Options):
     pad_for_shift: Optional[int] = 0
     """If not None, the image is padded with border values by this amount before shifting."""
     
+    subpixel_shift_all_probe_modes: bool = False
+    """If True, the subpixel part of each probe position is applied to all incoherent probe
+    modes. If False, only the first mode is shifted (as in PtychoShelves), so the other modes
+    sit at the nearest whole pixel, up to half a pixel away from the probe position. Enable
+    this for mixed-state reconstructions where modes beyond the first carry significant power.
+    Analytical reconstructors apply the matching adjoint shift to the probe update directions.
+    """
+    
     diffraction_pattern_blur_sigma: Optional[float] = None
     """If not None, simulated diffraction patterns are blurred with a Gaussian kernel of
     this sigma. This is useful to mitigate the effect of the detector's point spread function.
