@@ -64,6 +64,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     @timer()
     def run_minibatch(self, input_data, y_true, *args, **kwargs):
+        self.prepare_optimizer_closures(input_data, y_true)
         self.parameter_group.probe.initialize_grad()
         (delta_o, delta_p_i, delta_pos), y_pred = self.compute_updates(*input_data, y_true)
         self.apply_updates(delta_o, delta_p_i, delta_pos)
@@ -272,12 +273,12 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         if delta_o is not None:
             object_.set_grad(-delta_o)
-            object_.optimizer.step()
+            object_.step_optimizer()
 
         if delta_p_i is not None:
             mode_slicer = self.parameter_group.probe._get_probe_mode_slicer(None)
             self.parameter_group.probe.set_grad(-delta_p_i.mean(0), slicer=(0, mode_slicer))
-            self.parameter_group.probe.optimizer.step()
+            self.parameter_group.probe.step_optimizer()
 
         if delta_pos is not None:
             probe_positions.set_grad(-delta_pos)

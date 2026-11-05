@@ -199,6 +199,82 @@ delay probe updates until later:
     options.probe_options.optimization_plan.start = 5
 
 
+Optimizer closures
+------------------
+
+Parameters whose optimizer requires ``step(closure)`` receive an automatic
+closure for the current reconstruction batch. Options select optimizers through
+the serializable ``api.Optimizers`` enum. Registered first-order
+optimizers, including SGD and Adam, use the algorithm's existing update directions.
+Custom optimizer classes accepting an optional ``step(closure=None)`` argument
+receive an automatic closure by default. Their implementers can declare the class
+attribute ``requires_closure = False`` to use supplied gradients instead, or
+``requires_closure = True`` to explicitly request a closure. This declaration
+also applies to custom subclasses of built-in optimizers. Required closure
+arguments always receive a closure; optimizers without a closure argument are
+stepped normally.
+
+For example, enable a line search for probe positions in LSQML:
+
+.. code-block:: python
+
+    options = api.LSQMLOptions()
+    positions = options.probe_position_options
+    positions.optimizable = True
+    positions.optimizer = api.Optimizers.LBFGS
+    positions.optimizer_params = {"line_search_fn": "strong_wolfe", "max_iter": 10}
+
+Custom optimizer classes can be attached to an optimizable parameter after task
+construction. Rebuilding the optimizer initializes fresh optimizer and scheduler
+state:
+
+.. code-block:: python
+
+    parameter = task.reconstructor.parameter_group.probe_positions
+    parameter.optimizer_class = MyOptimizer
+    parameter.build_optimizer()
+
+Each trial evaluates the forward model at the optimizer's current parameter
+values and computes exact first derivatives with autograd, even in analytical
+reconstructors. Only that optimizer's gradients are replaced. LSQML uses its
+configured noise-model likelihood; PIE, BH, DM, and RAAR use a mean squared
+amplitude residual. Detector masks and intensity exclusions apply. Autodiff
+ptychography uses its configured loss and regularization terms. The displayed
+loss metric does not select the closure objective.
+
+A custom closure can be supplied to the ``ReconstructParameter`` constructor,
+assigned to ``parameter.optimizer_closure`` after task construction, or passed
+as ``parameter.step_optimizer(closure=...)``. A per-step closure takes precedence
+over the stored closure, which takes precedence over the automatic one. For example:
+
+.. code-block:: python
+
+    parameter = task.reconstructor.parameter_group.probe_positions
+
+    def closure():
+        parameter.optimizer.zero_grad()
+        loss = compute_my_objective()  # Reevaluate using current parameter values.
+        loss.backward(inputs=[parameter.tensor])
+        return loss
+
+    parameter.optimizer_closure = closure
+
+Closures run with gradient recording enabled. Custom closures must return a
+scalar loss and populate the optimizer's gradients on each call. Optimizers
+that need differentiable gradients or Hessians can implement those calculations
+in a custom closure.
+
+Automatic closures currently support single-process execution. Compact LSQML
+object updates evaluate the full dataset at the end of the epoch, which can
+require more memory than a minibatch update. Other closures evaluate the current
+batch. Post-step clipping, constraints, and algorithm-specific momentum can
+modify the accepted step, so a line search does not guarantee a decrease after
+those operations or in the full-dataset loss. DM and RAAR use direct projections
+for object and probe updates; closure optimizers are supported only for parameters
+that those algorithms update through an optimizer. Unsupported selections raise
+an error.
+
+
 Independent object and probe pixel sizes
 ----------------------------------------
 
