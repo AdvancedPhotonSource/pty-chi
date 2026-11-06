@@ -173,6 +173,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         low_memory_mode: bool = False,
         shift_operator: ShiftOperators = ShiftOperators.AUTO,
         *args,
+        detector_response_map: Optional[tuple[Tensor, Tensor]] = None,
         **kwargs,
     ) -> None:
         """
@@ -217,12 +218,23 @@ class PlanarPtychographyForwardModel(ForwardModel):
         shift_operator : ShiftOperators
             AUTO selects full-object periodic sampling for near-field illumination
             exceeding 80% of both object dimensions on the probe grid.
+        detector_response_map : tuple[Tensor, Tensor], optional
+            Shared (H, W) multiplier and offset in the same pixel ordering as the
+            internal diffraction data. After cropping and blur, predicted intensity
+            is multiplied by the dimensionless multiplier and the offset is added
+            in measured-intensity units.
         """
         super().__init__(
             parameter_group, retain_intermediates=retain_intermediates, detector_size=detector_size, 
             *args, **kwargs
         )
         self.low_mem_mode = low_memory_mode
+        multiplier, offset = (None, None) if detector_response_map is None else detector_response_map
+        if multiplier is not None:
+            device = parameter_group.object.data.device
+            multiplier, offset = multiplier.to(device), offset.to(device)
+        self.register_buffer("detector_response_multiplier", multiplier)
+        self.register_buffer("detector_response_offset", offset)
 
         # This step is essential as it sets the variables to be attributes of
         # the forward modelobject. Only with this can these buffers be copied
@@ -983,6 +995,12 @@ class PlanarPtychographyForwardModel(ForwardModel):
         )
         return y
 
+    def apply_detector_response(self, y: Tensor) -> Tensor:
+        """Apply the shared affine detector response to detector-sized intensities."""
+        if self.detector_response_multiplier is None:
+            return y
+        return y * self.detector_response_multiplier + self.detector_response_offset
+
     @timer()
     def forward(self, indices: Tensor, return_object_patches: bool = False) -> Tensor:
         """
@@ -1020,6 +1038,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         
         y = self.conform_to_detector_size(y)
         y = self.blur_diffraction_patterns(y)
+        y = self.apply_detector_response(y)
 
         returns = [y]
         if return_object_patches:
@@ -1089,6 +1108,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
 
         y = self.conform_to_detector_size(y)
         y = self.blur_diffraction_patterns(y)
+        y = self.apply_detector_response(y)
 
         # `self.intermediate_variables.shifted_unique_probes` is now a list of `n_modes * n_slices`
         # tensors. We concatenate the modes for each slice so that it becomes a list of `n_slices`
