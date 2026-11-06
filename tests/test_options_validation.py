@@ -53,6 +53,26 @@ def test_assignment_validation_rejects_bad_types_and_enum_values():
         options.reconstructor_options.default_device = "not-a-device"
 
 
+@pytest.mark.parametrize("optimizer_class", [torch.optim.SGD, torch.optim.LBFGS])
+def test_optimizer_classes_are_rejected_by_options(optimizer_class):
+    with pytest.raises(ValidationError):
+        base.ParameterOptions(optimizer=optimizer_class)
+
+    options = api.LSQMLOptions()
+    with pytest.raises(ValidationError):
+        options.probe_position_options.optimizer = optimizer_class
+    with pytest.raises(ValidationError):
+        options.load_from_dict({"object_options": {"optimizer": optimizer_class}})
+
+
+@pytest.mark.parametrize("optimizer", list(api.Optimizers))
+def test_optimizer_options_json_round_trip(optimizer):
+    options = base.ParameterOptions(optimizer=optimizer)
+    serialized = json.loads(json.dumps(options.get_dict()))
+    restored = base.ParameterOptions().load_from_dict(serialized, strict=True)
+    assert restored.optimizer is optimizer
+
+
 def test_documented_ranges_are_validated():
     options = api.LSQMLOptions()
 

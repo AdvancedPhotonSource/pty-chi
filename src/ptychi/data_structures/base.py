@@ -12,6 +12,7 @@ from numpy import ndarray
 
 from ptychi.utils import to_tensor
 import ptychi.maps as maps
+import ptychi.api.enums as enums
 import ptychi.api.options.base as obase
 
 if TYPE_CHECKING:
@@ -101,6 +102,7 @@ class ReconstructParameter(Module):
         options: "api.options.base.ParameterOptions" = None,
         data_as_parameter: bool = True,
         build_optimizer: bool = True,
+        optimizer_closure: Optional[Callable[[], Tensor]] = None,
         *args,
         **kwargs,
     ) -> None:
@@ -118,6 +120,10 @@ class ReconstructParameter(Module):
             The name of the parameter.
         options : api.options.base.ParameterOptions, optional
             Options of the parameter.
+        optimizer_closure : callable, optional
+            Custom no-argument closure passed to ``optimizer.step``. It must
+            reevaluate the scalar objective and populate this optimizer's gradients.
+            It can also be assigned after construction; it overrides automatic closures.
         data_as_parameter : bool, optional
             Whether the data is stored as a torch.Parameter. In most cases this should be True,
             but for DIPObject, the data is not directly optimized so it should just be a buffer.
@@ -138,6 +144,8 @@ class ReconstructParameter(Module):
         if self.optimization_plan is None:
             raise ValueError("Optimization plan of {} is not specified.".format(self.name))
         self.optimizer_class = maps.get_optimizer_by_enum(self.options.optimizer)
+        self.optimizer_closure = optimizer_closure
+        self._automatic_optimizer_closure = None
 
         self.optimizer_params = (
             {} if self.options.optimizer_params is None else self.options.optimizer_params
@@ -407,6 +415,54 @@ class ReconstructParameter(Module):
         logger.debug(f"{self.name} optimization enabled at epoch {epoch}: {enabled}")
         return enabled
     
+    @property
+    def uses_optimizer_closure(self) -> bool:
+        """Whether stepping uses a custom closure or the optimizer's automatic policy."""
+        if self.optimizer is None:
+            return False
+        return (self.optimizer_closure is not None
+                or maps.get_optimizer_closure_mode(self.optimizer) != enums.OptimizerClosureModes.NONE)
+
+    def make_optimizer_closure(
+        self, objective: Callable[[], Tensor], *, store: bool = False,
+    ) -> Callable[[], Tensor]:
+        """Build a closure for a scalar objective at the current parameter values.
+
+        In LOSS mode, evaluate under no_grad and preserve all pending gradients.
+        Otherwise, recompute exact first derivatives for tensors owned by this
+        optimizer, preserving other parameters' gradients. The objective must
+        rebuild its graph on each gradient evaluation; optimizers needing
+        a differentiable gradient can supply their own ``optimizer_closure``.
+
+        If ``store`` is True, also save the returned callable as this parameter's
+        automatic optimizer closure. Defaults to returning the callable only.
+        """
+        mode = maps.get_optimizer_closure_mode(self.optimizer)
+
+        @torch.enable_grad()
+        def closure():
+            if mode == enums.OptimizerClosureModes.LOSS:
+                with torch.no_grad():
+                    return objective()
+            self.optimizer.zero_grad()
+            loss = objective()
+            parameters = [p for group in self.optimizer.param_groups for p in group["params"]]
+            gradients = (
+                torch.autograd.grad(loss, parameters, allow_unused=True)
+                if loss.requires_grad else [None] * len(parameters)
+            )
+            for parameter, gradient in zip(parameters, gradients):
+                parameter.grad = gradient
+            self.process_optimizer_gradients()
+            return loss
+        if store:
+            self._automatic_optimizer_closure = closure
+        return closure
+
+    def process_optimizer_gradients(self) -> None:
+        """Apply parameter-specific restrictions to automatic closure gradients."""
+        pass
+
     def step_optimizer(
         self, 
         limit: float = None,
@@ -414,6 +470,7 @@ class ReconstructParameter(Module):
         forward_model_args: list[Tensor] = None,
         target_data: Tensor = None,
         loss_function: Callable = None,
+        closure: Optional[Callable[[], Tensor]] = None,
     ):
         """Step the optimizer with gradient filled in. This function
         can optionally impose a limit on the magnitude of the update.
@@ -434,36 +491,26 @@ class ReconstructParameter(Module):
         loss_function : Callable, optional
             The loss function to use for the update. Required if the optimizer is a backtracking
             one that needs a closure function in its step method.
+        closure : callable, optional
+            Per-step override of the stored custom or automatic closure.
         """
-        closure = None
-        
-        # Check if the optimizer's step method requires a closure function.
-        requires_closure = False
-        p = inspect.signature(self.optimizer.step).parameters.get("closure", None)
-        if p is not None and p.default is inspect._empty:
-            requires_closure = True
-        
-        if requires_closure:
-            if (
-                forward_model is not None 
-                and forward_model_args is not None 
-                and loss_function is not None
-                and target_data is not None
-            ):
-                def closure():
-                    self.optimizer.zero_grad()
-                    output_data = forward_model(*forward_model_args)
-                    loss = loss_function(output_data, target_data)
-                    loss.backward()
-                    return loss
-            else:
-                if isinstance(self.optimizer, torch.optim.LBFGS):
-                    raise ValueError(
-                        f"{self.optimizer.__class__.__name__} requires a closure function "
-                        f"in its step method, which needs the forward model and loss "
-                        f"function to be provided."
-                    )
-        
+        closure = closure if closure is not None else self.optimizer_closure
+        use_closure = closure is not None or self.uses_optimizer_closure
+        if use_closure:
+            if closure is None and all(value is not None for value in (
+                forward_model, forward_model_args, loss_function, target_data
+            )):
+                closure = self.make_optimizer_closure(
+                    lambda: loss_function(forward_model(*forward_model_args), target_data)
+                )
+            if closure is None:
+                closure = self._automatic_optimizer_closure
+            if closure is None:
+                raise ValueError(
+                    f"{self.optimizer.__class__.__name__} for {self.name} needs an optimizer "
+                    "closure. Supply one or step within a reconstructor batch."
+                )
+
         if limit is not None and limit <= 0:
             raise ValueError("`limit` should either be None or a positive number.")
         if limit == torch.inf:
@@ -471,10 +518,15 @@ class ReconstructParameter(Module):
         if limit is not None:
             data0 = self.data
         
-        if requires_closure:
-            self.optimizer.step(closure)
+        if use_closure:
+            closure = torch.enable_grad()(closure)
+            argument = inspect.signature(self.optimizer.step).parameters.get("closure")
+            if argument is not None and argument.kind == inspect.Parameter.POSITIONAL_ONLY:
+                result = self.optimizer.step(closure)
+            else:
+                result = self.optimizer.step(closure=closure)
         else:
-            self.optimizer.step()
+            result = self.optimizer.step()
         
         if limit is not None:
             data = self.data
@@ -482,7 +534,9 @@ class ReconstructParameter(Module):
             update_mag = dx.abs()
             exceed_mask = update_mag > limit
             dx[exceed_mask] = dx[exceed_mask] * limit / update_mag[exceed_mask]
-            self.set_data(data0 + dx)
+            with torch.no_grad():
+                self.set_data(data0 + dx)
+        return result
 
 
 class DummyParameter(ReconstructParameter):

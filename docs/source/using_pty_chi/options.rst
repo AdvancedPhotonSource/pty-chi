@@ -199,6 +199,94 @@ delay probe updates until later:
     options.probe_options.optimization_plan.start = 5
 
 
+Optimizer closures
+------------------
+
+Parameters whose optimizer requires ``step(closure)`` receive an automatic
+closure for the current reconstruction batch. Options select optimizers through
+the serializable ``api.Optimizers`` enum. Registered first-order
+optimizers, including SGD and Adam, use the algorithm's existing update directions.
+Custom optimizer classes accepting ``step(closure)`` or ``step(closure=None)``
+receive a loss-and-gradient closure by default. Implementers can select the
+contract with the class attribute ``closure_mode``:
+
+* ``api.OptimizerClosureModes.NONE`` steps using supplied gradients.
+* ``api.OptimizerClosureModes.LOSS`` evaluates the objective under
+  ``torch.no_grad()``, preserving existing gradients and skipping gradient hooks.
+* ``api.OptimizerClosureModes.LOSS_AND_GRADIENTS`` reevaluates the objective and
+  computes gradients for the optimizer's parameters, as required by LBFGS.
+
+For example, a custom optimizer that tests trial steps using only loss values can
+declare ``closure_mode = api.OptimizerClosureModes.LOSS``. These declarations also
+apply to subclasses of built-in optimizers. The legacy ``requires_closure`` boolean
+is supported when ``closure_mode`` is absent: True requests loss and gradients,
+and False uses supplied gradients. Required closure arguments always receive a
+closure, falling back to loss and gradients for a NONE or False declaration.
+Optimizers without a closure argument are stepped normally.
+
+For example, enable a line search for probe positions in LSQML:
+
+.. code-block:: python
+
+    options = api.LSQMLOptions()
+    positions = options.probe_position_options
+    positions.optimizable = True
+    positions.optimizer = api.Optimizers.LBFGS
+    positions.optimizer_params = {"line_search_fn": "strong_wolfe", "max_iter": 10}
+
+Custom optimizer classes can be attached to an optimizable parameter after task
+construction. Rebuilding the optimizer initializes fresh optimizer and scheduler
+state:
+
+.. code-block:: python
+
+    parameter = task.reconstructor.parameter_group.probe_positions
+    parameter.optimizer_class = MyOptimizer
+    parameter.build_optimizer()
+
+Each trial evaluates the forward model at the optimizer's current parameter
+values. Loss-and-gradient closures compute exact first derivatives with autograd,
+even in analytical reconstructors, replacing only that optimizer's gradients.
+Loss-only closures retain the update directions supplied by the reconstructor.
+LSQML uses its configured noise-model likelihood; PIE, BH, DM, and RAAR use a mean squared
+amplitude residual. Detector masks and intensity exclusions apply. Autodiff
+ptychography uses its configured loss and regularization terms. The displayed
+loss metric does not select the closure objective.
+
+A custom closure can be supplied to the ``ReconstructParameter`` constructor,
+assigned to ``parameter.optimizer_closure`` after task construction, or passed
+as ``parameter.step_optimizer(closure=...)``. A per-step closure takes precedence
+over the stored closure, which takes precedence over the automatic one. For example:
+
+.. code-block:: python
+
+    parameter = task.reconstructor.parameter_group.probe_positions
+
+    def closure():
+        parameter.optimizer.zero_grad()
+        loss = compute_my_objective()  # Reevaluate using current parameter values.
+        loss.backward(inputs=[parameter.tensor])
+        return loss
+
+    parameter.optimizer_closure = closure
+
+Custom closures run with gradient recording enabled and control their own
+evaluation behavior. They must return a scalar loss and populate gradients when
+required by the optimizer. A loss-only custom closure can use ``torch.no_grad()``.
+Optimizers that need differentiable gradients or Hessians can implement those
+calculations in a custom closure.
+
+Automatic closures currently support single-process execution. Compact LSQML
+object updates evaluate the full dataset at the end of the epoch, which can
+require more memory than a minibatch update. Other closures evaluate the current
+batch. Post-step clipping, constraints, and algorithm-specific momentum can
+modify the accepted step, so a line search does not guarantee a decrease after
+those operations or in the full-dataset loss. DM and RAAR use direct projections
+for object and probe updates; closure optimizers are supported only for parameters
+that those algorithms update through an optimizer. Unsupported selections raise
+an error.
+
+
 Independent object and probe pixel sizes
 ----------------------------------------
 

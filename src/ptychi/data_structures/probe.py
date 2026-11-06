@@ -570,6 +570,10 @@ class SynthesisDictLearnProbe( Probe ):
     def generate(self):
         """Generate the probe using the sparse code, and set the
         generated probe to self.data.
+
+        Rebuild the graph from the sparse coefficients on each call. Higher OPR
+        modes are retained as fixed state, independent of those coefficients.
+        Preserve pending analytical gradients when replacing the generated buffer.
         
         Returns
         -------
@@ -582,9 +586,11 @@ class SynthesisDictLearnProbe( Probe ):
         probe = probe[None,...]
         
         # we only use sparse codes for the shared modes, not the OPRs
-        probe = torch.cat((probe, self.data[1:,...]), 0)    
+        probe = torch.cat((probe, self.data[1:,...].detach()), 0)
         
-        self.set_data(probe)
+        pending_gradient = self.tensor.data.grad
+        self.tensor.data = torch.stack((probe.real, probe.imag), dim=-1).to(torch.get_default_dtype())
+        self.tensor.data.grad = pending_gradient
         return probe
     
     def build_optimizer(self):

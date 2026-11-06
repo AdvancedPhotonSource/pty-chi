@@ -24,6 +24,14 @@ class Optimizers(StrEnum):
     ADAMW = auto()
 
 
+class OptimizerClosureModes(StrEnum):
+    """Evaluations an optimizer requests from an automatic closure."""
+
+    NONE = auto()
+    LOSS = auto()
+    LOSS_AND_GRADIENTS = auto()
+
+
 class LossFunctions(StrEnum):
     MSE = auto()
     POISSON = auto()
