@@ -23,6 +23,16 @@ class OptionalClosureOptimizer(RequiredClosureOptimizer):
         return super().step(closure)
 
 
+class PositionalOnlyClosureOptimizer(RequiredClosureOptimizer):
+    def step(self, closure, /):
+        return super().step(closure)
+
+
+class KeywordOnlyClosureOptimizer(RequiredClosureOptimizer):
+    def step(self, *, closure):
+        return super().step(closure)
+
+
 class SuppliedGradientOptimizer(torch.optim.SGD):
     requires_closure = False
 
@@ -64,6 +74,18 @@ def make_parameter(data, optimizer_class):
     parameter.optimizer_class = optimizer_class
     parameter.build_optimizer()
     return parameter
+
+
+@pytest.mark.parametrize("optimizer_class", [
+    RequiredClosureOptimizer, PositionalOnlyClosureOptimizer, KeywordOnlyClosureOptimizer,
+])
+def test_closure_dispatch_respects_argument_kind(optimizer_class):
+    parameter = make_parameter(torch.tensor([2.0]), optimizer_class)
+    parameter.make_optimizer_closure(lambda: parameter.data.square().sum(), store=True)
+    with torch.no_grad():
+        loss = parameter.step_optimizer()
+    torch.testing.assert_close(loss, torch.tensor(4.0))
+    torch.testing.assert_close(parameter.data, torch.tensor([1.6]))
 
 
 @pytest.mark.parametrize("optimizer_name", list(api.Optimizers))
@@ -237,6 +259,7 @@ def restore_torch_defaults():
 def make_task(
     options_class=api.LSQMLOptions, parameter_name="probe_position",
     optimizer=api.Optimizers.LBFGS, noise_model=api.NoiseModels.GAUSSIAN,
+    sdl_probe=False,
 ):
     options = options_class()
     options.reconstructor_options.default_device = api.Devices.CPU
@@ -256,6 +279,15 @@ def make_task(
         options.object_options.optimizable = True
     if options_class == api.BHOptions and parameter_name == "probe_position":
         options.probe_options.optimizable = True
+    if sdl_probe:
+        options.reconstructor_options.default_dtype = api.Dtypes.FLOAT32
+        options.probe_options.optimizable = True
+        sdl = options.probe_options.experimental.sdl_probe_options
+        sdl.enabled = True
+        sdl.d_mat = torch.eye(25, dtype=torch.complex64, device="cpu")
+        sdl.d_mat_pinv = sdl.d_mat
+        sdl.d_mat_conj_transpose = sdl.d_mat
+        sdl.probe_sparse_code_nnz = 23
     if parameter_name == "probe_position":
         options.probe_position_options.correction_options.clip_update_magnitude_by_mad = False
         options.probe_position_options.correction_options.update_magnitude_limit = None
@@ -386,6 +418,56 @@ def test_compact_object_closure_uses_all_patterns():
 def test_projection_only_parameters_reject_unused_closure_optimizer(options_class):
     with pytest.raises(ValueError, match="does not step an optimizer for object"):
         make_task(options_class, parameter_name="object")
+
+
+@pytest.mark.parametrize("options_class", [api.DMOptions, api.RAAROptions])
+@pytest.mark.parametrize("parameter_name", ["object", "probe", "opr_mode_weight"])
+@pytest.mark.parametrize("custom_closure", [False, True])
+def test_projection_only_parameters_reject_closures_attached_after_construction(
+    options_class, parameter_name, custom_closure,
+):
+    task = make_task(options_class, parameter_name="object", optimizer=api.Optimizers.SGD)
+    name = "opr_mode_weights" if parameter_name == "opr_mode_weight" else parameter_name
+    parameter = getattr(task.reconstructor.parameter_group, name)
+    parameter.optimizable = True
+    parameter.optimizer_class = torch.optim.SGD if custom_closure else RequiredClosureOptimizer
+    parameter.build_optimizer()
+    if custom_closure:
+        parameter.optimizer_closure = lambda: pytest.fail("Unsupported closure was evaluated")
+    with pytest.raises(ValueError, match=f"does not step an optimizer for {name}"):
+        task.reconstructor.run()
+
+
+@pytest.mark.parametrize("optimizer", [api.Optimizers.SGD, api.Optimizers.LBFGS])
+def test_object_optimizer_runs_with_synthesis_dictionary_probe(optimizer):
+    task = make_task(api.RPIEOptions, parameter_name="object", optimizer=optimizer, sdl_probe=True)
+    initial_object = task.object.data.detach().clone()
+    task.reconstructor.run(n_epochs=2)
+    assert torch.isfinite(task.object.data).all()
+    assert not torch.equal(task.object.data, initial_object)
+
+
+@pytest.mark.parametrize("parameter_name", ["object", "opr_mode_weight"])
+def test_synthesis_dictionary_regeneration_rebuilds_graph_and_preserves_pending_gradients(
+    parameter_name,
+):
+    task = make_task(api.RPIEOptions, parameter_name=parameter_name, sdl_probe=True)
+    probe = task.probe
+    initial_probe = probe.data.detach().clone()
+    probe.initialize_grad()
+    pending_gradient = probe.tensor.data.grad
+    with torch.no_grad():
+        torch.testing.assert_close(probe.generate(), initial_probe)
+    for iteration in range(2):
+        generated = probe.generate()
+        torch.testing.assert_close(probe.data, generated)
+        torch.testing.assert_close(generated[0], initial_probe[0] * 0.9 ** iteration)
+        torch.testing.assert_close(generated[1:], initial_probe[1:])
+        gradient, = torch.autograd.grad(probe.data.abs().square().sum(), probe.sparse_code_probe)
+        torch.testing.assert_close(gradient, 2 * probe.sparse_code_probe)
+        assert probe.tensor.data.grad is pending_gradient
+        with torch.no_grad():
+            probe.sparse_code_probe.mul_(0.9)
 
 
 @pytest.mark.parametrize("options_class", [api.LSQMLOptions, api.RPIEOptions, api.BHOptions, api.AutodiffPtychographyOptions])

@@ -41,6 +41,8 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     parameter_group: "pg.PlanarPtychographyParameterGroup"
 
+    parameters_without_optimizer_step = ("object", "probe", "opr_mode_weights")
+
     def __init__(
         self,
         parameter_group: "pg.PlanarPtychographyParameterGroup",
@@ -60,13 +62,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.options: DMReconstructorOptions = self.options
 
     def check_inputs(self, *args, **kwargs):
-        for name in ('object', 'probe', 'opr_mode_weights'):
-            parameter = getattr(self.parameter_group, name)
-            if parameter.optimizable and parameter.uses_optimizer_closure:
-                raise ValueError(
-                    f"{type(self).__name__} does not step an optimizer for {name}; "
-                    "optimizer closures require an optimizer-based update for that parameter."
-                )
+        self.check_optimizer_closure_support()
         if self.parameter_group.object.is_multislice:
             raise NotImplementedError("DMReconstructor only supports 2D objects.")
         if self.parameter_group.probe.has_multiple_opr_modes:

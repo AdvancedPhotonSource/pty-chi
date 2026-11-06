@@ -262,6 +262,9 @@ class PtychographyReconstructor(Reconstructor):
 
 
 class IterativeReconstructor(Reconstructor):
+    # Parameter-group fields updated directly rather than through optimizer.step.
+    parameters_without_optimizer_step: tuple[str, ...] = ()
+
     def __init__(
         self,
         parameter_group: "pg.ParameterGroup",
@@ -359,6 +362,16 @@ class IterativeReconstructor(Reconstructor):
         """Evaluate the scalar objective used by automatic optimizer closures."""
         return self.loss_function(self.forward_model(*input_data), y_true)
 
+    def check_optimizer_closure_support(self):
+        """Reject closures for parameters this algorithm updates directly."""
+        for name in self.parameters_without_optimizer_step:
+            parameter = getattr(self.parameter_group, name)
+            if parameter.optimizable and parameter.uses_optimizer_closure:
+                raise ValueError(
+                    f"{type(self).__name__} does not step an optimizer for {name}; "
+                    "optimizer closures require an optimizer-based update for that parameter."
+                )
+
     def prepare_optimizer_closures(self, input_data, y_true):
         """Bind closure-enabled parameters to this batch's fixed objective.
 
@@ -366,6 +379,7 @@ class IterativeReconstructor(Reconstructor):
         updates. Loss-only closures preserve the algorithm's supplied gradients;
         loss-and-gradient closures replace them with exact objective derivatives.
         """
+        self.check_optimizer_closure_support()
         for parameter in self.parameter_group.get_all_reconstruct_parameters():
             if (not parameter.optimization_enabled(self.current_epoch)
                     or not parameter.uses_optimizer_closure

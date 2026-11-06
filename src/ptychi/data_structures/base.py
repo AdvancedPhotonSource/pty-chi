@@ -519,7 +519,12 @@ class ReconstructParameter(Module):
             data0 = self.data
         
         if use_closure:
-            result = self.optimizer.step(closure=torch.enable_grad()(closure))
+            closure = torch.enable_grad()(closure)
+            argument = inspect.signature(self.optimizer.step).parameters.get("closure")
+            if argument is not None and argument.kind == inspect.Parameter.POSITIONAL_ONLY:
+                result = self.optimizer.step(closure)
+            else:
+                result = self.optimizer.step(closure=closure)
         else:
             result = self.optimizer.step()
         
