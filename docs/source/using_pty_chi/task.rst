@@ -32,6 +32,20 @@ are omitted for a single-OPR-mode probe, the task initializes all weights to 1.
 If ``valid_pixel_mask`` is omitted or set to ``None``, all detector pixels are
 treated as valid.
 
+Pass ``detector_response_map=(multiplier, offset)`` to model a shared affine
+detector response. Both components must be NumPy arrays or tensors with the
+same ``(H, W)`` shape and pixel ordering as the input diffraction patterns.
+With ``data_options.fft_shift=True`` (the default), supply the maps in original
+detector coordinates, aligned with the centered far-field patterns, without
+manually FFT-shifting them. The task applies ``torch.fft.fftshift`` to both maps
+and patterns along the last two axes. With ``fft_shift=False``, the maps are
+used as supplied: align them with the already-shifted patterns when the
+far-field DC pixel is at the top left, or with the unshifted detector images
+for near-field data. After detector cropping and blur, the forward model applies
+``intensity * multiplier + offset``. The multiplier is dimensionless and the
+offset uses measured-intensity units. The default, ``None``, leaves the
+predicted intensity unchanged.
+
 For compatibility, the previous option-held data fields still work during a
 transition period and emit ``DeprecationWarning`` when used:
 ``data_options.data``, ``data_options.valid_pixel_mask``,

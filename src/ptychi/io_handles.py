@@ -32,6 +32,7 @@ class PtychographyDataset(Dataset):
         fft_shift: bool = True,
         save_data_on_device: bool = False,
         *args,
+        detector_response_map: Optional[tuple[Union[Tensor, ndarray], Union[Tensor, ndarray]]] = None,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -47,6 +48,17 @@ class PtychographyDataset(Dataset):
         if fft_shift:
             self.valid_pixel_mask = torch.fft.fftshift(self.valid_pixel_mask, dim=(-2, -1))
             logger.info("Valid pixel mask have been FFT-shifted.")
+
+        self.detector_response_map = None
+        if detector_response_map is not None:
+            self.detector_response_map = tuple(
+                to_tensor(component, device="cpu") for component in detector_response_map
+            )
+            if fft_shift:
+                self.detector_response_map = tuple(
+                    torch.fft.fftshift(component, dim=(-2, -1))
+                    for component in self.detector_response_map
+                )
 
         self.wavelength_m = wavelength_m
         self.free_space_propagation_distance_m = free_space_propagation_distance_m
@@ -66,6 +78,10 @@ class PtychographyDataset(Dataset):
         if device is None:
             device = torch.get_default_device()
         self.valid_pixel_mask = self.valid_pixel_mask.to(device)
+        if self.detector_response_map is not None:
+            self.detector_response_map = tuple(
+                component.to(device) for component in self.detector_response_map
+            )
 
 
 class PtychographyCompactBatchSampler(torch.utils.data.Sampler):

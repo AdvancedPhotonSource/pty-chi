@@ -67,6 +67,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
             parameter_group=self.parameter_group, 
             retain_intermediates=True,
             detector_size=tuple(self.dataset.patterns.shape[-2:]),
+            detector_response_map=self.dataset.detector_response_map,
             wavelength_m=self.dataset.wavelength_m,
             free_space_propagation_distance_m=self.dataset.free_space_propagation_distance_m,
             pad_for_shift=self.options.forward_model_options.pad_for_shift,
