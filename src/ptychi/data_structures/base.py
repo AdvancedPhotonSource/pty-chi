@@ -12,6 +12,7 @@ from numpy import ndarray
 
 from ptychi.utils import to_tensor
 import ptychi.maps as maps
+import ptychi.api.enums as enums
 import ptychi.api.options.base as obase
 
 if TYPE_CHECKING:
@@ -419,23 +420,30 @@ class ReconstructParameter(Module):
         """Whether stepping uses a custom closure or the optimizer's automatic policy."""
         if self.optimizer is None:
             return False
-        return self.optimizer_closure is not None or maps.optimizer_uses_closure(self.optimizer)
+        return (self.optimizer_closure is not None
+                or maps.get_optimizer_closure_mode(self.optimizer) != enums.OptimizerClosureModes.NONE)
 
     def make_optimizer_closure(
         self, objective: Callable[[], Tensor], *, store: bool = False,
     ) -> Callable[[], Tensor]:
         """Build a closure for a scalar objective at the current parameter values.
 
-        Recompute exact first derivatives for tensors owned by this optimizer.
-        Other parameters' pending gradients are preserved. The objective must
-        rebuild its graph on each call; custom Hessian-based optimizers needing
+        In LOSS mode, evaluate under no_grad and preserve all pending gradients.
+        Otherwise, recompute exact first derivatives for tensors owned by this
+        optimizer, preserving other parameters' gradients. The objective must
+        rebuild its graph on each gradient evaluation; optimizers needing
         a differentiable gradient can supply their own ``optimizer_closure``.
 
         If ``store`` is True, also save the returned callable as this parameter's
         automatic optimizer closure. Defaults to returning the callable only.
         """
+        mode = maps.get_optimizer_closure_mode(self.optimizer)
+
         @torch.enable_grad()
         def closure():
+            if mode == enums.OptimizerClosureModes.LOSS:
+                with torch.no_grad():
+                    return objective()
             self.optimizer.zero_grad()
             loss = objective()
             parameters = [p for group in self.optimizer.param_groups for p in group["params"]]

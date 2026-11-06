@@ -206,13 +206,23 @@ Parameters whose optimizer requires ``step(closure)`` receive an automatic
 closure for the current reconstruction batch. Options select optimizers through
 the serializable ``api.Optimizers`` enum. Registered first-order
 optimizers, including SGD and Adam, use the algorithm's existing update directions.
-Custom optimizer classes accepting an optional ``step(closure=None)`` argument
-receive an automatic closure by default. Their implementers can declare the class
-attribute ``requires_closure = False`` to use supplied gradients instead, or
-``requires_closure = True`` to explicitly request a closure. This declaration
-also applies to custom subclasses of built-in optimizers. Required closure
-arguments always receive a closure; optimizers without a closure argument are
-stepped normally.
+Custom optimizer classes accepting ``step(closure)`` or ``step(closure=None)``
+receive a loss-and-gradient closure by default. Implementers can select the
+contract with the class attribute ``closure_mode``:
+
+* ``api.OptimizerClosureModes.NONE`` steps using supplied gradients.
+* ``api.OptimizerClosureModes.LOSS`` evaluates the objective under
+  ``torch.no_grad()``, preserving existing gradients and skipping gradient hooks.
+* ``api.OptimizerClosureModes.LOSS_AND_GRADIENTS`` reevaluates the objective and
+  computes gradients for the optimizer's parameters, as required by LBFGS.
+
+For example, a custom optimizer that tests trial steps using only loss values can
+declare ``closure_mode = api.OptimizerClosureModes.LOSS``. These declarations also
+apply to subclasses of built-in optimizers. The legacy ``requires_closure`` boolean
+is supported when ``closure_mode`` is absent: True requests loss and gradients,
+and False uses supplied gradients. Required closure arguments always receive a
+closure, falling back to loss and gradients for a NONE or False declaration.
+Optimizers without a closure argument are stepped normally.
 
 For example, enable a line search for probe positions in LSQML:
 
@@ -235,9 +245,10 @@ state:
     parameter.build_optimizer()
 
 Each trial evaluates the forward model at the optimizer's current parameter
-values and computes exact first derivatives with autograd, even in analytical
-reconstructors. Only that optimizer's gradients are replaced. LSQML uses its
-configured noise-model likelihood; PIE, BH, DM, and RAAR use a mean squared
+values. Loss-and-gradient closures compute exact first derivatives with autograd,
+even in analytical reconstructors, replacing only that optimizer's gradients.
+Loss-only closures retain the update directions supplied by the reconstructor.
+LSQML uses its configured noise-model likelihood; PIE, BH, DM, and RAAR use a mean squared
 amplitude residual. Detector masks and intensity exclusions apply. Autodiff
 ptychography uses its configured loss and regularization terms. The displayed
 loss metric does not select the closure objective.
@@ -259,10 +270,11 @@ over the stored closure, which takes precedence over the automatic one. For exam
 
     parameter.optimizer_closure = closure
 
-Closures run with gradient recording enabled. Custom closures must return a
-scalar loss and populate the optimizer's gradients on each call. Optimizers
-that need differentiable gradients or Hessians can implement those calculations
-in a custom closure.
+Custom closures run with gradient recording enabled and control their own
+evaluation behavior. They must return a scalar loss and populate gradients when
+required by the optimizer. A loss-only custom closure can use ``torch.no_grad()``.
+Optimizers that need differentiable gradients or Hessians can implement those
+calculations in a custom closure.
 
 Automatic closures currently support single-process execution. Compact LSQML
 object updates evaluate the full dataset at the end of the epoch, which can

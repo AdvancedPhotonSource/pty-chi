@@ -363,8 +363,8 @@ class IterativeReconstructor(Reconstructor):
         """Bind closure-enabled parameters to this batch's fixed objective.
 
         Trial evaluations preserve forward-model intermediates used by analytical
-        updates. Each optimizer receives exact derivatives of the data-fitting
-        objective, independent of the update directions supplied by the algorithm.
+        updates. Loss-only closures preserve the algorithm's supplied gradients;
+        loss-and-gradient closures replace them with exact objective derivatives.
         """
         for parameter in self.parameter_group.get_all_reconstruct_parameters():
             if (not parameter.optimization_enabled(self.current_epoch)

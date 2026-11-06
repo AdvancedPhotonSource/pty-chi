@@ -36,6 +36,27 @@ class NoClosureOptimizer(torch.optim.SGD):
         return super().step()
 
 
+class LossOnlyClosureOptimizer(torch.optim.SGD):
+    closure_mode = api.OptimizerClosureModes.LOSS
+
+    def step(self, closure):
+        parameters = [p for group in self.param_groups for p in group["params"]]
+        gradients = [p.grad for p in parameters]
+        saved_gradients = [g.clone() if g is not None else None for g in gradients]
+        self.closure_calls = getattr(self, "closure_calls", 0)
+        for trial in range(2):
+            loss = closure()
+            self.closure_calls += 1
+            assert not loss.requires_grad
+            for parameter, gradient, saved in zip(parameters, gradients, saved_gradients):
+                assert parameter.grad is gradient
+                if saved is not None:
+                    torch.testing.assert_close(parameter.grad, saved)
+            if trial == 0:
+                super().step()
+        return loss
+
+
 def make_parameter(data, optimizer_class):
     parameter = ReconstructParameter(
         data=data, is_complex=data.is_complex(), options=ParameterOptions(step_size=0.1),
@@ -49,7 +70,84 @@ def make_parameter(data, optimizer_class):
 def test_builtin_optimizer_closure_policy(optimizer_name):
     optimizer_class = maps.get_optimizer_by_enum(optimizer_name)
     optimizer = optimizer_class([torch.nn.Parameter(torch.ones(1))], lr=0.1)
-    assert maps.optimizer_uses_closure(optimizer) == (optimizer_name == api.Optimizers.LBFGS)
+    expected = (api.OptimizerClosureModes.LOSS_AND_GRADIENTS
+                if optimizer_name == api.Optimizers.LBFGS else api.OptimizerClosureModes.NONE)
+    assert maps.get_optimizer_closure_mode(optimizer) == expected
+
+
+@pytest.mark.parametrize("optimizer_class", [RequiredClosureOptimizer, OptionalClosureOptimizer])
+@pytest.mark.parametrize("mode", list(api.OptimizerClosureModes))
+def test_explicit_closure_mode_overrides_legacy_declaration(optimizer_class, mode):
+    class DeclaredOptimizer(optimizer_class):
+        closure_mode = mode
+        requires_closure = mode == api.OptimizerClosureModes.NONE
+
+    parameter = make_parameter(torch.tensor([2.0]), DeclaredOptimizer)
+    expected = mode
+    if optimizer_class == RequiredClosureOptimizer and mode == api.OptimizerClosureModes.NONE:
+        expected = api.OptimizerClosureModes.LOSS_AND_GRADIENTS
+    assert maps.get_optimizer_closure_mode(parameter.optimizer) == expected
+    assert parameter.uses_optimizer_closure == (expected != api.OptimizerClosureModes.NONE)
+
+
+@pytest.mark.parametrize("complex_parameter", [False, True])
+@pytest.mark.parametrize("with_gradient", [False, True])
+def test_loss_only_closure_preserves_gradients_and_evaluates_current_values(
+    complex_parameter, with_gradient, monkeypatch,
+):
+    value = 2 + 3j if complex_parameter else 2.0
+    parameter = make_parameter(torch.tensor([value]), LossOnlyClosureOptimizer)
+    other = torch.nn.Parameter(torch.tensor([4.0]))
+    other.grad = torch.tensor([123.0])
+    if with_gradient:
+        parameter.set_grad(torch.tensor([value]))
+    tensor = parameter.optimizer.param_groups[0]["params"][0]
+    gradient = tensor.grad
+    saved_gradient = gradient.clone() if gradient is not None else None
+    monkeypatch.setattr(parameter.optimizer, "zero_grad", lambda: pytest.fail("Cleared gradients"))
+    monkeypatch.setattr(parameter, "process_optimizer_gradients", lambda: pytest.fail("Processed gradients"))
+    evaluations = []
+
+    def objective():
+        assert not torch.is_grad_enabled()
+        loss = (parameter.data.abs().square() * other).sum()
+        evaluations.append(loss.item())
+        return loss
+
+    parameter.make_optimizer_closure(objective, store=True)
+    with torch.no_grad():
+        parameter.step_optimizer()
+    expected = torch.tensor([value]) * (0.9 if with_gradient else 1)
+    torch.testing.assert_close(parameter.data, expected)
+    assert evaluations == pytest.approx([abs(value) ** 2 * 4, expected.abs().square().item() * 4])
+    assert tensor.grad is gradient
+    if with_gradient:
+        torch.testing.assert_close(tensor.grad, saved_gradient)
+    torch.testing.assert_close(other.grad, torch.tensor([123.0]))
+
+
+def test_loss_only_legacy_step_arguments_preserve_supplied_direction():
+    parameter = make_parameter(torch.tensor([2.0]), LossOnlyClosureOptimizer)
+    parameter.set_grad(torch.tensor([3.0]))
+    parameter.step_optimizer(
+        forward_model=lambda: parameter.data.square(), forward_model_args=[],
+        target_data=torch.tensor([0.0]), loss_function=torch.nn.MSELoss(),
+    )
+    torch.testing.assert_close(parameter.data, torch.tensor([1.7]))
+
+
+def test_custom_closure_controls_evaluation_for_loss_only_optimizer():
+    parameter = make_parameter(torch.tensor([2.0]), LossOnlyClosureOptimizer)
+    calls = []
+
+    def custom_closure():
+        assert torch.is_grad_enabled()
+        calls.append(True)
+        return parameter.data.detach().square().sum()
+
+    parameter.optimizer_closure = custom_closure
+    parameter.step_optimizer()
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize("optimizer_class", [
@@ -206,7 +304,7 @@ def test_lsqml_lbfgs_closure_improves_loss_for_each_parameter(parameter_name):
 
 
 @pytest.mark.parametrize("options_class", [api.LSQMLOptions, api.RPIEOptions, api.BHOptions, api.DMOptions, api.RAAROptions, api.AutodiffPtychographyOptions])
-@pytest.mark.parametrize("optimizer_class", [RequiredClosureOptimizer, OptionalClosureOptimizer, ExplicitClosureOptimizer])
+@pytest.mark.parametrize("optimizer_class", [RequiredClosureOptimizer, OptionalClosureOptimizer, ExplicitClosureOptimizer, LossOnlyClosureOptimizer])
 def test_reconstructors_supply_closure_during_run(options_class, optimizer_class):
     task = make_task(options_class, optimizer=optimizer_class)
     task.reconstructor.run()
