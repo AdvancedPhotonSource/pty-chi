@@ -8,6 +8,7 @@ Using Pty-chi
    task
    workflows
    options
+   custom_forward_models
    io
    initialization_recommendations
    position_mapping
