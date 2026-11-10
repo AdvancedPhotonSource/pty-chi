@@ -1,7 +1,10 @@
 # Copyright © 2025 UChicago Argonne, LLC All right reserved
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
-"""Options for GM-rPIE and GM-MAGPIE with a single shared coherent probe."""
+"""Options for GM-rPIE and GM-MAGPIE with a single shared probe.
+
+The probe may carry several incoherent (mixed-state) modes; OPR is unsupported.
+"""
 
 from dataclasses import field
 
@@ -39,7 +42,10 @@ class MAGPIEMultisliceError(MAGPIECapabilityError):
 
 
 class MAGPIEMultimodeError(MAGPIECapabilityError):
-    """GM-rPIE and GM-MAGPIE require a single coherent probe mode."""
+    """Deprecated: incoherent probe modes are supported.
+
+    Retained for backward compatibility of the public API. Nothing raises it.
+    """
 
 
 class MAGPIEOPRError(MAGPIECapabilityError):
@@ -93,9 +99,9 @@ def _check_direct_updates(options: base.ParameterOptions, name: str):
 class MAGPIEReconstructorOptions(pie.PIEReconstructorOptions):
     """Settings for GM-rPIE (one level) or GM-MAGPIE (multiple levels).
 
-    Both algorithms use random minibatches, one object slice, one coherent
-    shared probe, and matching object/probe/detector sampling. Resampling,
-    OPR, and detector blur are not supported. Object and probe updates are
+    Both algorithms use random or uniform minibatches, one object slice, one
+    shared probe that may have several incoherent modes, and matching
+    object/probe/detector sampling. Resampling, OPR, and detector blur are not supported. Object and probe updates are
     synthesized together from their pre-update state and applied directly.
     Native gradient position correction and post-epoch constraints remain available.
     """
@@ -129,10 +135,20 @@ class MAGPIEReconstructorOptions(pie.PIEReconstructorOptions):
                 "GM-rPIE/GM-MAGPIE require forward_model_options.pad_for_shift=1 "
                 "to preserve the one-pixel boundary padding of their local updates."
             )
-        if self.batching_mode != enums.BatchingModes.RANDOM:
+        if self.batching_mode not in (
+            enums.BatchingModes.RANDOM,
+            enums.BatchingModes.UNIFORM,
+        ):
             raise MAGPIECapabilityError(
-                "GM-rPIE/GM-MAGPIE support random minibatches only; "
-                "set batching_mode=BatchingModes.RANDOM."
+                f"GM-rPIE/GM-MAGPIE do not support batching_mode={self.batching_mode}. "
+                "Use BatchingModes.RANDOM, which Algorithm 1 of the reference specifies, or "
+                "BatchingModes.UNIFORM, which spreads each minibatch over the scan and so "
+                "preserves the spatial diversity the synthesis consensus relies on. COMPACT "
+                "clusters each minibatch into one region, so every position would see nearly "
+                "the same object content: the probe consensus of Eq. (30) would be formed from "
+                "highly correlated evidence and the object average of Eq. (26) would repeatedly "
+                "update a single region. COMPACT is also built to pair with momentum, which "
+                "these methods do not have."
             )
         if self.default_dtype not in (enums.Dtypes.FLOAT32, enums.Dtypes.FLOAT64):
             raise MAGPIECapabilityError(
@@ -180,12 +196,18 @@ class MAGPIEObjectOptions(pie.PIEObjectOptions):
 
 @dataclass
 class MAGPIEProbeOptions(pie.PIEProbeOptions):
-    """One directly represented coherent probe shared by all scan positions.
+    """One directly represented probe shared by all scan positions.
 
     The inherited ``alpha`` is the nonnegative rPIE regularization factor
     used by local probe proposals. The probe is updated on every minibatch
-    with unit SGD settings and no scheduler. Incoherent multimode probes,
-    OPR, and synthesis-dictionary probe representations are unsupported.
+    with unit SGD settings and no scheduler. Incoherent (mixed-state) modes are
+    supported; OPR and synthesis-dictionary probe representations are not.
+
+    An incoherent mode set is defined only up to a unitary mixing, which leaves
+    the measured incoherent sum invariant. The entrywise geometric mean does not
+    commute with that mixing, so enable
+    ``orthogonalize_incoherent_modes`` to pin the gauge when using more than one
+    mode; a warning is logged otherwise.
 
     Local probe corrections use the native shift adjoint before being averaged
     with the intensity of each reverse-shifted local object patch. These weights
@@ -249,9 +271,9 @@ class MAGPIEOptions(pie.PIEOptions):
 
     Both algorithms use ``MAGPIEOptions``. Set
     ``reconstructor_options.multigrid_levels = 1`` for GM-rPIE or a larger
-    valid depth for GM-MAGPIE. The initial implementation supports one object
-    slice and one coherent shared probe, random minibatches, and matching
-    object/probe/detector sampling. Object and probe must both be optimized
+    valid depth for GM-MAGPIE. The implementation supports one object slice and
+    one shared probe with any number of incoherent modes, random or uniform
+    minibatches, and matching object/probe/detector sampling. Object and probe must both be optimized
     on every minibatch, with unit SGD settings and no step-size schedulers.
     Native gradient position correction and post-epoch constraints remain available.
 
