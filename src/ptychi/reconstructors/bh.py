@@ -268,24 +268,26 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
     def compute_updates_object(self, op, p, psi_far, gradF, d):
         grad_o, grad_op = self.gradient_o(p, gradF)
 
-        if self.current_epoch == 0 or self.options.method == "GD":
-            eta_o = -grad_o
-            eta_op = -grad_op
-        elif self.options.method == "CG":
+        if self.options.method == "CG" and self.current_epoch > 0:
             eta_o = self.eta_o
             eta_op = self.refresh_object_direction_patches(
                 eta_o, self.positions, self.eta_op[self.indices]
             )
-
-            beta = self.calc_beta_object(p, d, psi_far, grad_op, eta_op)
+            Qgg, Bge, Qee = self.calc_hessian3_object(p, d, psi_far, grad_op, eta_op)
+            beta = Bge / Qee
             eta_o = -grad_o + beta * eta_o
             eta_op = -grad_op + beta * eta_op
+
+            top = -redot(grad_o, eta_o)
+            alpha = self.fused_step_length(top, beta, Qgg, Bge, Qee)
+        else:
+            eta_o = -grad_o
+            eta_op = -grad_op
+            alpha = self.calc_alpha_object(p, grad_o, eta_o, d, psi_far, eta_op)
 
         if self.options.method == "CG":
             self.eta_o = eta_o
             self.eta_op[self.indices] = eta_op
-
-        alpha = self.calc_alpha_object(p, grad_o, eta_o, d, psi_far, eta_op)
 
         # normalize with the batch size
         alpha *= op.shape[0] / self.batch_size
@@ -298,33 +300,34 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         grad_o, grad_op = self.gradient_o(p, gradF)
         grad_p = self.parameter_group.probe.options.rho * self.gradient_p(op, gradF)
 
-        if self.current_epoch == 0 or self.options.method == "GD":
-            eta_o = -grad_o
-            eta_op = -grad_op
-            eta_p = -grad_p
-        elif self.options.method == "CG":
-            # intermediate variables for the CG
+        if self.options.method == "CG" and self.current_epoch > 0:
             eta_o = self.eta_o
             eta_op = self.refresh_object_direction_patches(
                 eta_o, self.positions, self.eta_op[self.indices]
             )
             eta_p = self.eta_p
-
-            beta = self.calc_beta_object_probe(
+            Qgg, Bge, Qee = self.calc_hessian3_object_probe(
                 p, grad_p, eta_p, d, gradF, psi_far, op, grad_op, eta_op
             )
+            beta = Bge / Qee
             eta_o = -grad_o + beta * eta_o
             eta_op = -grad_op + beta * eta_op
             eta_p = -grad_p + beta * eta_p
+
+            top = -redot(grad_o, eta_o) - redot(grad_p, eta_p)
+            alpha = self.fused_step_length(top, beta, Qgg, Bge, Qee)
+        else:
+            eta_o = -grad_o
+            eta_op = -grad_op
+            eta_p = -grad_p
+            alpha = self.calc_alpha_object_probe(
+                p, grad_o, grad_p, eta_o, eta_p, d, gradF, psi_far, op, eta_op
+            )
 
         if self.options.method == "CG":
             self.eta_o = eta_o
             self.eta_op[self.indices] = eta_op
             self.eta_p = eta_p
-
-        alpha = self.calc_alpha_object_probe(
-            p, grad_o, grad_p, eta_o, eta_p, d, gradF, psi_far, op, eta_op
-        )
 
         # normalize with the batch size
         alpha *= op.shape[0] / self.batch_size
@@ -340,38 +343,39 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
             op, p, pos, gradF
         )
 
-        if self.current_epoch == 0 or self.options.method == "GD":
-            eta_o = -grad_o
-            eta_op = -grad_op
-            eta_p = -grad_p
-            eta_pos = -grad_pos
-        elif self.options.method == "CG":
-            # intermediate variables for the CG
+        if self.options.method == "CG" and self.current_epoch > 0:
             eta_o = self.eta_o
             eta_op = self.refresh_object_direction_patches(
                 eta_o, self.positions, self.eta_op[self.indices]
             )
             eta_p = self.eta_p
             eta_pos = self.eta_pos[self.indices]
-
-            beta = self.calc_beta_object_probe_positions(
-                p, grad_p, eta_p, grad_pos, eta_pos, d, gradF, psi_far, op, grad_op, eta_op,
-                do1=grad_o, do2=eta_o,
+            Qgg, Bge, Qee = self.calc_hessian3_object_probe_positions(
+                p, grad_p, eta_p, grad_pos, eta_pos, d, gradF, psi_far, op,
+                grad_op, eta_op, do1=grad_o, do2=eta_o,
             )
+            beta = Bge / Qee
             eta_o = -grad_o + beta * eta_o
             eta_op = -grad_op + beta * eta_op
             eta_p = -grad_p + beta * eta_p
             eta_pos = -grad_pos + beta * eta_pos
+
+            top = -redot(grad_o, eta_o) - redot(grad_p, eta_p) - torch.sum(grad_pos * eta_pos)
+            alpha = self.fused_step_length(top, beta, Qgg, Bge, Qee)
+        else:
+            eta_o = -grad_o
+            eta_op = -grad_op
+            eta_p = -grad_p
+            eta_pos = -grad_pos
+            alpha = self.calc_alpha_object_probe_positions(
+                p, grad_o, grad_p, grad_pos, eta_o, eta_p, eta_pos, d, gradF, psi_far, op, eta_op
+            )
 
         if self.options.method == "CG":
             self.eta_o = eta_o
             self.eta_op[self.indices] = eta_op
             self.eta_p = eta_p
             self.eta_pos[self.indices] = eta_pos
-
-        alpha = self.calc_alpha_object_probe_positions(
-            p, grad_o, grad_p, grad_pos, eta_o, eta_p, eta_pos, d, gradF, psi_far, op, eta_op
-        )
 
         # normalize with the batch size
         alpha *= op.shape[0] / self.batch_size
@@ -426,6 +430,34 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
             * c2
         )
         return 2 * (v1 + v2)
+
+    def hessianF3(self, psi_far, psi_far1, psi_far2, data):
+        """`hessianF` for (1, 1), (1, 2), (2, 2) in one pass."""
+
+        A = torch.sqrt(torch.sum(torch.abs(psi_far) ** 2, dim=1, keepdim=True)) + self.eps
+        l0 = psi_far / A
+        d0 = data / A
+        mask = self.current_constrained_pixel_mask
+        w1 = mask * (1 - d0)
+        w2 = mask * d0
+        del A, d0
+        c1 = torch.sum(reprod(l0, psi_far1), dim=1, keepdim=True)
+        c2 = torch.sum(reprod(l0, psi_far2), dim=1, keepdim=True)
+        del l0
+        h11 = torch.sum(w1 * reprod(psi_far1, psi_far1)) + torch.sum(w2 * c1 * c1)
+        h12 = torch.sum(w1 * reprod(psi_far1, psi_far2)) + torch.sum(w2 * c1 * c2)
+        h22 = torch.sum(w1 * reprod(psi_far2, psi_far2)) + torch.sum(w2 * c2 * c2)
+        return 2 * h11, 2 * h12, 2 * h22
+
+    def fused_step_length(self, top, beta, Qgg, Bge, Qee):
+        """Step length along eta_new = -g + beta*eta, using
+        B(eta_new, eta_new) = Qgg - 2 beta Bge + beta^2 Qee; non-positive curvature
+        is replaced by its absolute value to keep the step downhill."""
+        bottom = beta * beta * Qee - 2 * beta * Bge + Qgg
+        scale = torch.abs(beta * beta * Qee) + torch.abs(2 * beta * Bge) + torch.abs(Qgg)
+        fallback = torch.where(bottom != 0, torch.abs(bottom), 1e-6 * scale)
+        bottom = torch.where(bottom > 1e-6 * scale, bottom, fallback)
+        return top / bottom
 
     def gradient_o(self, p, gradF):
         """
@@ -523,43 +555,36 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         bottom = redot(gradF, d2m2) + self.hessianF(psi_far, Ldm2, Ldm2, d)
         return top / bottom
 
-    def calc_beta_object(self, p, d, psi_far, dop1, dop2):
-        """Step length for the CG direction with respect to the object"""
+    def calc_hessian3_object(self, p, d, psi_far, dop1, dop2):
+        """{B(g, g), B(g, eta), B(eta, eta)} for the object."""
 
-        dm1 = p * dop1
-        dm2 = p * dop2
+        propagate = self.forward_model.free_space_propagator.propagate_forward
+        Ldm1 = propagate(p * dop1)
+        Ldm2 = propagate(p * dop2)
+        return self.hessianF3(psi_far, Ldm1, Ldm2, d)
 
-        Ldm1 = self.forward_model.free_space_propagator.propagate_forward(dm1)
-        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dm2)
-
-        top = self.hessianF(psi_far, Ldm1, Ldm2, d)
-        bottom = self.hessianF(psi_far, Ldm2, Ldm2, d)
-        return top / bottom
-
-    def calc_beta_object_probe(self, p, dp1, dp2, d, gradF, psi_far, op, dop1, dop2):
-        """Step length for the CG direction with respect to the object and probe"""
+    def calc_hessian3_object_probe(self, p, dp1, dp2, d, gradF, psi_far, op, dop1, dop2):
+        """{B(g, g), B(g, eta), B(eta, eta)} for the object and probe."""
 
         dp1 = self.parameter_group.probe.options.rho * dp1
         dp2 = self.parameter_group.probe.options.rho * dp2
 
-        dm1 = dp1 * op + p * dop1
-        dm2 = dp2 * op + p * dop2
+        propagate = self.forward_model.free_space_propagator.propagate_forward
+        Ldm1 = propagate(dp1 * op + p * dop1)
+        Ldm2 = propagate(dp2 * op + p * dop2)
+        h11, h12, h22 = self.hessianF3(psi_far, Ldm1, Ldm2, d)
+        del Ldm1, Ldm2
 
-        d2m1 = dp1 * dop2 + dp2 * dop1
-        d2m2 = 2 * dp2 * dop2
+        h11 = h11 + redot(gradF, 2 * dp1 * dop1)
+        h12 = h12 + redot(gradF, dp1 * dop2 + dp2 * dop1)
+        h22 = h22 + redot(gradF, 2 * dp2 * dop2)
+        return h11, h12, h22
 
-        Ldm1 = self.forward_model.free_space_propagator.propagate_forward(dm1)
-        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dm2)
-
-        top = redot(gradF, d2m1) + self.hessianF(psi_far, Ldm1, Ldm2, d)
-        bottom = redot(gradF, d2m2) + self.hessianF(psi_far, Ldm2, Ldm2, d)
-        return top / bottom
-
-    def calc_beta_object_probe_positions(
+    def calc_hessian3_object_probe_positions(
         self, p, dp1, dp2, dpos1, dpos2, d, gradF, psi_far, op, dop1, dop2,
         *, do1=None, do2=None,
     ):
-        """Step length for the CG direction with respect to the object, probe and positions"""
+        """{B(g, g), B(g, eta), B(eta, eta)} for the object, probe and positions."""
 
         dp1 = self.parameter_group.probe.options.rho * dp1
         dp2 = self.parameter_group.probe.options.rho * dp2
@@ -568,23 +593,28 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         dpos2 = self.parameter_group.probe_positions.options.rho * dpos2
 
         derivative = self.position_directional_derivative
-        dt12 = derivative(dop1, self.positions, dpos2, object_array=do1)
-        dt21 = derivative(dop2, self.positions, dpos1, object_array=do2)
-        dt22 = derivative(dop2, self.positions, dpos2, object_array=do2)
-        dt1 = derivative(op, self.positions, dpos1)
-        dt2 = derivative(op, self.positions, dpos2)
-        d2t1 = derivative(op, self.positions, dpos1, second_direction=dpos2)
-        d2t2 = derivative(op, self.positions, dpos2, second_direction=dpos2)
+        positions = self.positions
+        propagate = self.forward_model.free_space_propagator.propagate_forward
 
-        dm1 = dp1 * op + p * (dop1 + dt1)
-        dm2 = dp2 * op + p * (dop2 + dt2)
+        # first order: dop_i + D_i op
+        a1 = dop1 + derivative(op, positions, dpos1)
+        a2 = dop2 + derivative(op, positions, dpos2)
+        Ldm1 = propagate(dp1 * op + p * a1)
+        Ldm2 = propagate(dp2 * op + p * a2)
+        h11, h12, h22 = self.hessianF3(psi_far, Ldm1, Ldm2, d)
+        del Ldm1, Ldm2
 
-        d2m1 = p * (dt12 + dt21 + d2t1) + dp1 * (dop2 + dt2) + dp2 * (dop1 + dt1)
-        d2m2 = p * (2 * dt22 + d2t2) + 2 * dp2 * dop2 + 2 * dp2 * dt2
+        # second order, one term at a time to bound memory
+        s = 2 * derivative(dop1, positions, dpos1, object_array=do1)
+        s = s + derivative(op, positions, dpos1, second_direction=dpos1)
+        h11 = h11 + redot(gradF, p * s + 2 * dp1 * a1)
 
-        Ldm1 = self.forward_model.free_space_propagator.propagate_forward(dm1)
-        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dm2)
+        s = derivative(dop1, positions, dpos2, object_array=do1)
+        s = s + derivative(dop2, positions, dpos1, object_array=do2)
+        s = s + derivative(op, positions, dpos1, second_direction=dpos2)
+        h12 = h12 + redot(gradF, p * s + dp1 * a2 + dp2 * a1)
 
-        top = redot(gradF, d2m1) + self.hessianF(psi_far, Ldm1, Ldm2, d)
-        bottom = redot(gradF, d2m2) + self.hessianF(psi_far, Ldm2, Ldm2, d)
-        return top / bottom
+        s = 2 * derivative(dop2, positions, dpos2, object_array=do2)
+        s = s + derivative(op, positions, dpos2, second_direction=dpos2)
+        h22 = h22 + redot(gradF, p * s + 2 * dp2 * a2)
+        return h11, h12, h22
