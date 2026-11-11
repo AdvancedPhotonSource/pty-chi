@@ -11,7 +11,6 @@ from ptychi.reconstructors.base import (
 )
 from ptychi.metrics import MSELossOfSqrt
 from ptychi.maths import reprod, redot
-from ptychi.utils import get_default_complex_dtype
 from ptychi.api.enums import ShiftOperators
 import ptychi.forward_models as fm
 import ptychi.image_proc as ip
@@ -61,7 +60,6 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.eps = 1e-8
         # cg varibales
         if self.options.method == "CG":
-            self.eta_op = torch.empty(dataset.patterns.shape,dtype=get_default_complex_dtype())[:,None,:,:]
             self.eta_pos = torch.empty([dataset.patterns.shape[0],2])
             
     def build_forward_model(self):
@@ -199,17 +197,18 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         return (delta_o, delta_p_all_modes, delta_pos), y
 
-    def refresh_object_direction_patches(self, direction, positions, patches):
-        r"""Resample a cached object search direction at the current positions.
-
-        FULL_OBJECT returns :math:`\widetilde{\Delta O}(u+q_y-(p_y-1)/2,
-        v+q_x-(p_x-1)/2)` on the fixed retained support, with zero padded
-        margins. Here :math:`q` is the current absolute probe-grid center and
-        :math:`p` is the probe shape. PATCH retains its cached ``patches``.
-        """
-        if self.forward_model.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
-            return patches
-        return self.forward_model.object_sampling_derivative(positions, (0, 0), direction)
+    def object_direction_patches(self, direction):
+        """Sample a native-grid object direction at the current positions."""
+        if self.forward_model.resolved_shift_operator == ShiftOperators.FULL_OBJECT:
+            return self.forward_model.object_sampling_derivative(self.positions, (0, 0), direction)
+        if self.forward_model.resampling_enabled:
+            direction = ip.fourier_resize(direction, self.forward_model.probe_grid_object_shape)
+        return self.forward_model.extract_probe_grid_patches(
+            direction,
+            self.positions,
+            self.parameter_group.probe.get_spatial_shape(),
+            integer_mode=False,
+        )[:, None]
 
     def position_directional_derivative(
         self, patches, positions, direction, *, object_array=None, second_direction=None
@@ -243,9 +242,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         if self.options.method == "CG" and self.current_epoch > 0:
             eta_o = self.eta_o
-            eta_op = self.refresh_object_direction_patches(
-                eta_o, self.positions, self.eta_op[self.indices]
-            )
+            eta_op = self.object_direction_patches(eta_o)
             Qgg, Bge, Qee = self.calc_hessian3_object(p, d, psi_far, grad_op, eta_op)
             beta = Bge / Qee
             eta_o = -grad_o + beta * eta_o
@@ -260,7 +257,6 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         if self.options.method == "CG":
             self.eta_o = eta_o
-            self.eta_op[self.indices] = eta_op
 
         # normalize with the batch size
         alpha *= op.shape[0] / self.batch_size
@@ -275,9 +271,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         if self.options.method == "CG" and self.current_epoch > 0:
             eta_o = self.eta_o
-            eta_op = self.refresh_object_direction_patches(
-                eta_o, self.positions, self.eta_op[self.indices]
-            )
+            eta_op = self.object_direction_patches(eta_o)
             eta_p = self.eta_p
             Qgg, Bge, Qee = self.calc_hessian3_object_probe(
                 p, grad_p, eta_p, d, gradF, psi_far, op, grad_op, eta_op
@@ -299,7 +293,6 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         if self.options.method == "CG":
             self.eta_o = eta_o
-            self.eta_op[self.indices] = eta_op
             self.eta_p = eta_p
 
         # normalize with the batch size
@@ -317,14 +310,12 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         if self.options.method == "CG" and self.current_epoch > 0:
             eta_o = self.eta_o
-            eta_op = self.refresh_object_direction_patches(
-                eta_o, self.positions, self.eta_op[self.indices]
-            )
+            eta_op = self.object_direction_patches(eta_o)
             eta_p = self.eta_p
             eta_pos = self.eta_pos[self.indices]
             Qgg, Bge, Qee = self.calc_hessian3_object_probe_positions(
                 p, grad_p, eta_p, grad_pos, eta_pos, d, gradF, psi_far, op,
-                grad_op, eta_op, op_derivs, do1=grad_o, do2=eta_o,
+                grad_op, eta_op, op_derivs, grad_o, eta_o,
             )
             beta = Bge / Qee
             eta_o = -grad_o + beta * eta_o
@@ -347,7 +338,6 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         if self.options.method == "CG":
             self.eta_o = eta_o
-            self.eta_op[self.indices] = eta_op
             self.eta_p = eta_p
             self.eta_pos[self.indices] = eta_pos
 
@@ -548,8 +538,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         return h11, h12, h22
 
     def calc_hessian3_object_probe_positions(
-        self, p, dp1, dp2, dpos1, dpos2, d, gradF, psi_far, op, dop1, dop2, op_derivs,
-        *, do1=None, do2=None,
+        self, p, dp1, dp2, dpos1, dpos2, d, gradF, psi_far, op, dop1, dop2, op_derivs, do1, do2
     ):
         """{B(g, g), B(g, eta), B(eta, eta)} for the object, probe and positions."""
 
