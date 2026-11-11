@@ -314,8 +314,20 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
             eta_p = self.eta_p
             eta_pos = self.eta_pos[self.indices]
             Qgg, Bge, Qee = self.calc_hessian3_object_probe_positions(
-                p, grad_p, eta_p, grad_pos, eta_pos, d, gradF, psi_far, op,
-                grad_op, eta_op, op_derivs, grad_o, eta_o,
+                p,
+                grad_p,
+                eta_p,
+                grad_pos,
+                eta_pos,
+                d,
+                gradF,
+                psi_far,
+                op,
+                grad_op,
+                eta_op,
+                op_derivs,
+                grad_o,
+                eta_o,
             )
             beta = Bge / Qee
             eta_o = -grad_o + beta * eta_o
