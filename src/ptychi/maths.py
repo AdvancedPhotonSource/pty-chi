@@ -638,8 +638,11 @@ def redot(a, b, axis=None):
     """
     Real part of the dot product of 2 arrays
     """
-    res = torch.sum(reprod(a, b), axis=axis)
-    return res
+    a, b = torch.view_as_real(a), torch.view_as_real(b)
+    if axis is None:
+        return torch.dot(a.reshape(-1), b.reshape(-1))
+    n = a.shape[0]
+    return torch.bmm(a.reshape(n, 1, -1), b.reshape(n, -1, 1)).view(n)
 
 
 def mad(x: torch.Tensor, dim=None):

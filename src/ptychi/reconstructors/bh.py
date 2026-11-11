@@ -11,7 +11,6 @@ from ptychi.reconstructors.base import (
 )
 from ptychi.metrics import MSELossOfSqrt
 from ptychi.maths import reprod, redot
-from ptychi.utils import get_default_complex_dtype
 from ptychi.api.enums import ShiftOperators
 import ptychi.forward_models as fm
 import ptychi.image_proc as ip
@@ -19,6 +18,9 @@ import ptychi.image_proc as ip
 if TYPE_CHECKING:
     import ptychi.api as api
     import ptychi.data_structures.parameter_group as pg
+
+FIRST_ORDERS = ((1, 0), (0, 1))
+SECOND_ORDERS = ((2, 0), (1, 1), (0, 2))
 
 
 class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
@@ -58,7 +60,6 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.eps = 1e-8
         # cg varibales
         if self.options.method == "CG":
-            self.eta_op = torch.empty(dataset.patterns.shape,dtype=get_default_complex_dtype())[:,None,:,:]
             self.eta_pos = torch.empty([dataset.patterns.shape[0],2])
             
     def build_forward_model(self):
@@ -196,63 +197,34 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         return (delta_o, delta_p_all_modes, delta_pos), y
 
-    def refresh_object_direction_patches(self, direction, positions, patches):
-        r"""Resample a cached object search direction at the current positions.
-
-        FULL_OBJECT returns :math:`\widetilde{\Delta O}(u+q_y-(p_y-1)/2,
-        v+q_x-(p_x-1)/2)` on the fixed retained support, with zero padded
-        margins. Here :math:`q` is the current absolute probe-grid center and
-        :math:`p` is the probe shape. PATCH retains its cached ``patches``.
-        """
-        if self.forward_model.resolved_shift_operator != ShiftOperators.FULL_OBJECT:
-            return patches
-        return self.forward_model.object_sampling_derivative(positions, (0, 0), direction)
+    def object_direction_patches(self, direction):
+        """Sample a native-grid object direction at the current positions."""
+        if self.forward_model.resolved_shift_operator == ShiftOperators.FULL_OBJECT:
+            return self.forward_model.object_sampling_derivative(self.positions, (0, 0), direction)
+        if self.forward_model.resampling_enabled:
+            direction = ip.fourier_resize(direction, self.forward_model.probe_grid_object_shape)
+        return self.forward_model.extract_probe_grid_patches(
+            direction,
+            self.positions,
+            self.parameter_group.probe.get_spatial_shape(),
+            integer_mode=False,
+        )[:, None]
 
     def position_directional_derivative(
         self, patches, positions, direction, *, object_array=None, second_direction=None
     ):
-        r"""Evaluate first or mixed second position derivatives for BH curvature.
-
-        For each position, let :math:`S(q)` denote its sampled object patch
-        and :math:`d=(d_y,d_x)` the supplied ``direction`` in probe-grid pixels.
-        With no ``second_direction``, return
-
-        .. math::
-
-            D_d S = d_y\partial_{q_y}S + d_x\partial_{q_x}S.
-
-        With ``second_direction`` :math:`e=(e_y,e_x)`, return
-
-        .. math::
-
-            D_e D_d S = d_y e_y\partial_{q_y}^2 S
-                + (d_y e_x+d_x e_y)\partial_{q_y}\partial_{q_x}S
-                + d_x e_x\partial_{q_x}^2 S.
-
-        Directions are held fixed during differentiation. FULL_OBJECT uses
-        probe-grid derivatives of the complete object before cropping,
-        provided by ``object_sampling_derivative``.
-        ``positions`` are in native object pixels; ``object_array`` optionally
-        supplies a native-grid object update direction in place of the object.
-
-        PATCH Fourier-differentiates ``patches`` on their own periodic grid:
-        the multiplier is :math:`2\pi i(f_y d_y+f_x d_x)`, multiplied by
-        :math:`2\pi i(f_y e_y+f_x e_x)` for the second derivative. The output
-        retains shape ``(batch_size, n_slices, probe_height, probe_width)``.
-        """
+        """First (D_d S) or mixed second (D_e D_d S) position derivative of sampled patches."""
         if self.forward_model.resolved_shift_operator == ShiftOperators.FULL_OBJECT:
-            def derivative(order):
-                return self.forward_model.object_sampling_derivative(positions, order, object_array)
             dy, dx = direction[:, 0, None, None, None], direction[:, 1, None, None, None]
             if second_direction is None:
-                return dy * derivative((1, 0)) + dx * derivative((0, 1))
+                sy, sx = self.position_derivatives(patches, positions, FIRST_ORDERS, object_array)
+                return dy * sy + dx * sx
             ey = second_direction[:, 0, None, None, None]
             ex = second_direction[:, 1, None, None, None]
-            return (
-                dy * ey * derivative((2, 0))
-                + (dy * ex + dx * ey) * derivative((1, 1))
-                + dx * ex * derivative((0, 2))
+            syy, sxy, sxx = self.position_derivatives(
+                patches, positions, SECOND_ORDERS, object_array
             )
+            return dy * ey * syy + (dy * ex + dx * ey) * sxy + dx * ex * sxx
         fy = torch.fft.fftfreq(patches.shape[-2], device=patches.device)
         fx = torch.fft.fftfreq(patches.shape[-1], device=patches.device)
         def factor(vector):
@@ -268,24 +240,23 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
     def compute_updates_object(self, op, p, psi_far, gradF, d):
         grad_o, grad_op = self.gradient_o(p, gradF)
 
-        if self.current_epoch == 0 or self.options.method == "GD":
-            eta_o = -grad_o
-            eta_op = -grad_op
-        elif self.options.method == "CG":
+        if self.options.method == "CG" and self.current_epoch > 0:
             eta_o = self.eta_o
-            eta_op = self.refresh_object_direction_patches(
-                eta_o, self.positions, self.eta_op[self.indices]
-            )
-
-            beta = self.calc_beta_object(p, d, psi_far, grad_op, eta_op)
+            eta_op = self.object_direction_patches(eta_o)
+            Qgg, Bge, Qee = self.calc_hessian3_object(p, d, psi_far, grad_op, eta_op)
+            beta = Bge / Qee
             eta_o = -grad_o + beta * eta_o
             eta_op = -grad_op + beta * eta_op
 
+            top = -redot(grad_o, eta_o)
+            alpha = self.fused_step_length(top, beta, Qgg, Bge, Qee)
+        else:
+            eta_o = -grad_o
+            eta_op = -grad_op
+            alpha = self.calc_alpha_object(p, grad_o, eta_o, d, psi_far, eta_op)
+
         if self.options.method == "CG":
             self.eta_o = eta_o
-            self.eta_op[self.indices] = eta_op
-
-        alpha = self.calc_alpha_object(p, grad_o, eta_o, d, psi_far, eta_op)
 
         # normalize with the batch size
         alpha *= op.shape[0] / self.batch_size
@@ -298,33 +269,31 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         grad_o, grad_op = self.gradient_o(p, gradF)
         grad_p = self.parameter_group.probe.options.rho * self.gradient_p(op, gradF)
 
-        if self.current_epoch == 0 or self.options.method == "GD":
-            eta_o = -grad_o
-            eta_op = -grad_op
-            eta_p = -grad_p
-        elif self.options.method == "CG":
-            # intermediate variables for the CG
+        if self.options.method == "CG" and self.current_epoch > 0:
             eta_o = self.eta_o
-            eta_op = self.refresh_object_direction_patches(
-                eta_o, self.positions, self.eta_op[self.indices]
-            )
+            eta_op = self.object_direction_patches(eta_o)
             eta_p = self.eta_p
-
-            beta = self.calc_beta_object_probe(
+            Qgg, Bge, Qee = self.calc_hessian3_object_probe(
                 p, grad_p, eta_p, d, gradF, psi_far, op, grad_op, eta_op
             )
+            beta = Bge / Qee
             eta_o = -grad_o + beta * eta_o
             eta_op = -grad_op + beta * eta_op
             eta_p = -grad_p + beta * eta_p
 
+            top = -redot(grad_o, eta_o) - redot(grad_p, eta_p)
+            alpha = self.fused_step_length(top, beta, Qgg, Bge, Qee)
+        else:
+            eta_o = -grad_o
+            eta_op = -grad_op
+            eta_p = -grad_p
+            alpha = self.calc_alpha_object_probe(
+                p, grad_o, grad_p, eta_o, eta_p, d, gradF, psi_far, op, eta_op
+            )
+
         if self.options.method == "CG":
             self.eta_o = eta_o
-            self.eta_op[self.indices] = eta_op
             self.eta_p = eta_p
-
-        alpha = self.calc_alpha_object_probe(
-            p, grad_o, grad_p, eta_o, eta_p, d, gradF, psi_far, op, eta_op
-        )
 
         # normalize with the batch size
         alpha *= op.shape[0] / self.batch_size
@@ -336,42 +305,53 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
     def compute_updates_object_probe_positions(self, op, p, pos, psi_far, gradF, d):
         grad_o, grad_op = self.gradient_o(p, gradF)
         grad_p = self.parameter_group.probe.options.rho * self.gradient_p(op, gradF)
-        grad_pos = self.parameter_group.probe_positions.options.rho * self.gradient_pos(
-            op, p, pos, gradF
-        )
+        grad_pos, op_derivs = self.gradient_pos(op, p, pos, gradF)
+        grad_pos = self.parameter_group.probe_positions.options.rho * grad_pos
 
-        if self.current_epoch == 0 or self.options.method == "GD":
-            eta_o = -grad_o
-            eta_op = -grad_op
-            eta_p = -grad_p
-            eta_pos = -grad_pos
-        elif self.options.method == "CG":
-            # intermediate variables for the CG
+        if self.options.method == "CG" and self.current_epoch > 0:
             eta_o = self.eta_o
-            eta_op = self.refresh_object_direction_patches(
-                eta_o, self.positions, self.eta_op[self.indices]
-            )
+            eta_op = self.object_direction_patches(eta_o)
             eta_p = self.eta_p
             eta_pos = self.eta_pos[self.indices]
-
-            beta = self.calc_beta_object_probe_positions(
-                p, grad_p, eta_p, grad_pos, eta_pos, d, gradF, psi_far, op, grad_op, eta_op,
-                do1=grad_o, do2=eta_o,
+            Qgg, Bge, Qee = self.calc_hessian3_object_probe_positions(
+                p,
+                grad_p,
+                eta_p,
+                grad_pos,
+                eta_pos,
+                d,
+                gradF,
+                psi_far,
+                op,
+                grad_op,
+                eta_op,
+                op_derivs,
+                grad_o,
+                eta_o,
             )
+            beta = Bge / Qee
             eta_o = -grad_o + beta * eta_o
             eta_op = -grad_op + beta * eta_op
             eta_p = -grad_p + beta * eta_p
             eta_pos = -grad_pos + beta * eta_pos
 
+            top = -redot(grad_o, eta_o) - redot(grad_p, eta_p) - torch.sum(grad_pos * eta_pos)
+            alpha = self.fused_step_length(top, beta, Qgg, Bge, Qee)
+        else:
+            eta_o = -grad_o
+            eta_op = -grad_op
+            eta_p = -grad_p
+            eta_pos = -grad_pos
+            alpha = self.calc_alpha_object_probe_positions(
+                p, grad_o, grad_p, grad_pos, eta_o, eta_p, eta_pos, d, gradF, psi_far, op, eta_op,
+                op_derivs,
+            )
+        del op_derivs
+
         if self.options.method == "CG":
             self.eta_o = eta_o
-            self.eta_op[self.indices] = eta_op
             self.eta_p = eta_p
             self.eta_pos[self.indices] = eta_pos
-
-        alpha = self.calc_alpha_object_probe_positions(
-            p, grad_o, grad_p, grad_pos, eta_o, eta_p, eta_pos, d, gradF, psi_far, op, eta_op
-        )
 
         # normalize with the batch size
         alpha *= op.shape[0] / self.batch_size
@@ -427,6 +407,34 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         )
         return 2 * (v1 + v2)
 
+    def hessianF3(self, psi_far, psi_far1, psi_far2, data):
+        """`hessianF` for (1, 1), (1, 2), (2, 2) in one pass."""
+
+        A = torch.sqrt(torch.sum(torch.abs(psi_far) ** 2, dim=1, keepdim=True)) + self.eps
+        l0 = psi_far / A
+        d0 = data / A
+        mask = self.current_constrained_pixel_mask
+        w1 = mask * (1 - d0)
+        w2 = mask * d0
+        del A, d0
+        c1 = torch.sum(reprod(l0, psi_far1), dim=1, keepdim=True)
+        c2 = torch.sum(reprod(l0, psi_far2), dim=1, keepdim=True)
+        del l0
+        h11 = torch.sum(w1 * reprod(psi_far1, psi_far1)) + torch.sum(w2 * c1 * c1)
+        h12 = torch.sum(w1 * reprod(psi_far1, psi_far2)) + torch.sum(w2 * c1 * c2)
+        h22 = torch.sum(w1 * reprod(psi_far2, psi_far2)) + torch.sum(w2 * c2 * c2)
+        return 2 * h11, 2 * h12, 2 * h22
+
+    def fused_step_length(self, top, beta, Qgg, Bge, Qee):
+        """Step length along eta_new = -g + beta*eta, using
+        B(eta_new, eta_new) = Qgg - 2 beta Bge + beta^2 Qee; non-positive curvature
+        is replaced by its absolute value to keep the step downhill."""
+        bottom = beta * beta * Qee - 2 * beta * Bge + Qgg
+        scale = torch.abs(beta * beta * Qee) + torch.abs(2 * beta * Bge) + torch.abs(Qgg)
+        fallback = torch.where(bottom != 0, torch.abs(bottom), 1e-6 * scale)
+        bottom = torch.where(bottom > 1e-6 * scale, bottom, fallback)
+        return top / bottom
+
     def gradient_o(self, p, gradF):
         """
         Gradient with respect to the object.
@@ -466,18 +474,11 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         return torch.sum(torch.conj(op) * gradF, axis=0)
 
     def gradient_pos(self, op, p, pos, gradF):
-        """Gradient with respect to positions"""
+        """Gradient with respect to positions, and the first derivatives (dS/dq_y, dS/dq_x)."""
 
-        direction = torch.zeros_like(pos)
-        direction[:, 0] = 1
-        dt1 = self.position_directional_derivative(op, pos, direction)
-        dt2 = self.position_directional_derivative(op, pos, direction.flip(-1))
-
-        grad_pos = torch.zeros_like(pos)
-        grad_pos[:, 0] = redot(gradF, p * dt1, axis=(1, 2, 3))
-        grad_pos[:, 1] = redot(gradF, p * dt2, axis=(1, 2, 3))
-
-        return grad_pos
+        op_derivs = tuple(self.position_derivatives(op, pos, FIRST_ORDERS))
+        grad_pos = torch.stack([redot(gradF, p * t, axis=(1, 2, 3)) for t in op_derivs], dim=-1)
+        return grad_pos, op_derivs
 
     def calc_alpha_object(self, p, do1, do2, d, psi_far, dop2):
         """Step length for the object update"""
@@ -502,7 +503,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         return top / bottom
 
     def calc_alpha_object_probe_positions(
-        self, p, do1, dp1, dpos1, do2, dp2, dpos2, d, gradF, psi_far, op, dop2
+        self, p, do1, dp1, dpos1, do2, dp2, dpos2, d, gradF, psi_far, op, dop2, op_derivs
     ):
         """Step length for the object, probe and positions update"""
 
@@ -511,55 +512,47 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         dp2 = self.parameter_group.probe.options.rho * dp2
         dpos2 = self.parameter_group.probe_positions.options.rho * dpos2
 
-        derivative = self.position_directional_derivative
-        dt2 = derivative(dop2, self.positions, dpos2, object_array=do2)
-        dt = derivative(op, self.positions, dpos2)
-        d2t = derivative(op, self.positions, dpos2, second_direction=dpos2)
-
-        dm2 = dp2 * op + p * (dop2 + dt)
-        d2m2 = p * (2 * dt2 + d2t) + 2 * dp2 * dop2 + 2 * dp2 * dt
-
-        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dm2)
-        bottom = redot(gradF, d2m2) + self.hessianF(psi_far, Ldm2, Ldm2, d)
-        return top / bottom
-
-    def calc_beta_object(self, p, d, psi_far, dop1, dop2):
-        """Step length for the CG direction with respect to the object"""
-
-        dm1 = p * dop1
-        dm2 = p * dop2
-
-        Ldm1 = self.forward_model.free_space_propagator.propagate_forward(dm1)
-        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dm2)
-
-        top = self.hessianF(psi_far, Ldm1, Ldm2, d)
+        sy, sx = op_derivs
+        a2 = dop2 + dpos2[:, 0, None, None, None] * sy + dpos2[:, 1, None, None, None] * sx
+        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dp2 * op + p * a2)
         bottom = self.hessianF(psi_far, Ldm2, Ldm2, d)
+        del Ldm2
+
+        derivative = self.position_directional_derivative
+        s = 2 * derivative(dop2, self.positions, dpos2, object_array=do2)
+        s = s + derivative(op, self.positions, dpos2, second_direction=dpos2)
+        bottom += redot(gradF, p * s + 2 * dp2 * a2)
         return top / bottom
 
-    def calc_beta_object_probe(self, p, dp1, dp2, d, gradF, psi_far, op, dop1, dop2):
-        """Step length for the CG direction with respect to the object and probe"""
+    def calc_hessian3_object(self, p, d, psi_far, dop1, dop2):
+        """{B(g, g), B(g, eta), B(eta, eta)} for the object."""
+
+        propagate = self.forward_model.free_space_propagator.propagate_forward
+        Ldm1 = propagate(p * dop1)
+        Ldm2 = propagate(p * dop2)
+        return self.hessianF3(psi_far, Ldm1, Ldm2, d)
+
+    def calc_hessian3_object_probe(self, p, dp1, dp2, d, gradF, psi_far, op, dop1, dop2):
+        """{B(g, g), B(g, eta), B(eta, eta)} for the object and probe."""
 
         dp1 = self.parameter_group.probe.options.rho * dp1
         dp2 = self.parameter_group.probe.options.rho * dp2
 
-        dm1 = dp1 * op + p * dop1
-        dm2 = dp2 * op + p * dop2
+        propagate = self.forward_model.free_space_propagator.propagate_forward
+        Ldm1 = propagate(dp1 * op + p * dop1)
+        Ldm2 = propagate(dp2 * op + p * dop2)
+        h11, h12, h22 = self.hessianF3(psi_far, Ldm1, Ldm2, d)
+        del Ldm1, Ldm2
 
-        d2m1 = dp1 * dop2 + dp2 * dop1
-        d2m2 = 2 * dp2 * dop2
+        h11 += redot(gradF, 2 * dp1 * dop1)
+        h12 += redot(gradF, dp1 * dop2 + dp2 * dop1)
+        h22 += redot(gradF, 2 * dp2 * dop2)
+        return h11, h12, h22
 
-        Ldm1 = self.forward_model.free_space_propagator.propagate_forward(dm1)
-        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dm2)
-
-        top = redot(gradF, d2m1) + self.hessianF(psi_far, Ldm1, Ldm2, d)
-        bottom = redot(gradF, d2m2) + self.hessianF(psi_far, Ldm2, Ldm2, d)
-        return top / bottom
-
-    def calc_beta_object_probe_positions(
-        self, p, dp1, dp2, dpos1, dpos2, d, gradF, psi_far, op, dop1, dop2,
-        *, do1=None, do2=None,
+    def calc_hessian3_object_probe_positions(
+        self, p, dp1, dp2, dpos1, dpos2, d, gradF, psi_far, op, dop1, dop2, op_derivs, do1, do2
     ):
-        """Step length for the CG direction with respect to the object, probe and positions"""
+        """{B(g, g), B(g, eta), B(eta, eta)} for the object, probe and positions."""
 
         dp1 = self.parameter_group.probe.options.rho * dp1
         dp2 = self.parameter_group.probe.options.rho * dp2
@@ -567,24 +560,56 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         dpos1 = self.parameter_group.probe_positions.options.rho * dpos1
         dpos2 = self.parameter_group.probe_positions.options.rho * dpos2
 
-        derivative = self.position_directional_derivative
-        dt12 = derivative(dop1, self.positions, dpos2, object_array=do1)
-        dt21 = derivative(dop2, self.positions, dpos1, object_array=do2)
-        dt22 = derivative(dop2, self.positions, dpos2, object_array=do2)
-        dt1 = derivative(op, self.positions, dpos1)
-        dt2 = derivative(op, self.positions, dpos2)
-        d2t1 = derivative(op, self.positions, dpos1, second_direction=dpos2)
-        d2t2 = derivative(op, self.positions, dpos2, second_direction=dpos2)
+        propagate = self.forward_model.free_space_propagator.propagate_forward
 
-        dm1 = dp1 * op + p * (dop1 + dt1)
-        dm2 = dp2 * op + p * (dop2 + dt2)
+        # first order: dop_i + D_i op
+        sy, sx = op_derivs
+        a1 = dop1 + dpos1[:, 0, None, None, None] * sy + dpos1[:, 1, None, None, None] * sx
+        a2 = dop2 + dpos2[:, 0, None, None, None] * sy + dpos2[:, 1, None, None, None] * sx
+        Ldm1 = propagate(dp1 * op + p * a1)
+        Ldm2 = propagate(dp2 * op + p * a2)
+        h11, h12, h22 = self.hessianF3(psi_far, Ldm1, Ldm2, d)
+        del Ldm1, Ldm2
 
-        d2m1 = p * (dt12 + dt21 + d2t1) + dp1 * (dop2 + dt2) + dp2 * (dop1 + dt1)
-        d2m2 = p * (2 * dt22 + d2t2) + 2 * dp2 * dop2 + 2 * dp2 * dt2
+        # second order: <gradF, p D_j dop_i> and <gradF, p D_i D_j op> from per-position
+        # projections of the base derivatives
+        r_op = self.position_projections(gradF, p, op, SECOND_ORDERS)
+        r1 = self.position_projections(gradF, p, dop1, FIRST_ORDERS, do1)
+        r2 = self.position_projections(gradF, p, dop2, FIRST_ORDERS, do2)
 
-        Ldm1 = self.forward_model.free_space_propagator.propagate_forward(dm1)
-        Ldm2 = self.forward_model.free_space_propagator.propagate_forward(dm2)
+        h11 += 2 * torch.sum(r1 * dpos1) + self.second_order_term(r_op, dpos1, dpos1)
+        h11 += redot(gradF, 2 * dp1 * a1)
+        h12 += torch.sum(r1 * dpos2) + torch.sum(r2 * dpos1)
+        h12 += self.second_order_term(r_op, dpos1, dpos2)
+        h12 += redot(gradF, dp1 * a2 + dp2 * a1)
+        h22 += 2 * torch.sum(r2 * dpos2) + self.second_order_term(r_op, dpos2, dpos2)
+        h22 += redot(gradF, 2 * dp2 * a2)
+        return h11, h12, h22
 
-        top = redot(gradF, d2m1) + self.hessianF(psi_far, Ldm1, Ldm2, d)
-        bottom = redot(gradF, d2m2) + self.hessianF(psi_far, Ldm2, Ldm2, d)
-        return top / bottom
+    def position_derivatives(self, patches, positions, orders, object_array=None):
+        """Yield d^(m+n) S / dq_y^m dq_x^n of the sampled object for each (m, n) in orders."""
+        if self.forward_model.resolved_shift_operator == ShiftOperators.FULL_OBJECT:
+            for order in orders:
+                yield self.forward_model.object_sampling_derivative(positions, order, object_array)
+            return
+        ky = 2j * torch.pi * torch.fft.fftfreq(patches.shape[-2], device=patches.device)
+        kx = 2j * torch.pi * torch.fft.fftfreq(patches.shape[-1], device=patches.device)
+        ky, kx = ky[:, None], kx[None, :]
+        f = torch.fft.fft2(patches)
+        for m, n in orders:
+            yield torch.fft.ifft2(f * (ky**m * kx**n))
+
+    def position_projections(self, gradF, p, patches, orders, object_array=None):
+        """Per-position <gradF, p * d^(m+n) S> for each order, shape (batch, len(orders))."""
+        return torch.stack([
+            redot(gradF, p * t, axis=(1, 2, 3))
+            for t in self.position_derivatives(patches, self.positions, orders, object_array)
+        ], dim=-1)
+
+    def second_order_term(self, r, a, b):
+        """sum_n of <gradF, p D_a D_b S> from second-derivative projections r (batch, 3)."""
+        return torch.sum(
+            a[:, 0] * b[:, 0] * r[:, 0]
+            + (a[:, 0] * b[:, 1] + a[:, 1] * b[:, 0]) * r[:, 1]
+            + a[:, 1] * b[:, 1] * r[:, 2]
+        )
