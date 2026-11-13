@@ -5,6 +5,8 @@ arXiv:2511.01793, and the authors' implementation at
 https://github.com/borongzhang/blind_magpie_ptychography.
 """
 
+import logging
+
 import torch
 import torch.nn.functional as F
 from torch import Tensor
@@ -15,7 +17,6 @@ from ptychi.api import enums
 from ptychi.api.options.magpie import (
     MAGPIECapabilityError,
     MAGPIEInitializationError,
-    MAGPIEMultimodeError,
     MAGPIEMultisliceError,
     MAGPIEOPRError,
     MAGPIEReconstructorOptions,
@@ -23,11 +24,16 @@ from ptychi.api.options.magpie import (
 from ptychi.reconstructors.pie import PIEReconstructor
 from ptychi.timing.timer_utils import timer
 
+logger = logging.getLogger(__name__)
+
 
 def _check_data_capabilities(
     object_data: Tensor, probe_data: Tensor, opr_mode_weights_data: Tensor
 ):
-    """Check the supported slice/mode counts and constructed OPR weight values."""
+    """Check the supported slice/OPR counts and constructed OPR weight values.
+
+    Incoherent (mixed-state) probe modes are supported; OPR modes are not.
+    """
     if object_data.shape[0] != 1:
         raise MAGPIEMultisliceError(
             f"GM-rPIE/GM-MAGPIE received {object_data.shape[0]} object slices but support "
@@ -37,11 +43,6 @@ def _check_data_capabilities(
         raise MAGPIEOPRError(
             f"GM-rPIE/GM-MAGPIE received {probe_data.shape[0]} OPR modes but do not support "
             "OPR; supply probe_data with one shared mode, shape (1, 1, height, width)."
-        )
-    if probe_data.shape[1] != 1:
-        raise MAGPIEMultimodeError(
-            f"GM-rPIE/GM-MAGPIE received {probe_data.shape[1]} incoherent probe modes but support "
-            "a single coherent mode; supply probe_data with shape (1, 1, height, width)."
         )
     if opr_mode_weights_data.shape[-1] != 1 or not torch.all(opr_mode_weights_data == 1).item():
         raise MAGPIEOPRError(
@@ -126,10 +127,24 @@ def aligned_geom_mean(a: Tensor, b: Tensor) -> Tensor:
 class MAGPIEReconstructor(PIEReconstructor):
     """GM-rPIE (one level) and GM-MAGPIE (multiple object-grid levels).
 
-    Supports one object slice and one shared coherent probe mode, without OPR
-    or independent object/probe sampling. Both factors are updated in every
-    random minibatch with unit step sizes. Native position refinement and
-    shared constraints remain available. Unsupported capabilities fail at setup.
+    Supports one object slice and one shared probe with any number of
+    incoherent (mixed-state) modes, without OPR or independent object/probe
+    sampling. Both factors are updated in every minibatch with unit step
+    sizes. Native position refinement and shared constraints remain available.
+    Unsupported capabilities fail at setup.
+
+    With several incoherent modes the detector sees the incoherent sum
+    ``sum_p |F(P_p O)|^2``. The shared magnitude replacement already implements
+    that projection, and its exit-wave residual equals the amplitude misfit
+    ``|| sqrt(sum_p |Psi_p|^2) - sqrt(d) ||^2`` exactly, so Proposition 2.2's
+    majorization is unchanged. Each probe mode keeps an exact block solve, but
+    the single object must serve every mode at once, so its proposal becomes the
+    mode-summed least-squares solution. Its ratio to the current object is then
+    an illumination-weighted compromise rather than the common ratio shared by
+    the probe proposals, and Proposition 3.2's entrywise contraction no longer
+    applies -- the same way the multigrid object proposal forfeits it. Only the
+    first-order statement of Proposition 3.3 survives. Multimode runs are
+    therefore heuristic in exactly the sense GM-MAGPIE already is.
 
     Object and probe proposals use the same pre-update forward state. Their
     phase-aligned geometric means are synthesized with counterpart-intensity
@@ -190,6 +205,18 @@ class MAGPIEReconstructor(PIEReconstructor):
                 f"Choose a level count from 1 to {max_levels}."
             )
         self.num_levels = self.options.multigrid_levels
+        if (
+            probe_data.shape[1] > 1
+            and not probe.options.orthogonalize_incoherent_modes.enabled
+        ):
+            logger.warning(
+                "GM-rPIE/GM-MAGPIE is running with %d incoherent probe modes while "
+                "probe_options.orthogonalize_incoherent_modes is disabled. An incoherent "
+                "mode set is only defined up to a unitary mixing, and the geometric mean "
+                "selects its square-root branch entrywise, so it does not commute with that "
+                "mixing. Enable the constraint to pin the gauge.",
+                probe_data.shape[1],
+            )
 
     def _proximal_step(
         self,
@@ -199,7 +226,12 @@ class MAGPIEReconstructor(PIEReconstructor):
         q_power: torch.Tensor,
         regularizer: torch.Tensor,
     ) -> torch.Tensor:
-        numerator = q.conj() * (target - q * z)
+        # ``q`` carries the incoherent probe modes and ``z`` the single shared
+        # object, so the object normal equations accumulate over modes:
+        #   O <- O + sum_p conj(P_p) (R_p - P_p O) / (sum_p |P_p|^2 + u).
+        # ``q_power`` is already mode-summed. With one mode the sum is over a
+        # singleton and the result is unchanged.
+        numerator = (q.conj() * (target - q * z)).sum(-3, keepdim=True)
         return z + _safe_divide(numerator, q_power + regularizer)
 
     def _object_proposal(
@@ -214,7 +246,11 @@ class MAGPIEReconstructor(PIEReconstructor):
         for _ in range(1, self.num_levels):
             q_levels.append(_restrict_2x(q_levels[-1]))
 
-        q_power = [_power(q) for q in q_levels]
+        # Mode-summed illumination power, sum_p |P_p|^2, shape (batch, 1, h, w).
+        # Every downstream use (regularizer, transfer weights, proximal
+        # denominator) is therefore mode-independent and broadcasts over modes.
+        q_power_modes = [_power(q) for q in q_levels]
+        q_power = [p.sum(-3, keepdim=True) for p in q_power_modes]
         # Use the same minibatch-wide fine-grid normalization as rPIE. Besides
         # keeping every scan on a common scale, this makes a one-grid MAGPIE
         # cycle reduce directly to the corresponding rPIE endpoint.
@@ -232,10 +268,19 @@ class MAGPIEReconstructor(PIEReconstructor):
         target_levels = [psi_prime]
         for level in range(1, self.num_levels):
             power_down = _prolong_2x(downsampled_power[level - 1])
+            # The object is shared across modes, so its restriction weight uses the
+            # mode-summed power.
             weight_z = _safe_divide(q_power[level - 1], power_down)
+            # Each exit wave belongs to one mode, so its restriction weight must use
+            # that mode's own power: Eq. (17) pairs the same probe in numerator and
+            # denominator. Dividing a per-mode numerator by the mode-summed power
+            # suppresses weak modes by |P_p|^2 / sum_q |P_q|^2, which makes the coarse
+            # residual inconsistent with the fine one and the V-cycle divergent.
+            # With one mode this is identical to the mode-summed form.
+            power_down_modes = _prolong_2x(_restrict_2x(q_power_modes[level - 1]))
             weight_target = _safe_divide(
                 _prolong_2x(q_levels[level]) * q_levels[level - 1].conj(),
-                power_down,
+                power_down_modes,
             )
             restricted = _restrict_2x(
                 torch.cat(
@@ -280,7 +325,8 @@ class MAGPIEReconstructor(PIEReconstructor):
     def _synthesize_object_update(self, indices, object_old, object_local, probe_counterpart):
         """Return the full object correction from normalized weighted patch sums."""
         positions = self.parameter_group.probe_positions.tensor[indices]
-        weight = _power(probe_counterpart)
+        # Illumination weight uses every incoherent mode, sum_p |P_p|^2.
+        weight = _power(probe_counterpart).sum(-3, keepdim=True)
         numerator = self.forward_model.place_object_patches_on_probe_grid(
             positions, (weight * (object_local - object_old))[:, 0], integer_mode=True
         )
