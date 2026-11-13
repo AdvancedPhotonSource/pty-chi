@@ -207,3 +207,51 @@ def test_reconstructor_passes_detector_propagator(distance, pixel_size, propagat
         task.object.preconditioner = None
         task.reconstructor.update_preconditioners()
     torch.testing.assert_close(task.object.preconditioner, expected)
+
+
+@pytest.mark.parametrize("as_numpy", [False, True])
+def test_probe_renormalization_ignores_masked_pixels(propagator, as_numpy):
+    mask = torch.ones((8, 12), dtype=torch.bool)
+    mask[::2, ::3] = False
+    patterns = torch.stack([torch.ones((8, 12)), torch.full((8, 12), 2.0)])
+    patterns[:, ~mask] = 1e6
+    expected = math.sqrt(
+        propagation.get_intensity_scaling_factor(propagator, (8, 12)) / (2 * mask.sum().item())
+    )
+    if as_numpy:
+        patterns, mask = patterns.numpy(), mask.numpy()
+    actual = utils.get_probe_renormalization_factor(patterns, propagator, valid_pixel_mask=mask)
+    assert actual == pytest.approx(expected, rel=1e-6)
+
+
+@pytest.mark.parametrize("as_numpy", [False, True])
+def test_probe_renormalization_corrects_detector_response(propagator, as_numpy):
+    from ptychi.data_structures.detector_response import DetectorResponse
+
+    gain = torch.linspace(0.5, 3.0, 96).reshape(8, 12)
+    offset = torch.full((8, 12), 5.0)
+    response = DetectorResponse((8, 12), data=(gain, offset))
+    signal = torch.stack([torch.ones((8, 12)), torch.full((8, 12), 2.0)])
+    signal[:, 0, 0] = -1  # Background-subtracted measurements are clipped at zero.
+    patterns = gain * signal + offset
+    mask = torch.ones((8, 12), dtype=torch.bool)
+    mask[1, 1] = False
+    patterns[:, 1, 1] = 1e8
+    expected = utils.get_probe_renormalization_factor(signal.clamp_min(0), propagator,
+                                                    valid_pixel_mask=mask)
+    if as_numpy:
+        patterns = patterns.numpy()
+    actual = utils.get_probe_renormalization_factor(patterns, propagator,
+                                                  valid_pixel_mask=mask, detector_response=response)
+    assert actual == pytest.approx(expected, rel=1e-6)
+
+
+def test_probe_renormalization_identity_equivalence(propagator):
+    from ptychi.data_structures.detector_response import DetectorResponse
+
+    patterns = torch.stack([torch.ones((8, 12)), torch.full((8, 12), 2.0)])
+    expected = utils.get_probe_renormalization_factor(patterns, propagator)
+    for response in (DetectorResponse((8, 12)),
+                     DetectorResponse((8, 12), data=(torch.ones((8, 12)), torch.zeros((8, 12))))):
+        actual = utils.get_probe_renormalization_factor(patterns, propagator, detector_response=response)
+        assert actual == expected

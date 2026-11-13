@@ -29,6 +29,10 @@ def reconstructor(request):
     reconstructor = object.__new__(BHReconstructor)
     # Test the unsmoothed loss at nonzero amplitudes.
     reconstructor.eps = 0.0
+    reconstructor.forward_model = SimpleNamespace(
+        map_intensity_to_detector=lambda value, include_offset=True: value,
+        intensity_to_detector_adjoint=lambda value, shape: value,
+    )
     mask = torch.ones(2, 1, 3, 5, dtype=torch.bool, device="cpu")
     if request.param:
         mask[0, :, ::2, ::2] = False
@@ -52,7 +56,7 @@ def test_gradientF_matches_autograd(reconstructor, random_complex, data, n_modes
     else:
         propagator = SimpleNamespace(propagate_backward=lambda value: value)
         field = wavefield
-    reconstructor.forward_model = SimpleNamespace(free_space_propagator=propagator)
+    reconstructor.forward_model.free_space_propagator = propagator
 
     loss = amplitude_loss(field, data, reconstructor.current_constrained_pixel_mask)
     expected = torch.autograd.grad(loss, wavefield)[0]

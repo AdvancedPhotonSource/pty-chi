@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
+from ptychi.utils import get_constrained_pixel_mask
 import ptychi.image_proc as ip
 from ptychi.api import enums
 from ptychi.api.options.magpie import (
@@ -343,7 +344,11 @@ class MAGPIEReconstructor(PIEReconstructor):
         psi_prime = self.replace_propagated_exit_wave_magnitude(
             variables["psi_far"],
             y_true,
-            constrained_pixel_mask=self.get_constrained_pixel_mask(y_true),
+            constrained_pixel_mask=get_constrained_pixel_mask(
+                valid_pixel_mask=self.dataset.valid_pixel_mask,
+                exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+                y_true=y_true,
+            ),
         )
         psi_prime = self.forward_model.free_space_propagator.propagate_backward(psi_prime)
         delta_psi = psi_prime - variables["psi"]

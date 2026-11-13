@@ -37,6 +37,11 @@ def test_task_constructor_accepts_data_kwargs():
     assert torch.equal(task.dataset.valid_pixel_mask.cpu(), torch.ones((4, 4), dtype=torch.bool))
 
 
+def test_task_constructor_rejects_unknown_keyword():
+    with pytest.raises(TypeError, match="unexpected keyword argument 'detector_response_mpa'"):
+        PtychographyTask(_options(), **_task_data(), detector_response_mpa=None)
+
+
 def test_deprecated_option_data_fallback_warns():
     options = _options()
     data = _task_data()

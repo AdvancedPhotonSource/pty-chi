@@ -6,6 +6,7 @@ from typing import Optional, TYPE_CHECKING
 import torch
 from torch.utils.data import Dataset
 
+from ptychi.utils import get_constrained_pixel_mask
 from ptychi.reconstructors.ad_general import AutodiffReconstructor
 from ptychi.reconstructors.base import IterativePtychographyReconstructor
 import ptychi.metrics as metrics
@@ -84,6 +85,12 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
             ):
                 self.parameter_group.opr_mode_weights.tensor.grad[:, 1:] = 0
 
+    def step_all_optimizers(self, forward_model_args=None, y_true=None):
+        super().step_all_optimizers(forward_model_args, y_true)
+        response = self.parameter_group.detector_response
+        if response.optimization_enabled(self.current_epoch):
+            response.normalize_gain(self.parameter_group.probe)
+
     def run_post_update_hooks(self) -> None:
         with torch.no_grad():
             if self.parameter_group.object.optimization_enabled(self.current_epoch):
@@ -129,7 +136,11 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
 
     def compute_optimizer_loss(self, input_data, y_true):
         y_pred = self.forward_model(*input_data)
-        mask = self.get_constrained_pixel_mask(y_true)
+        mask = get_constrained_pixel_mask(
+            valid_pixel_mask=self.dataset.valid_pixel_mask,
+            exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+            y_true=y_true,
+        )
         return self.loss_function(y_pred[mask], y_true[mask]) + self.compute_regularization_loss()
 
     def get_retain_graph(self) -> bool:
@@ -151,7 +162,11 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
 
     def run_minibatch(self, input_data, y_true, *args, **kwargs):        
         y_pred = self.forward_model(*input_data)
-        constrained_pixel_mask = self.get_constrained_pixel_mask(y_true)
+        constrained_pixel_mask = get_constrained_pixel_mask(
+            valid_pixel_mask=self.dataset.valid_pixel_mask,
+            exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+            y_true=y_true,
+        )
         batch_loss = self.loss_function(
             y_pred[constrained_pixel_mask], y_true[constrained_pixel_mask]
         )

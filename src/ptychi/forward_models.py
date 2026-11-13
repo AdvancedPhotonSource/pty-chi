@@ -16,11 +16,11 @@ from ptychi.propagate import (
     FourierPropagator,
     FresnelTransformPropagator
 )
-from ptychi.metrics import MSELossOfSqrt
+from ptychi.metrics import MSELossOfSqrt, validate_predicted_intensity
 import ptychi.image_proc as ip
 from ptychi.api.enums import ShiftOperators
 from ptychi.timing.timer_utils import timer
-from ptychi.utils import move_nested_tensors_to_device
+from ptychi.utils import move_nested_tensors_to_device, get_constrained_pixel_mask
 
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group
@@ -131,6 +131,9 @@ class ForwardModel(torch.nn.Module):
 class PlanarPtychographyForwardModel(ForwardModel):
     @dataclasses.dataclass
     class PlanarPtychographyIntermediateVariables(IntermediateVariables):
+        detector_intensity: Tensor = None
+        """Detector-grid intensity after crop/blur and before gain/offset."""
+
         positions: Tensor = None
         """Tensor of shape `[batch_size, 2]`, probe positions in the 
         current batch.
@@ -223,6 +226,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
             *args, **kwargs
         )
         self.low_mem_mode = low_memory_mode
+        self.detector_response = parameter_group.detector_response
 
         # This step is essential as it sets the variables to be attributes of
         # the forward modelobject. Only with this can these buffers be copied
@@ -984,9 +988,26 @@ class PlanarPtychographyForwardModel(ForwardModel):
         )
         return y
 
-    def map_intensity_to_detector(self, intensity: Tensor) -> Tensor:
-        """Crop and blur wave-grid intensity in internal FFT ordering."""
-        return self.blur_diffraction_patterns(self.conform_to_detector_size(intensity))
+    def apply_detector_response(self, y: Tensor) -> Tensor:
+        """Apply the shared affine detector response to detector-sized intensities."""
+        if self.detector_response.optimizable:
+            self.intermediate_variables.detector_intensity = y.detach()
+        if self.detector_response.is_identity:
+            return y
+        return y * self.detector_response.gain + self.detector_response.offset
+
+    def map_intensity_to_detector(self, intensity: Tensor, include_offset: bool = True) -> Tensor:
+        """Map wave-grid intensity to detector pixels: crop, blur, gain, offset.
+
+        Both grids use internal FFT ordering. With include_offset=False this
+        applies only the linear part, also used for intensity perturbations.
+        """
+        y = self.blur_diffraction_patterns(self.conform_to_detector_size(intensity))
+        if include_offset:
+            return self.apply_detector_response(y)
+        if not self.detector_response.is_identity:
+            y = y * self.detector_response.gain
+        return y
 
     def detector_crop_adjoint(self, y: Tensor, wave_shape: tuple[int, int]) -> Tensor:
         """Zero-insert detector pixels into the wave grid in internal FFT ordering.
@@ -1007,9 +1028,13 @@ class PlanarPtychographyForwardModel(ForwardModel):
     def intensity_to_detector_adjoint(self, gradient: Tensor, wave_shape: tuple[int, int]) -> Tensor:
         """Pull a real detector-intensity gradient back to the wave intensity.
 
-        For y = B(C(I)) this is C* B* gradient. B* includes the transpose of
-        replicated-edge padding; it is not the forward blur at the boundaries.
+        For y = m * B(C(I)) + b this is C* B* (m * gradient).
+        The offset has zero derivative with respect to wave intensity. B* includes
+        the transpose of replicated-edge padding, differing from forward blur at
+        the boundaries.
         """
+        if not self.detector_response.is_identity:
+            gradient = gradient * self.detector_response.gain
         gradient = self.blur_diffraction_patterns(gradient, adjoint=True)
         return self.detector_crop_adjoint(gradient, wave_shape)
 
@@ -1255,25 +1280,6 @@ class NoiseModel(torch.nn.Module):
         """Return the masked, unnormalized NLL derivative on the detector grid."""
         raise NotImplementedError
 
-    @staticmethod
-    def get_constrained_pixel_mask(
-        valid_pixel_mask: Optional[Tensor],
-        exclude_measured_pixels_below: Optional[float],
-        y_true: Tensor,
-    ) -> Tensor:
-        constrained_pixel_mask = torch.ones_like(y_true, dtype=torch.bool)
-        if valid_pixel_mask is not None:
-            constrained_pixel_mask = valid_pixel_mask.to(y_true.device)
-            constrained_pixel_mask = constrained_pixel_mask.unsqueeze(0).expand(
-                y_true.shape[0], -1, -1
-            )
-        if exclude_measured_pixels_below is not None:
-            constrained_pixel_mask = torch.logical_and(
-                constrained_pixel_mask,
-                y_true > exclude_measured_pixels_below,
-            )
-        return constrained_pixel_mask
-
     @timer()
     def backward_to_psi_far(
         self,
@@ -1285,14 +1291,15 @@ class NoiseModel(torch.nn.Module):
     ) -> Tensor:
         """Return the unnormalized Wirtinger NLL gradient of the detector wave.
 
-        For I=sum_j|psi_j|^2 and y=B(C(I)), compose the masked likelihood
+        For I=sum_j|psi_j|^2 and y=m*B(C(I))+b, compose the masked likelihood
         derivative with the detector Jacobian adjoint:
-        dL/dpsi_j* = psi_j * C* B* (dL/dy).
-        Crop, blur and their coordinate conventions are supplied by
+        dL/dpsi_j* = psi_j * C* B* (m * dL/dy).
+        The offset enters through y_pred and has zero derivative with respect to psi.
+        Crop, blur, gain and their coordinate conventions are supplied by
         forward_model. The noise model owns this complete chain-rule calculation.
 
         Omitting forward_model assumes an identity detector on the wave grid.
-        Pass it whenever prediction includes cropping or blur.
+        Pass it whenever prediction includes cropping, blur or a response map.
         The return value has the shape of psi_far, including its probe-mode
         dimension, and uses the noise model's usual denominator stabilization.
         """
@@ -1318,6 +1325,7 @@ class GaussianNoiseModel(NoiseModel):
     def nll(self, y_pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
         # This is averaged over all pixels, so it differs from Eq. 11a in Odstrcil (2018)
         # by a factor of 1 / y_pred.numel().
+        validate_predicted_intensity(y_pred)
         loss = torch.nn.functional.mse_loss(
             torch.sqrt(y_pred + self.loss_function.eps),
             torch.sqrt(y_true + self.loss_function.eps),
@@ -1332,10 +1340,11 @@ class PtychographyGaussianNoiseModel(GaussianNoiseModel):
 
     def backward_to_intensity(self, y_pred, y_true):
         """Unnormalized NLL derivative on the measured detector-intensity grid."""
-        mask = self.get_constrained_pixel_mask(
+        mask = get_constrained_pixel_mask(
             self.valid_pixel_mask,
             self.exclude_measured_pixels_below, y_true,
         )
+        validate_predicted_intensity(y_pred[mask])
         g = 1 - torch.sqrt(y_true) / (torch.sqrt(y_pred) + self.eps)
         g = torch.where(mask, g, 0)
         w = 1 / (2 * self.sigma) ** 2
@@ -1351,6 +1360,7 @@ class PoissonNoiseModel(NoiseModel):
     def nll(self, y_pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
         # This is averaged over all pixels, so it differs from Eq. 11a in Odstrcil (2018)
         # by a factor of 1 / y_pred.numel().
+        validate_predicted_intensity(y_pred)
         loss = torch.nn.functional.poisson_nll_loss(
             y_pred, y_true, log_input=False, eps=self.loss_function.eps, reduction=reduction
         )
@@ -1363,9 +1373,10 @@ class PtychographyPoissonNoiseModel(PoissonNoiseModel):
 
     def backward_to_intensity(self, y_pred, y_true):
         """Unnormalized NLL derivative on the measured detector-intensity grid."""
-        mask = self.get_constrained_pixel_mask(
+        mask = get_constrained_pixel_mask(
             self.valid_pixel_mask,
             self.exclude_measured_pixels_below, y_true,
         )
+        validate_predicted_intensity(y_pred[mask])
         g = 1 - y_true / (y_pred + self.eps)
         return torch.where(mask, g, 0)

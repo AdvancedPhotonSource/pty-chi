@@ -18,6 +18,7 @@ from ptychi.device import AcceleratorModuleWrapper
 
 if TYPE_CHECKING:
     from ptychi.api.task import PtychographyTask
+    from ptychi.data_structures.detector_response import DetectorResponse
 
 
 _default_complex_dtype = torch.complex64
@@ -187,10 +188,39 @@ def generate_secondary_probe_modes_hermite(probe: Tensor, m: int, n: int) -> Ten
     return h
 
 
+def get_constrained_pixel_mask(
+    valid_pixel_mask: Optional[Tensor],
+    exclude_measured_pixels_below: Optional[float],
+    y_true: Tensor,
+) -> Tensor:
+    """Return a boolean (N, H, W) mask of constrained detector measurements.
+
+    Broadcast the shared (H, W) valid-pixel mask to the measured batch and
+    retain only raw measurements strictly above the optional threshold.
+    The threshold uses supplied measurement units, before response correction.
+    The output is on y_true's device; omitted restrictions include all pixels.
+    """
+    constrained_pixel_mask = torch.ones_like(y_true, dtype=torch.bool)
+    if valid_pixel_mask is not None:
+        constrained_pixel_mask = valid_pixel_mask.to(y_true.device)
+        constrained_pixel_mask = constrained_pixel_mask.unsqueeze(0).expand(
+            y_true.shape[0], -1, -1
+        )
+    if exclude_measured_pixels_below is not None:
+        constrained_pixel_mask = torch.logical_and(
+            constrained_pixel_mask,
+            y_true > exclude_measured_pixels_below,
+        )
+    return constrained_pixel_mask
+
+
 @timer()
 def get_probe_renormalization_factor(
     patterns: Tensor | ndarray,
     propagator: Optional["propagate.WavefieldPropagator | type[propagate.WavefieldPropagator]"] = None,
+    *,
+    valid_pixel_mask: Optional[Tensor | ndarray] = None,
+    detector_response: Optional["DetectorResponse"] = None,
 ) -> float:
     """
     Calculate the inverse square root of the maximum probe-plane power inferred
@@ -206,6 +236,13 @@ def get_probe_renormalization_factor(
         Fourier, Fresnel, and Fraunhofer propagation require an instance.
         See :func:`ptychi.propagate.get_intensity_scaling_factor` for the
         normalization and propagating-band assumption.
+    valid_pixel_mask : Tensor | ndarray, optional
+        A shared (h, w) boolean mask in the same coordinates as patterns.
+        Only valid pixels contribute to the inferred detector power.
+    detector_response : DetectorResponse, optional
+        Shared response in the same detector coordinates as patterns. Infer
+        signal power from max((patterns - offset) / gain, 0). Omitted or
+        identity responses use the supplied patterns directly.
     
     Returns
     -------
@@ -217,7 +254,16 @@ def get_probe_renormalization_factor(
     if propagator is None:
         propagator = propagate.FourierPropagator()
     intensity_scale = propagate.get_intensity_scaling_factor(propagator, patterns.shape[-2:])
-    max_power = np.max(np.sum((patterns), axis=(1, 2))) / intensity_scale
+    if detector_response is not None and not detector_response.is_identity:
+        patterns = np.maximum(
+            (patterns - to_numpy(detector_response.offset)) / to_numpy(detector_response.gain), 0
+        )
+    if valid_pixel_mask is None:
+        detector_power = np.sum(patterns, axis=(1, 2))
+    else:
+        # Contract with the shared mask without allocating a masked copy of all patterns.
+        detector_power = np.einsum("nhw,hw->n", patterns, to_numpy(valid_pixel_mask))
+    max_power = np.max(detector_power) / intensity_scale
     return np.sqrt(1 / max_power)
             
 

@@ -13,7 +13,7 @@ import tqdm
 
 from ptychi.timing.timer_utils import timer
 import ptychi.movies as movies
-from ptychi.utils import to_numpy
+from ptychi.utils import to_numpy, get_constrained_pixel_mask
 import ptychi.maps as maps
 import ptychi.forward_models as fm
 import ptychi.api.enums as enums
@@ -378,6 +378,8 @@ class IterativeReconstructor(Reconstructor):
         Trial evaluations preserve forward-model intermediates used by analytical
         updates. Loss-only closures preserve the algorithm's supplied gradients;
         loss-and-gradient closures replace them with exact objective derivatives.
+        Epoch-level updates can supply a new closure immediately before stepping.
+        Distributed support is checked when the batch objective is evaluated.
         """
         self.check_optimizer_closure_support()
         for parameter in self.parameter_group.get_all_reconstruct_parameters():
@@ -385,13 +387,12 @@ class IterativeReconstructor(Reconstructor):
                     or not parameter.uses_optimizer_closure
                     or parameter.optimizer_closure is not None):
                 continue
-            if dist.is_initialized():
-                raise NotImplementedError(
-                    "Automatic optimizer closures currently require a single process. "
-                    "Supply a custom optimizer_closure to define distributed loss and gradients."
-                )
-
             def objective():
+                if dist.is_initialized():
+                    raise NotImplementedError(
+                        "Automatic optimizer closures currently require a single process. "
+                        "Supply a custom optimizer_closure to define distributed loss and gradients."
+                    )
                 model = self.forward_model
                 intermediates = getattr(model, "intermediate_variables", None)
                 try:
@@ -483,13 +484,18 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             )
         return super().build_dataloader(batch_sampler=batch_sampler)
 
-    def get_constrained_pixel_mask(self, y_true: Tensor) -> Tensor:
-        """Get the detector pixels that should constrain the update for a batch."""
-        return fm.NoiseModel.get_constrained_pixel_mask(
+    def update_batch_loss(self, y_pred: Tensor, y_true: Tensor) -> None:
+        """Record losses using the constrained detector pixels."""
+        mask = get_constrained_pixel_mask(
             valid_pixel_mask=self.dataset.valid_pixel_mask,
             exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
             y_true=y_true,
         )
+        if not mask.any():
+            self.loss_tracker.update_batch_loss_with_value(0.0)
+            return
+        y_pred, y_true = y_pred[mask], y_true[mask]
+        self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
 
     def update_preconditioners(self):
         # Update preconditioner of the object only if:
@@ -519,6 +525,8 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
                 use_all_modes=self.parameter_group.object.options.build_preconditioner_with_all_modes,
                 sampling=sampling,
                 propagator=forward_model.free_space_propagator,
+                valid_pixel_mask=self.dataset.valid_pixel_mask,
+                detector_response=self.parameter_group.detector_response,
             )
 
     def run_pre_epoch_hooks(self) -> None:
@@ -747,7 +755,11 @@ class AnalyticalIterativePtychographyReconstructor(
     def compute_optimizer_loss(self, input_data, y_true):
         """Use the masked mean squared amplitude residual for projection algorithms."""
         y_pred = self.forward_model(*input_data)
-        mask = self.get_constrained_pixel_mask(y_true)
+        mask = get_constrained_pixel_mask(
+            valid_pixel_mask=self.dataset.valid_pixel_mask,
+            exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+            y_true=y_true,
+        )
         return MSELossOfSqrt()(y_pred[mask], y_true[mask])
 
     def stabilize_object_projection_denominator(self, denominator: Tensor) -> Tensor:
@@ -762,6 +774,31 @@ class AnalyticalIterativePtychographyReconstructor(
             return denominator
         floor = (0.05 * denominator.max()).clamp_min(torch.finfo(denominator.dtype).tiny)
         return denominator.clamp_min(floor)
+
+    @torch.no_grad()
+    def update_detector_response(self) -> None:
+        """Supply an epoch-wise response fit with the object and probe held fixed.
+
+        Each position contributes once across all ranks. The response owns
+        accumulation, synchronization, fitting, and constraints.
+        """
+        response = self.parameter_group.detector_response
+        if not response.optimization_enabled(self.current_epoch):
+            return
+        response.reset_least_squares_statistics()
+        rank, world_size = (dist.get_rank(), dist.get_world_size()) if dist.is_initialized() else (0, 1)
+        indices = torch.arange(rank, len(self.dataset), world_size, device=self.dataset.patterns.device)
+        for batch_indices in indices.split(self.batch_size):
+            if batch_indices.numel() == 0:
+                continue
+            y_true = self.dataset.patterns[batch_indices].to(response.tensor.device)
+            self.forward_model(batch_indices)
+            mask = get_constrained_pixel_mask(
+                self.dataset.valid_pixel_mask, self.options.exclude_measured_pixels_below, y_true
+            )
+            intensity = self.forward_model.intermediate_variables.detector_intensity
+            response.accumulate_least_squares_statistics(intensity, y_true, mask)
+        response.apply_least_squares_update(self.parameter_group.probe)
 
     def run_post_epoch_hooks(self) -> None:
         with torch.no_grad():
@@ -781,6 +818,8 @@ class AnalyticalIterativePtychographyReconstructor(
             if object_.options.total_variation.is_enabled_on_this_epoch(self.current_epoch):
                 object_.constrain_total_variation()
 
+            self.update_detector_response()
+
     def run_pre_run_hooks(self) -> None:
         self.prepare_data()
 
@@ -795,7 +834,17 @@ class AnalyticalIterativePtychographyReconstructor(
         constrained_pixel_mask: Optional[Tensor] = None,
     ) -> Tensor:
         """
-        Replace the propogated exit wave amplitude.
+        Project the propagated exit wave onto the measured intensity constraint.
+
+        With no blur, the target wave intensity is
+        max((data - offset) / gain, 0). Phase and relative mode amplitudes
+        are preserved. Masked and unmeasured pixels remain unchanged.
+        Data below the offset project to zero intensity. Both grids use internal
+        FFT ordering; detector pixels are zero-inserted by the crop adjoint.
+        A fixed identity response on a matching grid retains the historical 1e-7
+        amplitude stabilization, including its zero-wave behavior. Other
+        cases use exact norm replacement, choosing the first mode's phase
+        as zero when the input wave vanishes. Blur requires LSQML or autodiff.
 
         Parameters
         ----------
@@ -810,18 +859,41 @@ class AnalyticalIterativePtychographyReconstructor(
         Returns
         -------
         Tensor
-            Predicted exit wave with the phase from `psi` and magnitude equal to the square root
-            of `actual_pattern_intensity`.
+            Exit wave with the measured total intensity, or the inverse-response
+            intensity when a response map is present, on constrained detector pixels.
         """
 
-        psi_prime = (
-            psi
-            / ((psi.abs() ** 2).sum(1, keepdims=True).sqrt() + 1e-7)
-            * torch.sqrt(actual_pattern_intensity + 1e-7)[:, None]
+        model = self.forward_model
+        if model.diffraction_pattern_blur_sigma is not None:
+            raise ValueError(
+                "Magnitude projection requires diffraction_pattern_blur_sigma=None. "
+                "Use LSQML or autodiff for blur."
+            )
+        target = actual_pattern_intensity
+        if not model.detector_response.is_identity:
+            target = (target - model.detector_response.offset) / model.detector_response.gain
+        target = target.clamp_min(0)
+        mask = (
+            self.dataset.valid_pixel_mask
+            if constrained_pixel_mask is None else constrained_pixel_mask
         )
-        if constrained_pixel_mask is not None:
-            return torch.where(constrained_pixel_mask[:, None], psi_prime, psi)
-        return psi_prime
+        target = model.detector_crop_adjoint(target, psi.shape[-2:])
+        mask = model.detector_crop_adjoint(mask, psi.shape[-2:])
+        intensity = psi.abs().square().sum(1)
+        if (
+            model.detector_response.is_identity
+            and psi.shape[-2:] == actual_pattern_intensity.shape[-2:]
+        ):
+            # Preserve the original same-grid amplitude stabilization.
+            psi_prime = (
+                psi / (intensity.sqrt()[:, None] + 1e-7) * (target + 1e-7).sqrt()[:, None]
+            )
+        else:
+            scale = (target / torch.where(intensity > 0, intensity, 1)).sqrt()
+            psi_prime = psi * scale[:, None]
+            # A zero wave has no phase; choose the first mode to satisfy the norm.
+            psi_prime[:, 0] = torch.where(intensity > 0, psi_prime[:, 0], target.sqrt())
+        return torch.where(mask[:, None] if mask.ndim == 3 else mask, psi_prime, psi)
         
     @timer()
     def adjoint_shift_probe_update_direction(self, indices, delta_p, first_mode_only=None):
