@@ -695,6 +695,8 @@ class PlanarObject(Object):
         *,
         sampling: Optional["ip.ObjectSamplingParameters"] = None,
         propagator: Optional["WavefieldPropagator | type[WavefieldPropagator]"] = None,
+        valid_pixel_mask: Optional[Tensor] = None,
+        detector_response: Optional["ds.detector_response.DetectorResponse"] = None,
     ) -> None:
         """Update the preconditioner. This function reproduces the behavior
         of PtychoShelves in `ptycho_solver`: it averages the new illumination
@@ -715,11 +717,16 @@ class PlanarObject(Object):
             Sampling parameters passed to ``calculate_illumination_map``.
         propagator : WavefieldPropagator or type[WavefieldPropagator], optional
             Detector propagator passed to ``initialize_preconditioner``.
+        valid_pixel_mask : Tensor, optional
+            Shared detector mask used for the initial probe-power normalization.
+        detector_response : ds.detector_response.DetectorResponse, optional
+            Gain and offset used to infer signal power from measured patterns.
         """
         if self.preconditioner is None:
             self.initialize_preconditioner(
                 probe, probe_positions, patterns, use_all_modes=use_all_modes,
-                sampling=sampling, propagator=propagator,
+                sampling=sampling, propagator=propagator, valid_pixel_mask=valid_pixel_mask,
+                detector_response=detector_response,
             )
         illum_map = self.calculate_illumination_map(
             probe, probe_positions, use_all_modes=use_all_modes,
@@ -736,6 +743,8 @@ class PlanarObject(Object):
         *,
         sampling: Optional["ip.ObjectSamplingParameters"] = None,
         propagator: Optional["WavefieldPropagator | type[WavefieldPropagator]"] = None,
+        valid_pixel_mask: Optional[Tensor] = None,
+        detector_response: Optional["ds.detector_response.DetectorResponse"] = None,
     ) -> None:
         """Initialize the preconditioner. This function reproduces the behavior
         of PtychoShelves in `init_solver` and `load_from_p`: the probe is first
@@ -759,9 +768,16 @@ class PlanarObject(Object):
             Defaults to Fourier propagation. The angular-spectrum class is
             accepted; Fourier, Fresnel, and Fraunhofer propagation require an instance.
             Assumes lossless propagation on the propagating band.
+        valid_pixel_mask : Tensor, optional
+            Shared detector mask used for the initial probe-power normalization.
+        detector_response : ds.detector_response.DetectorResponse, optional
+            Gain and offset used to infer signal power from measured patterns.
         """
         probe_data = probe.data
-        probe_renormalization_factor = get_probe_renormalization_factor(patterns, propagator)
+        probe_renormalization_factor = get_probe_renormalization_factor(
+            patterns, propagator, valid_pixel_mask=valid_pixel_mask,
+            detector_response=detector_response,
+        )
         # sqrt(H*W) converts the inferred probe-plane power to RMS amplitude;
         # propagation normalization is included in probe_renormalization_factor.
         probe_data = probe_data / (math.sqrt(probe.shape[-1] * probe.shape[-2]) * 2 * probe_renormalization_factor)

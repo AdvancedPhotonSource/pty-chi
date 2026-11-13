@@ -1111,7 +1111,46 @@ class OPRModeWeightsOptions(ParameterOptions):
     
     
 @dataclass
+class DetectorResponseOptions(ParameterOptions):
+    """Refinement of the shared detector gain and offset maps."""
+
+    optimizable: bool = False
+    """Enable response refinement according to ``optimization_plan``."""
+
+    optimize_gain: bool = False
+    """Refine gain, normalizing its mean over valid pixels to one after each update.
+    This fixes the global scale ambiguity with the probe.
+    """
+
+    optimize_offset: bool = True
+    """Refine the offset in measured-intensity units."""
+
+    step_size: float = PydanticField(default=1.0, gt=0)
+    """Optimizer learning rate. For analytical solvers, unit SGD applies the
+    epoch-wise intensity least-squares fit; smaller steps relax toward it.
+    Closure-based optimizers minimize squared distance to this fixed fit.
+    Autodiff uses the gradient of its configured loss and may need a smaller rate.
+    """
+
+    gain_floor: float = PydanticField(default=1e-6, gt=0)
+    """Positive floor applied to refined gain before mean normalization."""
+
+    offset_nonnegative: bool = False
+    """Constrain refined offsets to be nonnegative."""
+
+    def check(self, options: "task_options.PtychographyTaskOptions"):
+        super().check(options)
+        if self.optimizable and not (self.optimize_gain or self.optimize_offset):
+            raise ValueError("Detector response refinement requires gain or offset optimization.")
+
+
+@dataclass
 class ForwardModelOptions(Options):
+    detector_response_options: DetectorResponseOptions = dataclasses.field(
+        default_factory=DetectorResponseOptions
+    )
+    """Options for detector response refinement. Omitted maps initialize to identity."""
+
     shift_operator: enums.ShiftOperators = enums.ShiftOperators.AUTO
     """Object sampling operator. AUTO uses periodic full-object shifting for finite
     propagation distance when both probe dimensions exceed 80% of the object
@@ -1208,6 +1247,9 @@ class ReconstructorOptions(Options):
     """
     If not None, gradients corresponding to measured diffraction pixels whose intensity
     is less than or equal to this value are set to 0 in reconstructors that support it.
+    The threshold uses the units of the supplied diffraction data. Comparisons use
+    the measured values, including any pedestal, before any detector-response offset
+    subtraction or gain correction.
     """
 
     forward_model_options: ForwardModelOptions = dataclasses.field(

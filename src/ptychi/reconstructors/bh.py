@@ -9,9 +9,9 @@ from torch.utils.data import Dataset
 from ptychi.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
 )
-from ptychi.metrics import MSELossOfSqrt
+from ptychi.metrics import MSELossOfSqrt, validate_predicted_intensity
 from ptychi.maths import reprod, redot
-from ptychi.utils import get_default_complex_dtype
+from ptychi.utils import get_default_complex_dtype, get_constrained_pixel_mask
 from ptychi.api.enums import ShiftOperators
 import ptychi.forward_models as fm
 import ptychi.image_proc as ip
@@ -58,7 +58,10 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.eps = 1e-8
         # cg varibales
         if self.options.method == "CG":
-            self.eta_op = torch.empty(dataset.patterns.shape,dtype=get_default_complex_dtype())[:,None,:,:]
+            self.eta_op = torch.empty(
+                (len(dataset), 1, *self.parameter_group.probe.get_spatial_shape()),
+                dtype=get_default_complex_dtype(),
+            )
             self.eta_pos = torch.empty([dataset.patterns.shape[0],2])
             
     def build_forward_model(self):
@@ -72,7 +75,8 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
             pad_for_shift=self.options.forward_model_options.pad_for_shift,
             low_memory_mode=self.options.forward_model_options.low_memory_mode,
             shift_operator=self.options.forward_model_options.shift_operator,
-            apply_subpixel_shifts_on_probe=False
+            apply_subpixel_shifts_on_probe=False,
+            diffraction_pattern_blur_sigma=self.options.forward_model_options.diffraction_pattern_blur_sigma,
         )
 
     def build_loss_tracker(self):
@@ -90,7 +94,7 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         self.prepare_optimizer_closures(input_data, y_true)
         (delta_o, delta_p, delta_pos), y_pred = self.compute_updates(*input_data, y_true)
         self.apply_updates(delta_o, delta_p, delta_pos)
-        self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
+        self.update_batch_loss(y_pred, y_true)
 
     def orthogonalize_incoherent_probe_modes(self) -> None:
         probe = self.parameter_group.probe
@@ -151,7 +155,11 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         psi_far = self.forward_model.intermediate_variables["psi_far"]
         p = probe.get_opr_mode(0)  # shape (n_modes, h, w); all incoherent probe modes
         pos = self.positions
-        self.current_constrained_pixel_mask = self.get_constrained_pixel_mask(y_true)[:, None]
+        self.current_constrained_pixel_mask = get_constrained_pixel_mask(
+            valid_pixel_mask=self.dataset.valid_pixel_mask,
+            exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+            y_true=y_true,
+        )[:, None]
 
         # sqrt of data
         d = torch.sqrt(y_true)[:, torch.newaxis]
@@ -390,13 +398,21 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         modes; the measured intensity is their incoherent sum, so the amplitude
         entering the cost function is the joint norm A = sqrt(sum_mu |psi_far_mu|^2)
         rather than the per-mode modulus. This reduces to the single-mode formula
-        when N_mu == 1.
+        when N_mu == 1. Crop, blur, and gain are composed through the forward
+        model's detector operator and its adjoint. The additive amplitude epsilon
+        retains the original same-grid denominator stabilization; with eps=0,
+        this is the exact derivative at positive predicted intensities.
         """
 
-        A = torch.sqrt(torch.sum(torch.abs(psi_far) ** 2, dim=1, keepdim=True)) + self.eps
-        td = d * (psi_far / A)
-        td = psi_far - td
-        td = td * self.current_constrained_pixel_mask
+        model = self.forward_model
+        y = model.map_intensity_to_detector(psi_far.abs().square().sum(1))
+        mask = self.current_constrained_pixel_mask[:, 0]
+        validate_predicted_intensity(y[mask])
+        amplitude = torch.where(mask, y, 1).sqrt() + self.eps
+        residual = torch.where(mask, 1 - d[:, 0] / amplitude, 0)
+        td = psi_far * model.intensity_to_detector_adjoint(
+            residual, psi_far.shape[-2:]
+        )[:, None]
         # Compensate FFT normalization only for the far-field Fourier propagator.
         if isinstance(self.forward_model.free_space_propagator, fm.FourierPropagator):
             td *= psi_far.shape[-1] * psi_far.shape[-2]
@@ -410,22 +426,32 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
         As in `gradientF`, the amplitude is the joint norm A across probe modes
         (dim=1). The diagonal term is a plain per-mode sum, but the data term
         couples all modes through the shared amplitude: the mode axis must be
-        summed *before* the two factors are multiplied together.
+        summed *before* the two factors are multiplied together. Detector
+        operators act on the first and mixed second intensity variations.
+        The additive amplitude epsilon matches gradientF and retains the
+        original approximate curvature; eps=0 gives the exact bilinear Hessian.
         """
 
-        A = torch.sqrt(torch.sum(torch.abs(psi_far) ** 2, dim=1, keepdim=True)) + self.eps
-        l0 = psi_far / A
-        d0 = data / A
-        v1 = torch.sum(self.current_constrained_pixel_mask * (1 - d0) * reprod(psi_far1, psi_far2))
-        c1 = torch.sum(reprod(l0, psi_far1), dim=1, keepdim=True)
-        c2 = torch.sum(reprod(l0, psi_far2), dim=1, keepdim=True)
-        v2 = torch.sum(
-            self.current_constrained_pixel_mask
-            * d0
-            * c1
-            * c2
+        model = self.forward_model
+        y = model.map_intensity_to_detector(psi_far.abs().square().sum(1))
+        mask = self.current_constrained_pixel_mask[:, 0]
+        validate_predicted_intensity(y[mask])
+        amplitude = torch.where(mask, y, 1).sqrt() + self.eps
+        # For L=(sqrt(y)-d)^2: L'=1-d/sqrt(y), L''=d/(2*y**1.5).
+        dy1 = model.map_intensity_to_detector(
+            2 * reprod(psi_far, psi_far1).sum(1), include_offset=False
         )
-        return 2 * (v1 + v2)
+        dy2 = model.map_intensity_to_detector(
+            2 * reprod(psi_far, psi_far2).sum(1), include_offset=False
+        )
+        d2y = model.map_intensity_to_detector(
+            2 * reprod(psi_far1, psi_far2).sum(1), include_offset=False
+        )
+        curvature = (
+            (1 - data[:, 0] / amplitude) * d2y
+            + data[:, 0] / (2 * amplitude**3) * dy1 * dy2
+        )
+        return torch.where(mask, curvature, 0).sum()
 
     def gradient_o(self, p, gradF):
         """

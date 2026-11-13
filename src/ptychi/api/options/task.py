@@ -28,6 +28,7 @@ class PtychographyTaskOptions(base.TaskOptions):
         for options in (
             self.data_options,
             self.reconstructor_options,
+            self.reconstructor_options.forward_model_options.detector_response_options,
             self.object_options,
             self.probe_options,
             self.probe_position_options,
