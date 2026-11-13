@@ -34,7 +34,7 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
         )
     
     def build(self):
-        self.update_requires_grad()
+        self.set_requires_grad()
         super().build()
         
     def build_forward_model(self):
@@ -51,23 +51,23 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
     
     def run_pre_epoch_hooks(self) -> None:
         super().run_pre_epoch_hooks()
-        self.update_requires_grad()
+        self.set_requires_grad()
                     
-    def update_requires_grad(self):
+    def set_requires_grad(self):
         """Set requires_grad of variables that don't need to be optimized at this epoch to False.
         This prevents these variables from holding the old graph and causing errors during
         backward() call.
         """
         for var in self.parameter_group.get_all_parameters():
             if not (var.options.optimization_plan.is_enabled(self.current_epoch) and var.options.optimizable):
-                var.tensor.requires_grad = False
+                var.set_requires_grad(False)
             else:
-                var.tensor.requires_grad = True
+                var.set_requires_grad(True)
             for subvar in var.sub_modules:
                 if not (subvar.options.optimization_plan.is_enabled(self.current_epoch) and subvar.options.optimizable):
-                    subvar.tensor.requires_grad = False
+                    subvar.set_requires_grad(False)
                 else:
-                    subvar.tensor.requires_grad = True
+                    subvar.set_requires_grad(True)
 
     def run_post_differentiation_hooks(self, input_data, y_true):
         super().run_post_differentiation_hooks(input_data, y_true)
