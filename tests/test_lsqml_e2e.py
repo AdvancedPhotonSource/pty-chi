@@ -1,5 +1,4 @@
 import argparse
-import logging
 
 import torch
 import numpy as np
@@ -13,9 +12,8 @@ import test_utils as tutils
 
 
 class Test2dPtychoOptPlan(tutils.TungstenDataTester):
-
     @tutils.TungstenDataTester.wrap_recon_tester(name='test_2d_ptycho_opt_plan')
-    def test_2d_ptycho_opt_plan(self):
+    def test_lsqml_e2e(self):
         self.setup_ptychi(cpu_only=False)
 
         data, probe, pixel_size_m, positions_px = self.load_tungsten_data(pos_type='true', additional_opr_modes=3)
@@ -73,13 +71,13 @@ class Test2dPtychoOptPlan(tutils.TungstenDataTester):
             
         recon = task.get_data_to_cpu(name='object', as_numpy=True)[0]
         return recon
-    
-    
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--generate-gold', action='store_true')
-    args = parser.parse_args()
 
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--generate-gold", action="store_true")
+    args = parser.parse_args()
     tester = Test2dPtychoOptPlan()
-    tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=True)
-    tester.test_2d_ptycho_opt_plan()
+    tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=False)
+    tester.test_lsqml_e2e()

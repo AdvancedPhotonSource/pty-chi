@@ -9,39 +9,37 @@ from ptychi.utils import get_suggested_object_size, get_default_complex_dtype
 import test_utils as tutils
 
 
-class Test2DPtychoEPIE(tutils.TungstenDataTester):
-
-    @tutils.TungstenDataTester.wrap_recon_tester(name='test_2d_ptycho_epie')
-    def test_2d_ptycho_epie(self):
+class Test2DPtychoBH(tutils.TungstenDataTester):
+    @tutils.TungstenDataTester.wrap_recon_tester(name='test_2d_ptycho_bh_obj_probe_pos_cg')
+    def test_bh_e2e(self):
         self.setup_ptychi(cpu_only=False)
-        
+
         data, probe, pixel_size_m, positions_px = self.load_tungsten_data(additional_opr_modes=0)
         probe = probe[:, [0], :, :]
-        
-        options = api.EPIEOptions()
+
+        options = api.BHOptions()
         diffraction_data = data
-        
+
         object_data = torch.ones([1, *get_suggested_object_size(positions_px, probe.shape[-2:], extra=100)], dtype=get_default_complex_dtype())
         options.object_options.pixel_size_m = pixel_size_m
         options.object_options.optimizable = True
-        options.object_options.optimizer = api.Optimizers.SGD
-        options.object_options.step_size = 0.1
-        options.object_options.alpha = 1
-        
+
         probe_data = probe
         options.probe_options.optimizable = True
-        options.probe_options.optimizer = api.Optimizers.SGD
-        options.probe_options.step_size = 0.1
-        options.probe_options.alpha = 1
+        options.probe_options.rho = 0.1
 
         probe_position_x_px = positions_px[:, 1]
         probe_position_y_px = positions_px[:, 0]
-        options.probe_position_options.optimizable = False
-        
-        options.reconstructor_options.batch_size = 100
-        options.reconstructor_options.num_epochs = 32
+        options.probe_position_options.optimizable = True
+        options.probe_position_options.rho = 2
+
+        options.reconstructor_options.method = 'CG'
+        options.reconstructor_options.batch_size = 96
+        options.reconstructor_options.num_epochs = 8
         options.reconstructor_options.allow_nondeterministic_algorithms = False
-        
+        options.reconstructor_options.use_double_precision_for_fft = False
+        options.reconstructor_options.forward_model_options.pad_for_shift = 4
+
         task = PtychographyTask(
             options,
             diffraction_data=diffraction_data,
@@ -53,14 +51,15 @@ class Test2DPtychoEPIE(tutils.TungstenDataTester):
         task.run()
 
         recon = task.get_data_to_cpu('object', as_numpy=True)[0]
-        return recon
-    
-    
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--generate-gold', action='store_true')
-    args = parser.parse_args()
 
-    tester = Test2DPtychoEPIE()
-    tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=True)
-    tester.test_2d_ptycho_epie()
+        return recon
+
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--generate-gold", action="store_true")
+    args = parser.parse_args()
+    tester = Test2DPtychoBH()
+    tester.setup_method(name="", generate_data=False, generate_gold=args.generate_gold, debug=False)
+    tester.test_bh_e2e()
