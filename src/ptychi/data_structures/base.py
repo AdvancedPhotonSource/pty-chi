@@ -344,6 +344,8 @@ class ReconstructParameter(Module):
 
     def get_grad(self):
         if isinstance(self.tensor, ComplexTensor):
+            if self.tensor.data.grad is None:
+                return None
             return self.tensor.data.grad[..., 0] + 1j * self.tensor.data.grad[..., 1]
         else:
             return self.tensor.grad

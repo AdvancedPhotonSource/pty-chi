@@ -1224,30 +1224,38 @@ class PlanarPtychographyForwardModel(ForwardModel):
         ):
             return
         # Directly modify the gradients here. Tensor.register_hook has memory leak issue.
-        if self.object.optimizable:
+        object_grad = self.object.get_grad() if self.object.optimizable else None
+        if object_grad is not None:
             self.object.set_grad(
-                self.object.get_grad()
+                object_grad
                 / self.probe.get_all_mode_intensity().max()
                 * patterns.numel()
             )
         # Assuming (obj_patches.abs() ** 2).max() == 1.0
-        if self.probe.optimizable:
+        probe_grad = self.probe.get_grad() if self.probe.optimizable else None
+        if probe_grad is not None:
             self.probe.set_grad(
-                self.probe.get_grad() * (
+                probe_grad * (
                     patterns.numel() / len(patterns)
                 )
             )
             
-        if self.probe_positions.optimizable:
+        probe_positions_grad = (
+            self.probe_positions.get_grad() if self.probe_positions.optimizable else None
+        )
+        if probe_positions_grad is not None:
             self.probe_positions.set_grad(
-                self.probe_positions.get_grad() * (
+                probe_positions_grad * (
                     patterns.numel() / len(patterns)
                 )
             )
             
-        if self.opr_mode_weights.optimizable:
+        opr_mode_weights_grad = (
+            self.opr_mode_weights.get_grad() if self.opr_mode_weights.optimizable else None
+        )
+        if opr_mode_weights_grad is not None:
             self.opr_mode_weights.set_grad(
-                self.opr_mode_weights.get_grad() * (
+                opr_mode_weights_grad * (
                     patterns.numel() / len(patterns)
                 )
             )
