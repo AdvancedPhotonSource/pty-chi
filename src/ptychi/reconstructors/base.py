@@ -920,14 +920,13 @@ class AnalyticalIterativePtychographyReconstructor(
             return delta_p
         if first_mode_only is None:
             first_mode_only = not self.forward_model.subpixel_shift_all_probe_modes
-        orig_shape = delta_p.shape
         fractional_shifts = self.forward_model.get_probe_grid_position_data()[2][indices]
         
         if first_mode_only:
             delta_p_to_shift = delta_p[..., 0, :, :]
         else:
-            delta_p_to_shift = delta_p.reshape(delta_p.shape[0] * delta_p.shape[1], *delta_p.shape[2:])
-            fractional_shifts = fractional_shifts.repeat_interleave(delta_p.shape[1], dim=0)
+            # The modes share their position's shift, which shift_images broadcasts.
+            delta_p_to_shift = delta_p
         
         delta_p_shifted = ip.shift_images(
             delta_p_to_shift, 
@@ -940,5 +939,5 @@ class AnalyticalIterativePtychographyReconstructor(
         if first_mode_only:
             delta_p = torch.cat([delta_p_shifted[..., None, :, :], delta_p[..., 1:, :, :]], dim=-3)
         else:
-            delta_p = delta_p_shifted.reshape(orig_shape)
+            delta_p = delta_p_shifted
         return delta_p

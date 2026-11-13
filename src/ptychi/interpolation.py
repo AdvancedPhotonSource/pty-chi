@@ -386,8 +386,10 @@ def translate(images: Tensor, shifts: Tensor, method="bilinear", *, adjoint=Fals
     Parameters
     ----------
     images : Tensor
-        Real or complex tensor of shape (N, H, W). Compact inputs include
-        the support halo; cubic compact inputs hold spline coefficients.
+        Real or complex tensor of shape (N, H, W), or (N, ..., H, W) for
+        ordinary translations, where all images under one leading index share
+        its shift. Compact inputs include the support halo; cubic compact
+        inputs hold spline coefficients.
     shifts : Tensor
         Tensor of shape (N, 2) containing forward (y, x) displacements in
         pixels. It is moved to the image device if necessary. Positive shifts
@@ -427,11 +429,28 @@ def translate(images: Tensor, shifts: Tensor, method="bilinear", *, adjoint=Fals
             frequency_dtype=(torch.get_default_dtype() if method == "fourier"
                              else images.real.dtype), separable=False,
         )
-        spectrum = spectrum * (multiplier.conj() if adjoint else multiplier)
+        # One multiplier per shift, broadcast over the dimensions between the
+        # batch and the image (e.g. the probe modes that share a position).
+        multiplier = multiplier.reshape(
+            len(shifts), *(1,) * (images.ndim - 3), *images.shape[-2:]
+        )
+        if adjoint:
+            multiplier = multiplier.conj()
+        if (spectrum.requires_grad or multiplier.requires_grad
+                or torch.result_type(spectrum, multiplier) != spectrum.dtype):
+            spectrum = spectrum * multiplier
+        else:
+            # The FFT output is fresh; multiplying in place saves a batch-sized copy.
+            spectrum.mul_(multiplier)
         result = pmath.ifft2_precise(spectrum)
         return result if images.is_complex() else result.real
     if method not in ("bilinear", "nearest", "cubic"):
         raise ValueError(f"Invalid interpolation method: {method}")
     if valid_shape is not None:
         return _compact_support(images, shifts, valid_shape, adjoint, out, method)
+    if images.ndim > 3:
+        # The spatial kernels take (N, H, W): repeat each shift for its images.
+        flat = images.reshape(-1, *images.shape[-2:])
+        shifts = shifts.repeat_interleave(len(flat) // len(shifts), dim=0)
+        return _spatial_shift(flat, shifts, method, adjoint).reshape(images.shape)
     return _spatial_shift(images, shifts, method, adjoint)
