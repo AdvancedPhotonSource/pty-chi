@@ -331,8 +331,68 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             size=(self.parameter_group.probe_positions.shape[0],), fill_value=0.5
         )
 
+    def _get_detector_model_step_size(self, y_pred, y_true, indices, gradient, eps=1e-5):
+        """Approximate the reciprocal-space likelihood search with two fixed-point passes.
+
+        For the linear detector operator A (crop, blur), precompute
+        s = A Re(sum(conj(psi) * g)) and t = A sum(|g|^2). The trial prediction
+        is exactly y(alpha) = y_pred - 2*alpha*s + alpha^2*t.
+        All detector arrays use unshifted
+        FFT coordinates, and sums over wavefields include incoherent modes.
+
+        Likelihood stationarity gives alpha_new = sum(M*(s-rho*(s-alpha*t)))
+        / sum(M*t), where M is the constrained-pixel mask and rho is
+        y_true/y(alpha) for Poisson noise or its square root for Gaussian
+        amplitude noise. Two passes approximate this equation; they do not
+        guarantee convergence. Poisson steps retain damping and perturbation.
+        """
+        model = self.forward_model
+        psi = model.intermediate_variables["psi_far"]
+        mask = self.get_constrained_pixel_mask(y_true)
+        s = model.map_intensity_to_detector(
+            (psi.conj() * gradient).real.sum(1)
+        )
+        t = model.map_intensity_to_detector(gradient.abs().square().sum(1))
+        denominator = torch.where(mask, t, 0).sum((-2, -1))
+        active = denominator > 0
+        denominator = torch.where(active, denominator, 1)
+        max_step = 1
+        alpha = self.alpha_psi_far_all_pos[indices].clamp(0, max_step)
+        poisson = isinstance(self.noise_model, fm.PtychographyPoissonNoiseModel)
+        for _ in range(2):
+            alpha_prev = alpha.mean()
+            trial = (y_pred - 2 * alpha_prev * s + alpha_prev**2 * t).clamp_min(eps)
+            ratio = y_true / trial
+            if not poisson:
+                ratio = ratio.sqrt()
+            numerator = torch.where(mask, s - ratio * (s - alpha_prev * t), 0).sum((-2, -1))
+            alpha = numerator / denominator
+            if poisson:
+                alpha = (0.5 * alpha_prev + 0.5 * alpha).clamp(0, max_step)
+            alpha = torch.where(active, alpha, 0)
+        if poisson:
+            alpha = alpha + torch.randn(alpha.shape, device=alpha.device) * 1e-2
+            alpha = torch.where(active, alpha, 0)
+        self.alpha_psi_far_all_pos[indices] = alpha
+        return alpha
+
     @timer()
-    def get_psi_far_step_size(self, y_pred, y_true, indices, eps=1e-5):
+    def get_psi_far_step_size(self, y_pred, y_true, indices, eps=1e-5, gradient=None):
+        """Choose the reciprocal wavefield likelihood step (Odstrcil 2018, Eq. 15).
+
+        Blur uses two fixed-point passes on the detector
+        intensity polynomial along the supplied gradient. The original steps are
+        retained for an ideal detector, optionally cropped. Object/probe steps
+        fitting the updated wavefield are solved by calculate_optimal_step_sizes.
+        """
+        model = self.forward_model
+        if model.diffraction_pattern_blur_sigma is not None:
+            if gradient is None:
+                gradient = self.noise_model.backward_to_psi_far(
+                    y_pred, y_true, model.intermediate_variables["psi_far"],
+                    forward_model=model,
+                )
+            return self._get_detector_model_step_size(y_pred, y_true, indices, gradient, eps)
         if isinstance(self.noise_model, fm.PtychographyGaussianNoiseModel):
             alpha = torch.tensor(0.5, device=y_pred.device)  # Eq. 16
         elif isinstance(self.noise_model, fm.PtychographyPoissonNoiseModel):
@@ -379,8 +439,12 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         # gradient as in Eq. 12a/b
         psi_far_0 = self.forward_model.intermediate_variables["psi_far"]
-        dl_dpsi_far = self.noise_model.backward_to_psi_far(y_pred, y_true, psi_far_0)
-        self.alpha_psi_far = self.get_psi_far_step_size(y_pred, y_true, indices)
+        dl_dpsi_far = self.noise_model.backward_to_psi_far(
+            y_pred, y_true, psi_far_0, forward_model=self.forward_model
+        )
+        self.alpha_psi_far = self.get_psi_far_step_size(
+            y_pred, y_true, indices, gradient=dl_dpsi_far
+        )
         psi_far = psi_far_0 - self.alpha_psi_far.view(-1, 1, 1, 1) * dl_dpsi_far  # Eq. 14
 
         psi_opt = self.forward_model.free_space_propagator.propagate_backward(psi_far)
@@ -670,8 +734,12 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         probe=None,
         slice_index=0,
     ):
-        """Calculate the optimal step sizes for the object and probem, and update
-        the step size buffers.
+        """Fit object/probe update directions to the updated exit wave.
+
+        This is the wavefield least-squares problem in Eqs. (20)-(22) of
+        Odstrcil (2018), distinct from the reciprocal likelihood step in Eq. (15).
+        Detector effects enter through chi, the corrected target wavefield minus
+        the current wavefield. The fitted steps are stored in the step-size buffers.
 
         Parameters
         ----------

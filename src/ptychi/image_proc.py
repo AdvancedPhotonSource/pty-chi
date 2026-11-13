@@ -1132,12 +1132,31 @@ def convolve1d(
 
 
 @timer()
-def gaussian_filter(image, sigma=1, size=3):
+def gaussian_filter(image, sigma=1, size=3, adjoint=False):
+    """Gaussian convolution with replicated edges, or its exact adjoint.
+
+    The adjoint folds contributions from the padded border into the edge pixels;
+    applying the forward filter again would give a different boundary operator.
+    """
     x = torch.arange(-((size - 1) / 2), -((size - 1) / 2) + size, 1, device=image.device)
     gauss_1d = torch.exp(-0.5 * (x / sigma) ** 2)
     kernel = gauss_1d[:, None] * gauss_1d[None, :]
     kernel = kernel / torch.sum(kernel)
-    return convolve2d(image, kernel, padding="same")
+    if not adjoint:
+        return convolve2d(image, kernel, padding="same")
+    shape = image.shape
+    pad = size // 2
+    expanded = torch.nn.functional.conv_transpose2d(
+        image.reshape(-1, 1, *shape[-2:]), kernel[None, None].to(image.dtype)
+    )
+    # Transpose of replicate padding, first along x and then along y.
+    x = (torch.arange(expanded.shape[-1], device=image.device) - pad).clamp(0, shape[-1] - 1)
+    folded_x = expanded.new_zeros((*expanded.shape[:-1], shape[-1]))
+    folded_x.index_add_(-1, x, expanded)
+    y = (torch.arange(expanded.shape[-2], device=image.device) - pad).clamp(0, shape[-2] - 1)
+    result = expanded.new_zeros((*expanded.shape[:-2], *shape[-2:]))
+    result.index_add_(-2, y, folded_x)
+    return result.reshape(shape)
 
 
 @timer()
