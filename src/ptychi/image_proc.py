@@ -603,7 +603,8 @@ def shift_images(
     Parameters
     ----------
     images : Tensor
-        A [N, H, W] tensor of images.
+        A [N, H, W] tensor of images, or [N, ..., H, W] where all images under
+        one leading index share its shift (e.g. the probe modes at a position).
     shifts : Tensor
         A [N, 2] tensor of shifts in pixels. Use the same shift values as the
         forward shift operation even if `adjoint` is True; do not flip the sign.

@@ -793,14 +793,13 @@ class PlanarPtychographyForwardModel(ForwardModel):
             return unique_probes
         if first_mode_only is None:
             first_mode_only = not self.subpixel_shift_all_probe_modes
-        orig_shape = unique_probes.shape
         fractional_shifts = self.get_probe_grid_position_data()[2][indices]
         
         if first_mode_only:
             unique_probe_to_shift = unique_probes[..., 0, :, :]
         else:
-            unique_probe_to_shift = unique_probes.reshape(unique_probes.shape[0] * unique_probes.shape[1], *unique_probes.shape[2:])
-            fractional_shifts = fractional_shifts.repeat_interleave(unique_probes.shape[1], dim=0)
+            # The modes share their position's shift, which shift_images broadcasts.
+            unique_probe_to_shift = unique_probes
 
         unique_probe_shifted = ip.shift_images(
             unique_probe_to_shift, 
@@ -813,7 +812,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         if first_mode_only:
             unique_probes = torch.cat([unique_probe_shifted[..., None, :, :], unique_probes[..., 1:, :, :]], dim=-3)
         else:
-            unique_probes = unique_probe_shifted.reshape(orig_shape)
+            unique_probes = unique_probe_shifted
         return unique_probes
         
     @timer()
