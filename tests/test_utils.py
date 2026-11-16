@@ -3,6 +3,7 @@ import os
 import datetime
 import logging
 import configparser
+import warnings
 from typing import Union
 
 import torch
@@ -110,11 +111,17 @@ class BaseTester:
     
     @staticmethod
     def get_ci_data_dir():
-        try:
-            dir = os.environ['PTYCHO_CI_DATA_DIR']
-        except KeyError:
-            raise KeyError('PTYCHO_CI_DATA_DIR not set. Please set it to the path to the data folder.')
-        return dir
+        """Return the test data root, defaulting to this checkout's DVC data."""
+        if "PTYCHO_CI_DATA_DIR" in os.environ:
+            warnings.warn(
+                "PTYCHO_CI_DATA_DIR overrides the versioned test data location. "
+                "Unset it and run 'dvc pull' from the repository root to switch to "
+                "DVC-managed data. See tests/README.rst for setup instructions.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return os.environ["PTYCHO_CI_DATA_DIR"]
+        return os.path.join(os.path.dirname(__file__), "reference")
 
     def get_ci_input_data_dir(self):
         return os.path.join(self.get_ci_data_dir(), 'data')
