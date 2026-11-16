@@ -1276,16 +1276,18 @@ def total_variation_2d_chambolle(
         grad_y, grad_x = nearest_neighbor_gradient(div(xi) - image / lmbda, "forward")
         gdv = torch.stack([grad_y, grad_x], dim=-1)
 
-        # Isotropic
-        d = torch.sqrt(torch.sum(gdv**2, dim=-1, keepdim=True))
+        # Isotropic. Use |g|^2 so that d is the real Euclidean norm of the
+        # gradient also for complex images (treated as 2-channel real images).
+        d = torch.sqrt(torch.sum(gdv.abs() ** 2, dim=-1, keepdim=True))
 
         xi = (xi + tau * gdv) / (1 + tau * d)
 
         # Reconstruct
         image = image - lmbda * div(xi)
 
-    # Prevent pushing values to 0
-    image = torch.sum(x0 * image) / torch.sum(image**2) * image
+    # Prevent pushing values to 0: rescale by the least-squares optimal
+    # factor argmin_c ||x0 - c * image||^2 (conjugate is a no-op for real images).
+    image = torch.sum(image.conj() * x0) / torch.sum(image.abs() ** 2) * image
     return image
 
 
