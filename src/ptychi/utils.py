@@ -18,7 +18,6 @@ from ptychi.device import AcceleratorModuleWrapper
 
 if TYPE_CHECKING:
     from ptychi.api.task import PtychographyTask
-    from ptychi.data_structures.detector_response import DetectorResponse
 
 
 _default_complex_dtype = torch.complex64

@@ -725,19 +725,6 @@ class PlanarObject(Object):
         sampling: Optional["ip.ObjectSamplingParameters"] = None,
     ) -> None:
         """Initialize ``C_0 = L``, the current probe illumination map.
-
-        Scaling the probe by ``s`` scales the seed by ``abs(s)**2``. Averaging
-        with subsequent illumination maps preserves this scaling and LSQML's
-        preconditioned object direction under a change of field units.
-
-        PtychoShelves' ``load_from_p`` divides the actual reconstruction probe
-        by ``2 * sqrt(H * W) * p.renorm`` to convert between CPU and GPU engine
-        units. Its ``init_solver`` builds the seed from that converted probe,
-        before optional initial probe rescaling. Pty-Chi already stores the
-        probe in its reconstruction units and builds the seed directly from it.
-        This replaces our earlier adaptation, which applied the conversion
-        only to a temporary probe used for the seed and introduced an extra
-        ``max_power / (4 * (H * W)**2)`` weight for the default far-field case.
         
         Parameters
         ----------

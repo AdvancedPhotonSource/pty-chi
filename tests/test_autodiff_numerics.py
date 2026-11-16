@@ -117,19 +117,15 @@ def test_opr_gradient_hook_freezes_disabled_weight_components(intensity, eigen, 
     recon.forward_model.post_differentiation_hook.assert_called_once()
 
 
-@pytest.mark.parametrize(
-    "norm,expected_object,expected_probe", [(None, 0.125, 1.0), ("ortho", 0.5, 4.0)]
-)
-def test_autodiff_fft_and_minibatch_gradient_scaling(norm, expected_object, expected_probe):
+def test_autodiff_fft_and_minibatch_gradient_scaling():
     task = make_task(api.AutodiffPtychographyOptions())
     model = task.reconstructor.forward_model
-    model.free_space_propagator.norm = norm
     task.object.set_grad(torch.ones_like(task.object.data))
     task.probe.set_grad(torch.ones_like(task.probe.data))
     model.post_differentiation_hook(torch.tensor([0, 1]), torch.ones((2, 2, 2)))
     # Probe maximum intensity=16; two patterns of four pixels each.
-    torch.testing.assert_close(task.object.get_grad(), torch.full((1, 6, 6), expected_object + 0j))
-    torch.testing.assert_close(task.probe.get_grad(), torch.full((1, 1, 2, 2), expected_probe + 0j))
+    torch.testing.assert_close(task.object.get_grad(), torch.full((1, 6, 6), 0.5 + 0j))
+    torch.testing.assert_close(task.probe.get_grad(), torch.full((1, 1, 2, 2), 4.0 + 0j))
 
 
 def test_autodiff_minibatch_applies_simultaneous_object_probe_sgd_updates():
@@ -141,9 +137,10 @@ def test_autodiff_minibatch_applies_simultaneous_object_probe_sgd_updates():
     recon = task.reconstructor
     with torch.no_grad():
         task.probe.set_data(torch.ones((1, 1, 2, 2), dtype=torch.complex128))
-    # A constant 2x2 exit wave has intensity 16 at DC. The measured amplitude
-    # is 2, so each illuminated object pixel and probe pixel has gradient 1.
-    recon.run_minibatch([torch.tensor([0])], torch.tensor([[[4.0, 0.0], [0.0, 0.0]]]))
+    # A constant 2x2 exit wave has unitary-FFT intensity 4 at DC. The measured
+    # amplitude is 1, so each illuminated object and probe pixel has gradient 1
+    # after the gradient hook cancels the pixel-averaging factor.
+    recon.run_minibatch([torch.tensor([0])], torch.tensor([[[1.0, 0.0], [0.0, 0.0]]]))
     expected_object = torch.ones((1, 6, 6), dtype=torch.complex128)
     # The task places the first patch at rows 2:4, columns 1:3.
     expected_object[0, 2:4, 1:3] = 0.9
