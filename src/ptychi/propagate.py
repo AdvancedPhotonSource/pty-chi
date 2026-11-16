@@ -164,7 +164,7 @@ class WavefieldPropagator(ABC, torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-        # TODO: Remove this warning after version 2.5.0.
+        # TODO: Remove this warning in 2.8.0 (two releases after 2.6.0).
         # Share the notice across all subclasses and concurrent initializations.
         with WavefieldPropagator._normalization_warning_lock:
             if not WavefieldPropagator._normalization_warning_emitted:

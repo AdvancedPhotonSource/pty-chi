@@ -4,6 +4,8 @@
 from typing import Optional, Type, Union
 import dataclasses
 from dataclasses import field
+import logging
+import math
 from pydantic import Field as PydanticField
 from pydantic.dataclasses import dataclass
 
@@ -15,12 +17,66 @@ import ptychi.api.options.ad_general as ad_general
 import ptychi.forward_models as fm
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class AutodiffPtychographyReconstructorOptions(ad_general.AutodiffReconstructorOptions):
     forward_model_class: Union["enums.ForwardModels", Type["fm.ForwardModel"]] = enums.ForwardModels.PLANAR_PTYCHOGRAPHY
     
     def get_reconstructor_type(self) -> enums.Reconstructors:
         return enums.Reconstructors.AD_PTYCHO
+
+    def check(self, options: "AutodiffPtychographyOptions"):
+        super().check(options)
+        object_options = options.object_options
+        probe_options = options.probe_options
+        far_field = math.isinf(options.data_options.free_space_propagation_distance_m)
+        if (
+            (not far_field and (object_options.optimizable or probe_options.optimizable))
+            or (probe_options.optimizable and probe_options.optimizer != enums.Optimizers.SGD)
+        ):
+            # TODO: Remove this warning in 2.8.0 (two releases after 2.6.0).
+            logger.warning(
+                "Pty-Chi 2.6.0 changed autodiff object/probe gradient scaling. Review "
+                "`object_options.step_size`, `probe_options.step_size`, and their "
+                "`optimizer_params` when migrating tuned settings. For array-based "
+                "parameters with the old default FourierPropagator, SGD step sizes "
+                "are unchanged; Adam probe step size and epsilon should be multiplied "
+                "by sqrt(H*W). Fresnel/Fraunhofer SGD and Adam-epsilon conversions "
+                "depend on geometry; angular-spectrum units are unchanged. "
+                "See https://github.com/AdvancedPhotonSource/pty-chi/discussions/90"
+            )
+        if (
+            far_field
+            and self.forward_model_class == enums.ForwardModels.PLANAR_PTYCHOGRAPHY
+            and all(
+                dip is None or not dip.enabled
+                for dip in (
+                    object_options.experimental.deep_image_prior_options,
+                    probe_options.experimental.deep_image_prior_options,
+                )
+            )
+        ):
+            for name, parameter_options in (
+                ("probe_position_options", options.probe_position_options),
+                ("opr_mode_weight_options", options.opr_mode_weight_options),
+                (
+                    "reconstructor_options.forward_model_options.detector_response_options",
+                    self.forward_model_options.detector_response_options,
+                ),
+            ):
+                if parameter_options.optimizable:
+                    # TODO: Remove this warning in 2.8.0 (two releases after 2.6.0).
+                    logger.warning(
+                        "Pty-Chi 2.6.0 removed the old Fourier gradient compensation "
+                        "for autodiff `%s`. With a migrated probe and the default "
+                        "FourierPropagator, divide its SGD `step_size` by H*W. "
+                        "For Adam, retain the step size and multiply `optimizer_params` "
+                        "epsilon by H*W. These conversions assume fresh optimizer state. "
+                        "See https://github.com/AdvancedPhotonSource/pty-chi/discussions/90",
+                        name,
+                    )
 
 
 @dataclass
