@@ -51,13 +51,16 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Update test data
-      id: update_test_data
+    - name: Fetch versioned test data
+      env:
+        PTYCHO_CI_DATA_URL: ${{ secrets.PTYCHO_CI_DATA_URL }}
+        PTYCHO_CI_CACHE_DIR: ${{ vars.PTYCHO_CI_CACHE_DIR }}
       run: |
-        PACKAGE_DIR=$(pwd)
-        cd $PTYCHO_CI_DATA_DIR
-        git pull origin main
-        cd $PACKAGE_DIR
+        : "${PTYCHO_CI_DATA_URL:?Set the PTYCHO_CI_DATA_URL repository secret}"
+        PTYCHO_CI_CACHE_DIR="${PTYCHO_CI_CACHE_DIR:-$(dirname "$GITHUB_WORKSPACE")/.dvc-cache}"
+        uv tool run --from 'dvc[ssh]==3.67.1' dvc cache dir --local "$PTYCHO_CI_CACHE_DIR"
+        uv tool run --from 'dvc[ssh]==3.67.1' dvc remote add --local --force -d testdata "$PTYCHO_CI_DATA_URL"
+        uv tool run --from 'dvc[ssh]==3.67.1' dvc pull
 
     - name: Create environment
       id: create_env
@@ -79,6 +82,7 @@ jobs:
       run: |
         source .venv_pytest/bin/activate
         echo $(which python)
+        unset PTYCHO_CI_DATA_DIR
         cd tests
         uv run --active --locked --with torch==2.12.1 --with torchvision pytest -s --high-tol --save-timing
 

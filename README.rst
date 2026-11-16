@@ -124,16 +124,11 @@ This allows you to run scripts located anywhere in your system.
 
 
 =======================
-How to run test scripts 
+How to run test scripts
 =======================
 
-1. Contact the developers to be given access to the APS GitLab repository
-   that holds test data. **You need to have an account on APS GitLab**.
-2. After gaining access, clone the GitLab data repository to your
-   hard drive. 
-3. Set ``PTYCHO_CI_DATA_DIR`` to the ``ci_data`` directory of the data
-   repository: ``export PTYCHO_CI_DATA_DIR="path_to_data_repo/ci_data"``.
-4. Run any test scripts in ``tests`` with Python.
+See the `testing README <tests/README.rst>`_ for instructions on running tests
+and updating reference data.
 
 ======================
 To use non-Nvidia GPUs
