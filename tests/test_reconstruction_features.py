@@ -76,8 +76,8 @@ def test_multislice_forward_and_low_memory_match_inline_diffraction(n_slices, n_
         task.object.slice_spacings.set_data(torch.zeros(n_slices - 1))
     model = task.reconstructor.forward_model
     indices = torch.tensor([0, 1])
-    # FFT([[1,2i],[3,4i]]) = [[4+6i,4-6i],[-2-2i,-2+2i]].
-    expected = torch.tensor([[[52.0, 52.0], [8.0, 8.0]]]).repeat(2, 1, 1)
+    # Orthonormal FFT([[1,2i],[3,4i]]) = [[2+3i,2-3i],[-1-1i,-1+1i]].
+    expected = torch.tensor([[[13.0, 13.0], [2.0, 2.0]]]).repeat(2, 1, 1)
     expected *= n_modes * 4**n_slices
     torch.testing.assert_close(model(indices), expected)
     torch.testing.assert_close(model.forward_low_memory(indices), expected)

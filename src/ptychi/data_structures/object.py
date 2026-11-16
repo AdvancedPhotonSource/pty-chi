@@ -3,8 +3,6 @@
 
 from typing import Tuple, TYPE_CHECKING, Optional
 import logging
-import copy
-import math
 
 import torch
 from torch import Tensor
@@ -20,13 +18,11 @@ from ptychi.utils import (
     to_numpy, 
     to_tensor,
     chunked_processing,
-    get_probe_renormalization_factor
 )
 import ptychi.maps as maps
 
 if TYPE_CHECKING:
     import ptychi.api as api
-    from ptychi.propagate import WavefieldPropagator
     from ptychi.data_structures.probe_positions import ProbePositions
     
 logger = logging.getLogger(__name__)
@@ -690,17 +686,13 @@ class PlanarObject(Object):
         self,
         probe: "ds.probe.Probe",
         probe_positions: "ds.probe_positions.ProbePositions",
-        patterns: Tensor = None,
         use_all_modes: bool = False,
         *,
         sampling: Optional["ip.ObjectSamplingParameters"] = None,
-        propagator: Optional["WavefieldPropagator | type[WavefieldPropagator]"] = None,
-        valid_pixel_mask: Optional[Tensor] = None,
-        detector_response: Optional["ds.detector_response.DetectorResponse"] = None,
     ) -> None:
-        """Update the preconditioner. This function reproduces the behavior
-        of PtychoShelves in `ptycho_solver`: it averages the new illumination
-        map and the old preconditioner to reduce oscillations.
+        """Initialize from the illumination map, then average subsequent maps
+        with the previous preconditioner to reduce oscillations, as in
+        PtychoShelves' ``ptycho_solver``.
         
         Parameters
         ----------
@@ -708,26 +700,16 @@ class PlanarObject(Object):
             The probe to use for the illumination map.
         probe_positions : ds.probe_positions.ProbePositions
             The positions of the probe.
-        patterns : Tensor, optional
-            A (n_scan_points, h, w) tensor giving the diffraction patterns. Only needed
-            if the preconditioner does not exist and needs to be initialized.
         use_all_modes : bool, optional
             Whether to use the sum of all probe modes' intensities for the illumination map.
         sampling : ip.ObjectSamplingParameters, optional
             Sampling parameters passed to ``calculate_illumination_map``.
-        propagator : WavefieldPropagator or type[WavefieldPropagator], optional
-            Detector propagator passed to ``initialize_preconditioner``.
-        valid_pixel_mask : Tensor, optional
-            Shared detector mask used for the initial probe-power normalization.
-        detector_response : ds.detector_response.DetectorResponse, optional
-            Gain and offset used to infer signal power from measured patterns.
         """
         if self.preconditioner is None:
             self.initialize_preconditioner(
-                probe, probe_positions, patterns, use_all_modes=use_all_modes,
-                sampling=sampling, propagator=propagator, valid_pixel_mask=valid_pixel_mask,
-                detector_response=detector_response,
+                probe, probe_positions, use_all_modes=use_all_modes, sampling=sampling,
             )
+            return
         illum_map = self.calculate_illumination_map(
             probe, probe_positions, use_all_modes=use_all_modes,
             sampling=sampling,
@@ -738,18 +720,11 @@ class PlanarObject(Object):
         self, 
         probe: "ds.probe.Probe", 
         probe_positions: "ds.probe_positions.ProbePositions",
-        patterns: Tensor,
         use_all_modes: bool = False,
         *,
         sampling: Optional["ip.ObjectSamplingParameters"] = None,
-        propagator: Optional["WavefieldPropagator | type[WavefieldPropagator]"] = None,
-        valid_pixel_mask: Optional[Tensor] = None,
-        detector_response: Optional["ds.detector_response.DetectorResponse"] = None,
     ) -> None:
-        """Initialize the preconditioner. This function reproduces the behavior
-        of PtychoShelves in `init_solver` and `load_from_p`: the probe is first
-        renormalized before being used to calculate the illumination map.
-        Diffraction patterns are needed to calculate the renormalization factor.
+        """Initialize ``C_0 = L``, the current probe illumination map.
         
         Parameters
         ----------
@@ -757,33 +732,13 @@ class PlanarObject(Object):
             The probe to use for the illumination map.
         probe_positions : ds.probe_positions.ProbePositions
             The positions of the probe.
-        patterns : ds.patterns.Patterns
-            A (n_scan_points, h, w) tensor giving the diffraction patterns.
         use_all_modes : bool, optional
             Whether to use the sum of all probe modes' intensities for the illumination map.
         sampling : ip.ObjectSamplingParameters, optional
             Sampling parameters passed to ``calculate_illumination_map``.
-        propagator : WavefieldPropagator or type[WavefieldPropagator], optional
-            Detector propagator used to infer probe-plane power from the data.
-            Defaults to Fourier propagation. The angular-spectrum class is
-            accepted; Fourier, Fresnel, and Fraunhofer propagation require an instance.
-            Assumes lossless propagation on the propagating band.
-        valid_pixel_mask : Tensor, optional
-            Shared detector mask used for the initial probe-power normalization.
-        detector_response : ds.detector_response.DetectorResponse, optional
-            Gain and offset used to infer signal power from measured patterns.
         """
-        probe_data = probe.data
-        probe_renormalization_factor = get_probe_renormalization_factor(
-            patterns, propagator, valid_pixel_mask=valid_pixel_mask,
-            detector_response=detector_response,
-        )
-        # sqrt(H*W) converts the inferred probe-plane power to RMS amplitude;
-        # propagation normalization is included in probe_renormalization_factor.
-        probe_data = probe_data / (math.sqrt(probe.shape[-1] * probe.shape[-2]) * 2 * probe_renormalization_factor)
-        probe_temp = ds.probe.Probe(data=probe_data, options=copy.deepcopy(probe.options))
         self.preconditioner = self.calculate_illumination_map(
-            probe_temp, probe_positions, use_all_modes=use_all_modes,
+            probe, probe_positions, use_all_modes=use_all_modes,
             sampling=sampling,
         )
 

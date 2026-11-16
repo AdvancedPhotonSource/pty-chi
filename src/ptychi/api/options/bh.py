@@ -2,12 +2,16 @@
 # Full license accessible at https://github.com//AdvancedPhotonSource/pty-chi/blob/main/LICENSE
 
 from dataclasses import field
+import logging
 from pydantic import Field as PydanticField
 from pydantic.dataclasses import dataclass
 
 import ptychi.api.options.base as base
 import ptychi.api.options.task as task_options
 import ptychi.api.enums as enums
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -38,6 +42,19 @@ class BHProbeOptions(base.ProbeOptions):
     based on how closely the initial guess aligns with the final solution.
     For near-field ptychography, a typical value is 1, while for far-field ptychography, it is 0.1.
     """
+
+    def check(self, options: "BHOptions"):
+        super().check(options)
+        if self.optimizable:
+            # TODO: Remove this warning in 2.8.0 (two releases after 2.6.0).
+            logger.warning(
+                "Pty-Chi 2.6.0 changed the scaling of `probe_options.rho` in BH. "
+                "When migrating a tuned value from the old default FourierPropagator, "
+                "multiply it by sqrt(H*W), matching the probe-amplitude conversion. "
+                "Fresnel/Fraunhofer conversion depends on geometry and may require "
+                "retuning; angular-spectrum units are unchanged. "
+                "See https://github.com/AdvancedPhotonSource/pty-chi/discussions/90"
+            )
 
 
 @dataclass

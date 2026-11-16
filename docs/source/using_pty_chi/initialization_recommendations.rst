@@ -55,23 +55,24 @@ Probe
 
 The probe should be initialized to be a complex array of ``[n_opr_modes, n_incoherent_modes, h, w]``.
 
-To match the initial probe intensity to the mean measured pattern, use
-:func:`ptychi.utils.rescale_probe` with the detector propagator::
+Squared probe magnitudes represent photons per pixel when the diffraction data
+are in photon counts. All built-in propagators conserve their sum on the
+propagating band. To match the initial probe power to the mean measured pattern,
+assuming unit object transmission, use::
+
+    probe = rescale_probe(probe, patterns)
+
+If angular-spectrum propagation removes evanescent frequencies, pass a
+propagator instance to include this filtering::
 
     probe = rescale_probe(probe, patterns, propagator=propagator)
 
-The default is an unnormalized far-field Fourier transform. Rescaling assumes
-unit object transmission when relating the probe to measured counts.
-The ``AngularSpectrumPropagator`` class *normally* suffices to calculate detector power
-directly from source-plane power, assuming conservation on the propagating band.
-Fourier propagation requires an instance to supply its FFT normalization;
-Fresnel and Fraunhofer propagation require an instance to supply the
-geometry-dependent intensity scale.
-
-One exception: If angular-spectrum propagation removes
-evanescent frequencies, the actual power loss depends on the probe and must be
-evaluated by propagation.
-Pass an angular-spectrum instance to ``rescale_probe`` to include this filtering.
+The probe power constraint uses the same convention: ``probe_power`` is the
+incident photon count per exposure. Under unit transmission and lossless
+propagation onto the full detector grid, it equals the total detector count.
+Divide squared field magnitudes by the pixel area of their plane to obtain
+counts per unit area. Fresnel and Fraunhofer output pixel pitches are
+``lambda * abs(z) / (W * dx)`` and ``lambda * abs(z) / (H * dy)``.
 
 
 Incoherent probe modes
@@ -85,16 +86,26 @@ OPR modes
 ~~~~~~~~~~
 
 OPR modes can be initialized as random numbers normalized in such a way that the power of each
-mode is the number of pixels in a mode (since "backward" normalization is used for FFT by default). 
+mode is the number of pixels in a mode (unit RMS amplitude).
 See :func:`ptychi.utils.add_additional_opr_probe_modes_to_probe`.
 
 
-Probe scaling
-~~~~~~~~~~~~~~
+Migrating saved probes
+~~~~~~~~~~~~~~~~~~~~~~
 
-For far-field ptychography, the probe should be scaled so that the power of the FFT of the
-probe matches the maximum power of the diffraction patterns. Function 
-:func:`ptychi.utils.get_probe_renormalization_factor` can be used to get the scaling factor.
+To preserve predicted detector counts with an unchanged object, multiply probes
+saved under the previous normalization by ``sqrt(H * W)`` for the default
+Fourier propagator, or by ``sqrt(H * W) * abs(Fr / ar)`` for Fresnel and Fraunhofer
+propagation. Here ``Fr = dx**2 / (lambda * z)`` and ``ar = dx / dy`` use the source
+pixel pitches. Angular-spectrum probes retain their scale. Multiply saved
+``probe_power`` targets by the square of the corresponding amplitude factor.
+Apply the same amplitude factor to every stored OPR mode while retaining its
+weights. Alternatively, initialize from measured data using ``rescale_probe``.
+
+``FourierPropagator`` now uses fixed orthonormal normalization. For probes from
+an explicitly selected legacy ``norm="ortho"``, the amplitude factor is 1;
+for ``norm="forward"``, it is ``1 / sqrt(H * W)``. The normalization conversion
+helpers are replaced by direct sums of photon counts.
 
 
 OPR mode weights

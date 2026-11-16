@@ -57,7 +57,8 @@ def test_reciprocal_step_matches_reference(noise):
         options,
         diffraction_data=np.array([[[1.0, 2.0], [0.0, 4.0]]]),
         object_data=np.ones((1, 4, 4), dtype=np.complex128),
-        probe_data=np.array([[[[1 + 0.5j, 2 - 0.5j], [0.5 + 1j, 1 - 1j]]]]),
+        # Convert the legacy probe by sqrt(H*W) to preserve detector counts.
+        probe_data=2 * np.array([[[[1 + 0.5j, 2 - 0.5j], [0.5 + 1j, 1 - 1j]]]]),
         probe_position_x_px=np.array([0.0]),
         probe_position_y_px=np.array([0.0]),
         valid_pixel_mask=np.array([[True, False], [True, True]]),
@@ -75,5 +76,7 @@ def test_reciprocal_step_matches_reference(noise):
     expected = REFERENCE[noise]
     for name, value in (("gradient", gradient), ("psi_opt", psi_opt),
                         ("alpha", rec.alpha_psi_far), ("cached_alpha", rec.alpha_psi_far_all_pos)):
-        torch.testing.assert_close(value.squeeze(), torch.tensor(expected[name], dtype=value.dtype),
+        # Source-plane fields acquire sqrt(H*W); detector quantities retain their units.
+        scale = 2 if name == "psi_opt" else 1
+        torch.testing.assert_close(value.squeeze(), scale * torch.tensor(expected[name], dtype=value.dtype),
                                    rtol=1e-12, atol=1e-12)

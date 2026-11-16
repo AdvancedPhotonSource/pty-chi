@@ -574,7 +574,7 @@ def test_lsqml_step_bound_ignores_unconstrained_high_gain(noise, exclusion):
 
 
 @pytest.mark.parametrize("response", [False, "identity", True])
-def test_preconditioner_uses_response_corrected_power(response):
+def test_preconditioner_uses_illumination_with_detector_response(response):
     mask = torch.ones((3, 5), dtype=torch.bool)
     mask[0, 0] = False
     task = make_task(response=response, valid_pixel_mask=mask)
@@ -587,13 +587,10 @@ def test_preconditioner_uses_response_corrected_power(response):
     with torch.no_grad():
         task.dataset.patterns.copy_(signal * calibration.gain + calibration.offset)
         task.dataset.patterns[:, 0, 0] = 1e8
-        corrected = signal.clamp_min(0) if response is True else signal
-        task.object.update_preconditioner(
-            task.probe, task.probe_positions, corrected,
+        expected = task.object.calculate_illumination_map(
+            task.probe, task.probe_positions,
+            use_all_modes=task.object.options.build_preconditioner_with_all_modes,
             sampling=model.get_object_sampling_parameters(),
-            propagator=model.free_space_propagator, valid_pixel_mask=task.dataset.valid_pixel_mask,
         )
-        expected = task.object.preconditioner.clone()
-        task.object.preconditioner = None
         rec.update_preconditioners()
     torch.testing.assert_close(task.object.preconditioner, expected, rtol=1e-12, atol=1e-12)

@@ -96,7 +96,7 @@ def test_object_step_scales_for_multislice_and_multimode(reconstructor):
 @pytest.mark.parametrize("sign", [1, -1])
 def test_joint_least_squares_solves_coupled_system(reconstructor, sign):
     # Directions [1,0] and [1,1] give A=[[1.1,1],[1,2.2]], b=[3,5].
-    # lambda_0 adds 1.32e-7 to each diagonal; solve by hand using the determinant.
+    # Solve the relatively damped system by hand using the determinant.
     ao, ap = reconstructor.calculate_object_and_probe_update_step_sizes(
         sign * torch.tensor([[[[3 + 0j, 2]]]]),
         torch.ones((1, 1, 1, 2), dtype=torch.complex128),
@@ -104,9 +104,9 @@ def test_joint_least_squares_solves_coupled_system(reconstructor, sign):
         torch.tensor([[[1 + 0j, 1]]]),
         probe=torch.ones((1, 1, 1, 2), dtype=torch.complex128),
     )
-    determinant = (1.1 + 1.32e-7) * (2.2 + 1.32e-7) - 1
-    expected_o = (3 * (2.2 + 1.32e-7) - 5) / determinant if sign > 0 else 0.0
-    expected_p = (5 * (1.1 + 1.32e-7) - 3) / determinant if sign > 0 else 0.0
+    determinant = 1.1 * 2.2 - 1
+    expected_o = (3 * 2.2 - 5) / determinant if sign > 0 else 0.0
+    expected_p = (5 * 1.1 - 3) / determinant if sign > 0 else 0.0
     torch.testing.assert_close(ao, torch.tensor([expected_o]))
     torch.testing.assert_close(ap, torch.tensor([expected_p]))
 
