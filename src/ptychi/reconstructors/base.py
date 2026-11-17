@@ -593,7 +593,11 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             # Apply probe support constraint.
             if probe.options.support_constraint.is_enabled_on_this_epoch(self.current_epoch):
                 probe.constrain_support()
-                
+
+            # Apply probe smoothing constraint.
+            if probe.options.smoothing_constraint.is_enabled_on_this_epoch(self.current_epoch):
+                probe.smooth_probe()
+
             # Apply probe center constraint.
             if probe.options.center_constraint.is_enabled_on_this_epoch(self.current_epoch):
                 probe.center_probe()

@@ -148,3 +148,8 @@ class ProbeSupportMethods(StrEnum):
     NONE = auto()
     ELLIPSE = auto()
     RECTANGLE = auto()
+
+
+class ProbeSmoothingMethods(StrEnum):
+    GAUSSIAN = auto()
+    MEDIAN = auto()
