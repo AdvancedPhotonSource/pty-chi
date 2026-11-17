@@ -13,7 +13,6 @@ import torch.distributed as dist
 from ptychi.utils import get_constrained_pixel_mask
 from ptychi.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
-    LossTracker,
 )
 import ptychi.forward_models as fm
 from ptychi.metrics import validate_predicted_intensity
@@ -310,24 +309,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         super().build()
         self.build_cached_variables()
         self.build_noise_model()
-
-    def compute_optimizer_loss(self, input_data, y_true):
-        """Evaluate the masked likelihood of the configured noise model."""
-        y_pred = self.forward_model(*input_data)
-        mask = get_constrained_pixel_mask(
-            valid_pixel_mask=self.dataset.valid_pixel_mask,
-            exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
-            y_true=y_true,
-        )
-        return self.noise_model.nll(y_pred[mask], y_true[mask])
-
-    def build_loss_tracker(self):
-        f = (
-            self.noise_model.nll
-            if self.displayed_loss_function is None
-            else self.displayed_loss_function
-        )
-        self.loss_tracker = LossTracker(metric_function=f)
 
     def build_noise_model(self):
         self.noise_model = self.noise_model.to(torch.get_default_device())

@@ -1259,6 +1259,91 @@ class NoiseModel(torch.nn.Module):
         """
         raise NotImplementedError
 
+    def project_to_propagated_magnitude_constraint(
+        self,
+        psi: Tensor,
+        actual_pattern_intensity: Tensor,
+        constrained_pixel_mask: Optional[Tensor] = None,
+        *,
+        forward_model: Optional[PlanarPtychographyForwardModel] = None,
+    ) -> Tensor:
+        """
+        Project the propagated exit wave onto the measured intensity constraint.
+
+        With no blur, the target wave intensity is
+        max((data - offset) / gain, 0). Phase and relative mode amplitudes
+        are preserved. Masked and unmeasured pixels remain unchanged.
+        Data below the offset project to zero intensity. Both grids use internal
+        FFT ordering; detector pixels are zero-inserted by the crop adjoint.
+        A fixed identity response on a matching grid retains the historical 1e-7
+        amplitude stabilization, including its zero-wave behavior. Other
+        cases use exact norm replacement, choosing the first mode's phase
+        as zero when the input wave vanishes. Blur requires LSQML or autodiff.
+
+        Parameters
+        ----------
+        psi : Tensor
+            Complex detector-plane wave, shaped (batch, incoherent_modes, H, W).
+        actual_pattern_intensity : Tensor
+            Measured intensities, shaped (batch, detector_height, detector_width).
+        constrained_pixel_mask : Tensor, optional
+            If given, only pixels where this mask is True are constrained. Other pixels
+            are left unchanged from `psi`. Defaults to the noise model's valid-pixel
+            mask combined with its measured-intensity threshold.
+        forward_model : PlanarPtychographyForwardModel, optional
+            Supplies detector response and crop geometry for the projection.
+            If omitted, measurements must be on the wave grid and are assumed
+            to have no blur, gain or offset correction, or crop.
+
+        Returns
+        -------
+        Tensor
+            Exit wave with the measured total intensity, or the inverse-response
+            intensity when a response map is present, on constrained detector pixels.
+        """
+
+        wave_shape = psi.shape[-2:]
+        same_grid = wave_shape == actual_pattern_intensity.shape[-2:]
+        target = actual_pattern_intensity
+        identity_response = True
+        if forward_model is not None:
+            if forward_model.diffraction_pattern_blur_sigma is not None:
+                raise ValueError(
+                    "Magnitude projection requires diffraction_pattern_blur_sigma=None. "
+                    "Use LSQML or autodiff for blur."
+                )
+            response = forward_model.detector_response
+            identity_response = response.is_identity
+            if not identity_response:
+                target = (target - response.offset) / response.gain
+        elif not same_grid:
+            raise ValueError(
+                "Pass forward_model to magnitude projection when detector and wave grids differ."
+            )
+        target = target.clamp_min(0)
+        mask = (
+            get_constrained_pixel_mask(
+                self.valid_pixel_mask, self.exclude_measured_pixels_below,
+                actual_pattern_intensity,
+            )
+            if constrained_pixel_mask is None else constrained_pixel_mask
+        )
+        if forward_model is not None:
+            target = forward_model.detector_crop_adjoint(target, wave_shape)
+            mask = forward_model.detector_crop_adjoint(mask, wave_shape)
+        intensity = psi.abs().square().sum(1)
+        if identity_response and same_grid:
+            # Preserve the original same-grid amplitude stabilization.
+            psi_prime = (
+                psi / (intensity.sqrt()[:, None] + 1e-7) * (target + 1e-7).sqrt()[:, None]
+            )
+        else:
+            scale = (target / torch.where(intensity > 0, intensity, 1)).sqrt()
+            psi_prime = psi * scale[:, None]
+            # A zero wave has no phase; choose the first mode to satisfy the norm.
+            psi_prime[:, 0] = torch.where(intensity > 0, psi_prime[:, 0], target.sqrt())
+        return torch.where(mask[:, None] if mask.ndim == 3 else mask, psi_prime, psi)
+
     def backward(self, *args, **kwargs):
         raise NotImplementedError
 
@@ -1301,23 +1386,36 @@ class NoiseModel(torch.nn.Module):
         return gradient[:, None] * psi_far
 
 
-class GaussianNoiseModel(NoiseModel):
+class MagnitudeMeanSquaredNoiseModel(NoiseModel):
+    """Mean squared amplitude residual for intensity inputs.
+
+    The NLL is MSE(sqrt(y_pred + 1e-7), sqrt(y_true + 1e-7)), with the
+    requested reduction. Callers select constrained pixels before evaluation.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.loss_function = MSELossOfSqrt()
+
+    def nll(self, y_pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
+        validate_predicted_intensity(y_pred)
+        return torch.nn.functional.mse_loss(
+            torch.sqrt(y_pred + self.loss_function.eps),
+            torch.sqrt(y_true + self.loss_function.eps),
+            reduction=reduction,
+        )
+
+
+class GaussianNoiseModel(MagnitudeMeanSquaredNoiseModel):
     def __init__(self, sigma: float = 0.5, eps: float = 1e-9, *args, **kwargs) -> None:
         super().__init__(eps=eps, *args, **kwargs)
         self.noise_statistics = "gaussian"
         self.sigma = sigma
-        self.loss_function = MSELossOfSqrt()
 
     def nll(self, y_pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
         # This is averaged over all pixels, so it differs from Eq. 11a in Odstrcil (2018)
         # by a factor of 1 / y_pred.numel().
-        validate_predicted_intensity(y_pred)
-        loss = torch.nn.functional.mse_loss(
-            torch.sqrt(y_pred + self.loss_function.eps),
-            torch.sqrt(y_true + self.loss_function.eps),
-            reduction=reduction,
-        ) / self.sigma**2 * 0.5
-        return loss
+        return super().nll(y_pred, y_true, reduction=reduction) / self.sigma**2 * 0.5
 
 
 class PtychographyGaussianNoiseModel(GaussianNoiseModel):

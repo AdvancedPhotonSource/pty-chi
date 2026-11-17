@@ -190,7 +190,7 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
     @timer()
     def apply_data_projection(self, exit_wave: Tensor, y_true: Tensor) -> Tensor:
         propagated_exit_wave = self.forward_model.free_space_propagator.propagate_forward(exit_wave)
-        propagated_exit_wave = self.replace_propagated_exit_wave_magnitude(
+        propagated_exit_wave = self.noise_model.project_to_propagated_magnitude_constraint(
             propagated_exit_wave,
             y_true,
             constrained_pixel_mask=get_constrained_pixel_mask(
@@ -198,6 +198,7 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
                 exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
                 y_true=y_true,
             ),
+            forward_model=self.forward_model,
         )
         return self.forward_model.free_space_propagator.propagate_backward(propagated_exit_wave)
 

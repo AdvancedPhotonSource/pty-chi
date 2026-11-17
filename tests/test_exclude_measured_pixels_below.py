@@ -6,9 +6,8 @@ import torch
 from ptychi.utils import get_constrained_pixel_mask
 from ptychi.api.options.base import ReconstructorOptions
 from ptychi.api.options.data import PtychographyDataOptions
-from ptychi.forward_models import PtychographyGaussianNoiseModel, PtychographyPoissonNoiseModel
-from ptychi.reconstructors.base import (
-    AnalyticalIterativePtychographyReconstructor,
+from ptychi.forward_models import (
+    NoiseModel, PtychographyGaussianNoiseModel, PtychographyPoissonNoiseModel,
 )
 from ptychi.reconstructors.bh import BHReconstructor
 
@@ -18,9 +17,6 @@ class _DummyAnalyticalPtychographyReconstructor:
         detector_response=SimpleNamespace(is_identity=True),
         diffraction_pattern_blur_sigma=None,
         detector_crop_adjoint=lambda value, shape: value,
-    )
-    replace_propagated_exit_wave_magnitude = (
-        AnalyticalIterativePtychographyReconstructor.replace_propagated_exit_wave_magnitude
     )
 
 class _IdentityPropagator:
@@ -141,14 +137,20 @@ def test_projection_helper_leaves_excluded_pixels_unconstrained():
         exclude_measured_pixels_below=reconstructor.options.exclude_measured_pixels_below,
         y_true=y_true,
     )
-    constrained_projection = reconstructor.replace_propagated_exit_wave_magnitude(
-        psi_far,
-        y_true,
-        constrained_pixel_mask=constrained_pixel_mask,
+    model = NoiseModel(
+        valid_pixel_mask=reconstructor.dataset.valid_pixel_mask,
+        exclude_measured_pixels_below=reconstructor.options.exclude_measured_pixels_below,
     )
-    fully_constrained_projection = reconstructor.replace_propagated_exit_wave_magnitude(
+    constrained_projection = model.project_to_propagated_magnitude_constraint(
         psi_far,
         y_true,
+        forward_model=reconstructor.forward_model,
+    )
+    fully_constrained_projection = model.project_to_propagated_magnitude_constraint(
+        psi_far,
+        y_true,
+        constrained_pixel_mask=torch.ones_like(y_true, dtype=torch.bool),
+        forward_model=reconstructor.forward_model,
     )
 
     expanded_mask = constrained_pixel_mask[:, None]

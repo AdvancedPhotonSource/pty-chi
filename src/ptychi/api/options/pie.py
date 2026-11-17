@@ -13,6 +13,9 @@ import ptychi.api.enums as enums
 
 @dataclass
 class PIEReconstructorOptions(base.ReconstructorOptions):
+
+    displayed_loss_function: enums.LossFunctions | None = None
+    """Displayed metric; None uses the magnitude mean squared noise-model loss."""
     
     def get_reconstructor_type(self) -> enums.Reconstructors:
         return enums.Reconstructors.PIE
