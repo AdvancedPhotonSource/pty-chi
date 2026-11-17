@@ -21,6 +21,7 @@ import ptychi.data_structures.opr_mode_weights as oprweights
 import ptychi.data_structures.probe as probe
 import ptychi.data_structures.probe_positions as probepos
 import ptychi.data_structures.parameter_group as paramgrp
+from ptychi.data_structures.detector_response import DetectorResponse
 import ptychi.maps as maps
 from ptychi.io_handles import PtychographyDataset
 from ptychi.reconstructors.base import Reconstructor
@@ -55,10 +56,11 @@ class _PtychographyTaskData:
     probe_position_y_px: TaskArray
     opr_mode_weights_data: Optional[TaskArray]
     valid_pixel_mask: Optional[TaskArray]
+    detector_response_map: Optional[tuple[Union[Tensor, ndarray], Union[Tensor, ndarray]]]
 
 
 class Task(MultiprocessMixin):
-    def __init__(self, options: api.options.base.TaskOptions, *args, **kwargs) -> None:
+    def __init__(self, options: api.options.base.TaskOptions) -> None:
         pass
 
     def __enter__(self) -> "Task":
@@ -85,6 +87,67 @@ class Task(MultiprocessMixin):
 
 
 class PtychographyTask(Task):
+    """Build and run a ptychography reconstruction from settings and input arrays.
+
+    Initialization validates the inputs and builds the dataset, reconstruction
+    parameters, and reconstructor. Call :meth:`run` to start reconstruction and
+    :meth:`get_data` to retrieve reconstructed parameters.
+
+    Parameters
+    ----------
+    options : ptychi.api.options.task.PtychographyTaskOptions
+        Algorithm-specific reconstruction settings.
+    diffraction_data : array-like
+        Measured intensities with shape ``(n_positions, H, W)``. The dataset
+        FFT-shifts the patterns when ``options.data_options.fft_shift`` is True.
+    object_data : array-like
+        Initial complex object with shape ``(n_slices, height, width)``.
+        A single-slice object retains the leading dimension of size 1.
+    probe_data : array-like
+        Initial complex probe with shape
+        ``(n_opr_modes, n_incoherent_modes, height, width)``.
+    probe_position_x_px : array-like
+        Initial horizontal probe positions in object pixels, with shape
+        ``(n_positions,)``.
+    probe_position_y_px : array-like
+        Initial vertical probe positions in object pixels, with shape
+        ``(n_positions,)``. Positions are stored internally in ``(y, x)`` order.
+    opr_mode_weights_data : array-like, optional
+        Initial OPR weights with shape ``(n_positions, n_opr_modes)`` or
+        ``(n_opr_modes,)`` for weights shared by all positions. Required when
+        the probe has multiple OPR modes; otherwise omitted weights default to 1.
+    valid_pixel_mask : array-like, optional
+        Boolean mask with shape ``(H, W)``, shared by all diffraction patterns,
+        where True marks valid pixels. All pixels are valid by default.
+    detector_response_map : tuple of numpy.ndarray or torch.Tensor, optional
+        Shared ``(gain, offset)`` pair, each with shape ``(H, W)``. Both maps
+        must be real and finite in the reconstruction dtype, including at masked
+        pixels. Gains must be strictly positive in the reconstruction dtype.
+        Use ``valid_pixel_mask`` to exclude invalid detector pixels.
+        After detector cropping and blur, predicted intensities are transformed
+        as ``intensity * gain + offset``. The gain is dimensionless;
+        the offset uses measured-intensity units. None initializes an identity
+        response. Refinement is disabled by default; configure
+        ``options.reconstructor_options.forward_model_options.detector_response_options``
+        to enable it. Retrieve the live ``(2, H, W)`` tensor with
+        ``get_data("detector_response")``.
+        With ``options.data_options.fft_shift=True`` (the default), supply response
+        maps in the original detector coordinates, aligned with the centered
+        far-field patterns, without manually FFT-shifting them. The task applies
+        ``torch.fft.fftshift`` to both maps and patterns along the last two axes.
+        With ``fft_shift=False``, maps are used as supplied: align them with the
+        already-shifted patterns when the far-field DC pixel is at the top left,
+        or with the unshifted detector images for near-field data.
+
+    Notes
+    -----
+    Input arrays are keyword-only. The mask and detector-response components
+    must use the same pixel ordering as the input diffraction patterns.
+
+    Legacy option-held data fields remain supported with a deprecation warning.
+    Explicit data arguments take precedence over those fields.
+    """
+
     def __init__(
         self,
         options: api.options.task.PtychographyTaskOptions,
@@ -96,6 +159,7 @@ class PtychographyTask(Task):
         probe_position_y_px: Optional[TaskArray] | _UnsetTaskData = _UNSET,
         opr_mode_weights_data: Optional[TaskArray] | _UnsetTaskData = _UNSET,
         valid_pixel_mask: Optional[TaskArray] | _UnsetTaskData = _UNSET,
+        detector_response_map: Optional[tuple[Union[Tensor, ndarray], Union[Tensor, ndarray]]] = None,
         **kwargs,
     ) -> None:
         super().__init__(options, *args, **kwargs)
@@ -112,6 +176,7 @@ class PtychographyTask(Task):
         self.probe = None
         self.probe_positions = None
         self.opr_mode_weights = None
+        self.detector_response = None
         self.reconstructor: Reconstructor | None = None
 
         self._task_data = self._resolve_task_data(
@@ -122,6 +187,7 @@ class PtychographyTask(Task):
             probe_position_y_px=probe_position_y_px,
             opr_mode_weights_data=opr_mode_weights_data,
             valid_pixel_mask=valid_pixel_mask,
+            detector_response_map=detector_response_map,
         )
 
         self.check_options()
@@ -149,6 +215,7 @@ class PtychographyTask(Task):
         probe_position_y_px: Optional[TaskArray] | _UnsetTaskData,
         opr_mode_weights_data: Optional[TaskArray] | _UnsetTaskData,
         valid_pixel_mask: Optional[TaskArray] | _UnsetTaskData,
+        detector_response_map: Optional[tuple[Union[Tensor, ndarray], Union[Tensor, ndarray]]],
     ) -> _PtychographyTaskData:
         return _PtychographyTaskData(
             diffraction_data=self._resolve_data_field(
@@ -207,6 +274,7 @@ class PtychographyTask(Task):
                 kwarg_name="valid_pixel_mask",
                 required=False,
             ),
+            detector_response_map=detector_response_map,
         )
 
     def _resolve_data_field(
@@ -291,6 +359,18 @@ class PtychographyTask(Task):
                     "`valid_pixel_mask.shape` must match the diffraction pattern shape "
                     f"({valid_pixel_mask_shape} != {diffraction_shape[-2:]})."
                 )
+
+        if data.detector_response_map is not None:
+            if not isinstance(data.detector_response_map, tuple) or len(data.detector_response_map) != 2:
+                raise ValueError("`detector_response_map` must be a tuple of (gain, offset).")
+            for name, component in zip(("gain", "offset"), data.detector_response_map):
+                if not isinstance(component, (Tensor, ndarray)):
+                    raise ValueError(f"`detector_response_map` {name} must be an array or tensor.")
+                if self._shape(component) != diffraction_shape[-2:]:
+                    raise ValueError(
+                        f"`detector_response_map` {name} must have the diffraction pattern "
+                        f"shape {diffraction_shape[-2:]}."
+                    )
 
         self._check_opr_mode_weights_shape(
             weights=data.opr_mode_weights_data,
@@ -435,6 +515,7 @@ class PtychographyTask(Task):
         self.build_probe()
         self.build_probe_positions()
         self.build_opr_mode_weights()
+        self.build_detector_response()
         self.build_reconstructor()
 
     def build_random_seed(self):
@@ -588,12 +669,22 @@ class PtychographyTask(Task):
             data=initial_weights, options=self.opr_mode_weight_options
         )
 
+    def build_detector_response(self):
+        self.detector_response = DetectorResponse(
+            shape=self.dataset.patterns.shape[-2:],
+            data=self._task_data.detector_response_map,
+            options=self.reconstructor_options.forward_model_options.detector_response_options,
+            fft_shift=self.data_options.fft_shift,
+            valid_pixel_mask=self.dataset.valid_pixel_mask,
+        )
+
     def build_reconstructor(self):
         par_group = paramgrp.PlanarPtychographyParameterGroup(
             object=self.object,
             probe=self.probe,
             probe_positions=self.probe_positions,
             opr_mode_weights=self.opr_mode_weights,
+            detector_response=self.detector_response,
         )
 
         if self.n_ranks == 1:
@@ -636,19 +727,21 @@ class PtychographyTask(Task):
         self.reconstructor.run(n_epochs=n_epochs)
 
     def get_data(
-        self, name: Literal["object", "probe", "probe_positions", "opr_mode_weights"]
+        self, name: Literal["object", "probe", "probe_positions", "opr_mode_weights", "detector_response"]
     ) -> Tensor:
         """Get a detached copy of the data of the given name.
 
         Parameters
         ----------
-        name : Literal["object", "probe", "probe_positions", "opr_mode_weights"]
+        name : Literal["object", "probe", "probe_positions", "opr_mode_weights", "detector_response"]
             The name of the data to get.
 
         Returns
         -------
         Tensor
-            The data of the given name.
+            The data of the given name. Detector response has shape ``(2, H, W)``
+            with gain first and offset second, in the internal diffraction-data
+            ordering (after the configured FFT shift).
         """
         # Deep image prior objects and probes need to be generated 
         # before fetching to avoid issues with multi-GPU.
@@ -660,7 +753,7 @@ class PtychographyTask(Task):
 
     def get_data_to_cpu(
         self,
-        name: Literal["object", "probe", "probe_positions", "opr_mode_weights"],
+        name: Literal["object", "probe", "probe_positions", "opr_mode_weights", "detector_response"],
         as_numpy: bool = False,
     ) -> Union[Tensor, ndarray]:
         data = self.get_data(name).cpu()
@@ -712,6 +805,8 @@ class PtychographyTask(Task):
                     self.reconstructor.parameter_group.opr_mode_weights.set_data(
                         task.get_data("opr_mode_weights")
                     )
+                elif param == "detector_response":
+                    self.detector_response.set_data(task.get_data("detector_response"))
                 else:
                     raise ValueError(f"Invalid parameter name: {param}")
 
@@ -756,6 +851,7 @@ class PtychographyTask(Task):
             self.dataset.patterns = self.dataset.patterns.to(device)
             self.dataset.move_attributes_to_device(device)
             self.dataset.save_data_on_device = device.type != "cpu"
+            self.reconstructor.forward_model.to(device)
 
             buffers = self.reconstructor.reconstructor_buffers
             for name in buffers.get_all_names():
@@ -802,6 +898,7 @@ class PtychographyTask(Task):
         del self.probe
         del self.probe_positions
         del self.opr_mode_weights
+        del self.detector_response
         del self.reconstructor
         del self.dataset
 

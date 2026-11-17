@@ -47,6 +47,7 @@ class TestLargeTensorOffload(tutils.BaseTester):
             probe_data=probe_data,
             probe_position_x_px=probe_position_x_px,
             probe_position_y_px=probe_position_y_px,
+            detector_response_map=(torch.ones(detector_shape), torch.zeros(detector_shape)),
         )
         fm = task.reconstructor.forward_model
         indices = torch.arange(2, device="cuda", dtype=torch.long)
@@ -66,6 +67,9 @@ class TestLargeTensorOffload(tutils.BaseTester):
         assert task.probe_positions.data.device.type == "cuda"
         assert task.opr_mode_weights.data.device.type == "cuda"
         assert task.dataset.valid_pixel_mask.device.type == "cuda"
+        assert all(component.device.type == "cuda" for component in task.detector_response.data)
+        assert fm.detector_response.gain.device.type == "cuda"
+        assert fm.detector_response.offset.device.type == "cuda"
         assert task.object.preconditioner.device.type == "cuda"
         assert task.probe.update_buffer.device.type == "cuda"
         assert object_optimizer.state[object_parameter]["test_buffer"].device.type == "cuda"
@@ -81,6 +85,9 @@ class TestLargeTensorOffload(tutils.BaseTester):
         assert task.probe_positions.data.device.type == "cpu"
         assert task.opr_mode_weights.data.device.type == "cpu"
         assert task.dataset.valid_pixel_mask.device.type == "cpu"
+        assert all(component.device.type == "cpu" for component in task.detector_response.data)
+        assert fm.detector_response.gain.device.type == "cpu"
+        assert fm.detector_response.offset.device.type == "cpu"
         assert task.object.preconditioner.device.type == "cpu"
         assert task.probe.update_buffer.device.type == "cpu"
         assert object_optimizer.state[object_parameter]["test_buffer"].device.type == "cpu"
@@ -97,6 +104,9 @@ class TestLargeTensorOffload(tutils.BaseTester):
         assert task.probe_positions.data.device.type == "cuda"
         assert task.opr_mode_weights.data.device.type == "cuda"
         assert task.dataset.valid_pixel_mask.device.type == "cuda"
+        assert all(component.device.type == "cuda" for component in task.detector_response.data)
+        assert fm.detector_response.gain.device.type == "cuda"
+        assert fm.detector_response.offset.device.type == "cuda"
         assert task.object.preconditioner.device.type == "cuda"
         assert task.probe.update_buffer.device.type == "cuda"
         assert object_optimizer.state[object_parameter]["test_buffer"].device.type == "cuda"

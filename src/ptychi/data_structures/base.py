@@ -294,7 +294,12 @@ class ReconstructParameter(Module):
 
     def set_optimizable(self, optimizable):
         self.optimizable = optimizable
-        self.tensor.requires_grad_(optimizable)
+        self.set_requires_grad(optimizable)
+
+    def set_requires_grad(self, requires_grad: bool) -> None:
+        """Set gradient tracking on the stored tensor without changing optimization settings."""
+        tensor = self.tensor.data if isinstance(self.tensor, ComplexTensor) else self.tensor
+        tensor.requires_grad_(requires_grad)
 
     def get_tensor(self, name):
         """Get a member tensor in this object.
@@ -339,6 +344,8 @@ class ReconstructParameter(Module):
 
     def get_grad(self):
         if isinstance(self.tensor, ComplexTensor):
+            if self.tensor.data.grad is None:
+                return None
             return self.tensor.data.grad[..., 0] + 1j * self.tensor.data.grad[..., 1]
         else:
             return self.tensor.grad

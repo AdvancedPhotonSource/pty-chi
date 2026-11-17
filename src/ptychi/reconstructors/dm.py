@@ -10,6 +10,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 import math
 
+from ptychi.utils import get_constrained_pixel_mask
 import ptychi.api as api
 from ptychi.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
@@ -246,7 +247,11 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
         revised_psi = self.replace_propagated_exit_wave_magnitude(
             revised_psi,
             y_true[start_pt:end_pt],
-            constrained_pixel_mask=self.get_constrained_pixel_mask(y_true[start_pt:end_pt]),
+            constrained_pixel_mask=get_constrained_pixel_mask(
+                valid_pixel_mask=self.dataset.valid_pixel_mask,
+                exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+                y_true=y_true[start_pt:end_pt],
+            ),
         )
         # Propagate back to sample plane
         revised_psi = self.forward_model.free_space_propagator.propagate_backward(revised_psi)

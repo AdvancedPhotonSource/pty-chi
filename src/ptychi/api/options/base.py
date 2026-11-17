@@ -588,10 +588,10 @@ class ProbePowerConstraintOptions(FeatureOptions):
     Target real-space sum of squared probe magnitudes over pixels and incoherent
     modes, without a pixel-area factor. With OPR, the probe is composed using the
     mean OPR weights when available. The probe and optionally the object are
-    scaled to enforce this target. To convert detector counts under lossless
-    propagation, divide their sum by
-    ``ptychi.propagate.get_intensity_scaling_factor(propagator, probe_shape)``.
-    For the default Fourier propagator this divisor is ``height * width``.
+    scaled to enforce this target. Squared probe magnitudes represent photons
+    per pixel, so this target is the incident photon count per exposure when
+    the diffraction data are in photon counts. Under unit transmission and
+    lossless propagation, it equals the total detector count.
     """
 
     scale_object: bool = True
@@ -790,6 +790,51 @@ class ProbeOptions(ParameterOptions):
     def check(self, options: "task_options.PtychographyTaskOptions"):
         super().check(options)
         self.center_constraint.check(options)
+        if self.initial_guess is not None:
+            # TODO: Remove this warning in 2.8.0 (two releases after 2.6.0).
+            logger.warning(
+                "Pty-Chi 2.6.0 changed propagator normalization. When reusing "
+                "`probe_options.initial_guess` from older versions, multiply probe "
+                "amplitudes by sqrt(H*W) for the old default FourierPropagator. "
+                "Fresnel/Fraunhofer conversion depends on geometry; angular-spectrum "
+                "probe units are unchanged. Already migrated probes need no conversion. "
+                "See https://github.com/AdvancedPhotonSource/pty-chi/discussions/90"
+            )
+        if self.power_constraint.enabled:
+            # TODO: Remove this warning in 2.8.0 (two releases after 2.6.0).
+            logger.warning(
+                "Pty-Chi 2.6.0 changed the units of "
+                "`probe_options.power_constraint.probe_power`: it remains the "
+                "real-space sum of squared probe magnitudes, now in incident counts "
+                "per exposure when data are photon counts. To preserve a target in "
+                "old default FourierPropagator probe units, multiply it by H*W. "
+                "Fresnel/Fraunhofer conversion depends on geometry; angular-spectrum "
+                "targets are unchanged. Targets already expressed as incident counts "
+                "need no conversion. Detector counts equal incident counts only for "
+                "unit transmission and full, lossless collection. "
+                "See https://github.com/AdvancedPhotonSource/pty-chi/discussions/90"
+            )
+        if (
+            self.optimizable
+            and self.optimizer != enums.Optimizers.SGD
+            and options.reconstructor_options.get_reconstructor_type() in (
+                enums.Reconstructors.PIE,
+                enums.Reconstructors.EPIE,
+                enums.Reconstructors.RPIE,
+                enums.Reconstructors.LSQML,
+            )
+        ):
+            # TODO: Remove this warning in 2.8.0 (two releases after 2.6.0).
+            logger.warning(
+                "Pty-Chi 2.6.0 changed probe units. Review `probe_options.step_size` "
+                "and `probe_options.optimizer_params` for non-SGD PIE/ePIE/rPIE/LSQML "
+                "updates. With Adam and fresh optimizer state, multiply the probe "
+                "step size and epsilon by the probe-amplitude conversion factor "
+                "(sqrt(H*W) for the old default FourierPropagator). "
+                "Fresnel/Fraunhofer factors depend on geometry; angular-spectrum "
+                "units are unchanged. "
+                "See https://github.com/AdvancedPhotonSource/pty-chi/discussions/90"
+            )
         if self.power_constraint.enabled and options.object_options.remove_object_probe_ambiguity.enabled:
             logger.warning(
                 "`ObjectOptions.remove_object_probe_ambiguity` and `ProbeOptions.power_constraint` "
@@ -1111,7 +1156,46 @@ class OPRModeWeightsOptions(ParameterOptions):
     
     
 @dataclass
+class DetectorResponseOptions(ParameterOptions):
+    """Refinement of the shared detector gain and offset maps."""
+
+    optimizable: bool = False
+    """Enable response refinement according to ``optimization_plan``."""
+
+    optimize_gain: bool = False
+    """Refine gain, normalizing its mean over valid pixels to one after each update.
+    This fixes the global scale ambiguity with the probe.
+    """
+
+    optimize_offset: bool = True
+    """Refine the offset in measured-intensity units."""
+
+    step_size: float = PydanticField(default=1.0, gt=0)
+    """Optimizer learning rate. For analytical solvers, unit SGD applies the
+    epoch-wise intensity least-squares fit; smaller steps relax toward it.
+    Closure-based optimizers minimize squared distance to this fixed fit.
+    Autodiff uses the gradient of its configured loss and may need a smaller rate.
+    """
+
+    gain_floor: float = PydanticField(default=1e-6, gt=0)
+    """Positive floor applied to refined gain before mean normalization."""
+
+    offset_nonnegative: bool = False
+    """Constrain refined offsets to be nonnegative."""
+
+    def check(self, options: "task_options.PtychographyTaskOptions"):
+        super().check(options)
+        if self.optimizable and not (self.optimize_gain or self.optimize_offset):
+            raise ValueError("Detector response refinement requires gain or offset optimization.")
+
+
+@dataclass
 class ForwardModelOptions(Options):
+    detector_response_options: DetectorResponseOptions = dataclasses.field(
+        default_factory=DetectorResponseOptions
+    )
+    """Options for detector response refinement. Omitted maps initialize to identity."""
+
     shift_operator: enums.ShiftOperators = enums.ShiftOperators.AUTO
     """Object sampling operator. AUTO uses periodic full-object shifting for finite
     propagation distance when both probe dimensions exceed 80% of the object
@@ -1208,6 +1292,9 @@ class ReconstructorOptions(Options):
     """
     If not None, gradients corresponding to measured diffraction pixels whose intensity
     is less than or equal to this value are set to 0 in reconstructors that support it.
+    The threshold uses the units of the supplied diffraction data. Comparisons use
+    the measured values, including any pedestal, before any detector-response offset
+    subtraction or gain correction.
     """
 
     forward_model_options: ForwardModelOptions = dataclasses.field(

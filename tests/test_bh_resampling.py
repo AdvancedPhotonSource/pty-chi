@@ -3,7 +3,7 @@ import torch
 
 import ptychi.api as api
 from ptychi.api.task import PtychographyTask
-from ptychi.utils import get_default_complex_dtype, set_default_complex_dtype
+from ptychi.utils import get_default_complex_dtype, set_default_complex_dtype, get_constrained_pixel_mask
 
 
 @pytest.fixture
@@ -106,7 +106,11 @@ def test_bh_object_and_probe_gradients_match_autograd(task):
     indices = torch.arange(2)
     data = reconstructor.dataset.patterns
     reconstructor.positions = task.probe_positions.tensor[indices]
-    mask = reconstructor.get_constrained_pixel_mask(data).clone()
+    mask = get_constrained_pixel_mask(
+        valid_pixel_mask=reconstructor.dataset.valid_pixel_mask,
+        exclude_measured_pixels_below=reconstructor.options.exclude_measured_pixels_below,
+        y_true=data,
+    ).clone()
     mask[:, ::2, ::2] = False
     reconstructor.current_constrained_pixel_mask = mask[:, None]
 

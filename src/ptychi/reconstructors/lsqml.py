@@ -10,11 +10,13 @@ import torch
 from torch.utils.data import Dataset
 import torch.distributed as dist
 
+from ptychi.utils import get_constrained_pixel_mask
 from ptychi.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
     LossTracker,
 )
 import ptychi.forward_models as fm
+from ptychi.metrics import validate_predicted_intensity
 import ptychi.maths as pmath
 import ptychi.api.enums as enums
 from ptychi.timing.timer_utils import timer
@@ -312,7 +314,11 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
     def compute_optimizer_loss(self, input_data, y_true):
         """Evaluate the masked likelihood of the configured noise model."""
         y_pred = self.forward_model(*input_data)
-        mask = self.get_constrained_pixel_mask(y_true)
+        mask = get_constrained_pixel_mask(
+            valid_pixel_mask=self.dataset.valid_pixel_mask,
+            exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+            y_true=y_true,
+        )
         return self.noise_model.nll(y_pred[mask], y_true[mask])
 
     def build_loss_tracker(self):
@@ -331,14 +337,90 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             size=(self.parameter_group.probe_positions.shape[0],), fill_value=0.5
         )
 
+    def _get_detector_model_step_size(self, y_pred, y_true, indices, gradient, eps=1e-5):
+        """Approximate the reciprocal-space likelihood search with two fixed-point passes.
+
+        For the linear detector operator A (crop, blur, gain), precompute
+        s = A Re(sum(conj(psi) * g)) and t = A sum(|g|^2). The trial prediction
+        is exactly y(alpha) = y_pred - 2*alpha*s + alpha^2*t, with the detector
+        offset already included in y_pred. All detector arrays use unshifted
+        FFT coordinates, and sums over wavefields include incoherent modes.
+
+        Likelihood stationarity gives alpha_new = sum(M*(s-rho*(s-alpha*t)))
+        / sum(M*t), where M is the constrained-pixel mask and rho is
+        y_true/y(alpha) for Poisson noise or its square root for Gaussian
+        amplitude noise. Two passes approximate this equation; they do not
+        guarantee convergence. Poisson steps retain damping and perturbation.
+        The starting step and Poisson bounds/perturbation scale with gain.
+        """
+        model = self.forward_model
+        psi = model.intermediate_variables["psi_far"]
+        mask = get_constrained_pixel_mask(
+            valid_pixel_mask=self.dataset.valid_pixel_mask,
+            exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+            y_true=y_true,
+        )
+        s = model.map_intensity_to_detector(
+            (psi.conj() * gradient).real.sum(1), include_offset=False
+        )
+        t = model.map_intensity_to_detector(gradient.abs().square().sum(1), include_offset=False)
+        denominator = torch.where(mask, t, 0).sum((-2, -1))
+        active = denominator > 0
+        denominator = torch.where(active, denominator, 1)
+        gain = (
+            1 if model.detector_response.is_identity
+            else torch.where(mask.any(0), model.detector_response.gain.abs(), 0).amax().clamp_min(1)
+        )
+        max_step = 1 / gain
+        alpha = self.alpha_psi_far_all_pos[indices].clamp(0, max_step)
+        poisson = isinstance(self.noise_model, fm.PtychographyPoissonNoiseModel)
+        for _ in range(2):
+            alpha_prev = alpha.mean()
+            trial = (y_pred - 2 * alpha_prev * s + alpha_prev**2 * t).clamp_min(eps)
+            ratio = y_true / trial
+            if not poisson:
+                ratio = ratio.sqrt()
+            numerator = torch.where(mask, s - ratio * (s - alpha_prev * t), 0).sum((-2, -1))
+            alpha = numerator / denominator
+            if poisson:
+                alpha = (0.5 * alpha_prev + 0.5 * alpha).clamp(0, max_step)
+            alpha = torch.where(active, alpha, 0)
+        if poisson:
+            alpha = alpha + torch.randn(alpha.shape, device=alpha.device) * (1e-2 / gain)
+            alpha = torch.where(active, alpha, 0)
+        self.alpha_psi_far_all_pos[indices] = alpha
+        return alpha
+
     @timer()
-    def get_psi_far_step_size(self, y_pred, y_true, indices, eps=1e-5):
+    def get_psi_far_step_size(self, y_pred, y_true, indices, eps=1e-5, gradient=None):
+        """Choose the reciprocal wavefield likelihood step (Odstrcil 2018, Eq. 15).
+
+        Response maps or blur use two fixed-point passes on the detector
+        intensity polynomial along the supplied gradient. The original steps are
+        retained for an ideal detector, optionally cropped. Object/probe steps
+        fitting the updated wavefield are solved by calculate_optimal_step_sizes.
+        """
+        model = self.forward_model
+        if (
+            not model.detector_response.is_identity
+            or model.diffraction_pattern_blur_sigma is not None
+        ):
+            if gradient is None:
+                gradient = self.noise_model.backward_to_psi_far(
+                    y_pred, y_true, model.intermediate_variables["psi_far"],
+                    forward_model=model,
+                )
+            return self._get_detector_model_step_size(y_pred, y_true, indices, gradient, eps)
         if isinstance(self.noise_model, fm.PtychographyGaussianNoiseModel):
             alpha = torch.tensor(0.5, device=y_pred.device)  # Eq. 16
         elif isinstance(self.noise_model, fm.PtychographyPoissonNoiseModel):
             # This implementation reproduces PtychoShelves (gradient_descent_xi_solver)
             # and is different from Eq. 17 of Odstrcil (2018).
-            constrained_pixel_mask = self.get_constrained_pixel_mask(y_true)
+            constrained_pixel_mask = get_constrained_pixel_mask(
+                valid_pixel_mask=self.dataset.valid_pixel_mask,
+                exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+                y_true=y_true,
+            )
             xi = (1 - y_true / (y_pred + eps)) * constrained_pixel_mask
             for _ in range(2):
                 alpha_prev = self.alpha_psi_far_all_pos[indices].mean()
@@ -379,8 +461,12 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         # gradient as in Eq. 12a/b
         psi_far_0 = self.forward_model.intermediate_variables["psi_far"]
-        dl_dpsi_far = self.noise_model.backward_to_psi_far(y_pred, y_true, psi_far_0)
-        self.alpha_psi_far = self.get_psi_far_step_size(y_pred, y_true, indices)
+        dl_dpsi_far = self.noise_model.backward_to_psi_far(
+            y_pred, y_true, psi_far_0, forward_model=self.forward_model
+        )
+        self.alpha_psi_far = self.get_psi_far_step_size(
+            y_pred, y_true, indices, gradient=dl_dpsi_far
+        )
         psi_far = psi_far_0 - self.alpha_psi_far.view(-1, 1, 1, 1) * dl_dpsi_far  # Eq. 14
 
         psi_opt = self.forward_model.free_space_propagator.propagate_backward(psi_far)
@@ -670,8 +756,12 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         probe=None,
         slice_index=0,
     ):
-        """Calculate the optimal step sizes for the object and probem, and update
-        the step size buffers.
+        """Fit object/probe update directions to the updated exit wave.
+
+        This is the wavefield least-squares problem in Eqs. (20)-(22) of
+        Odstrcil (2018), distinct from the reciprocal likelihood step in Eq. (15).
+        Detector effects enter through chi, the corrected target wavefield minus
+        the current wavefield. The fitted steps are stored in the step-size buffers.
 
         Parameters
         ----------
@@ -777,7 +867,6 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         if delta_p_hat.shape[1] > 1:
             delta_p_hat = delta_p_hat[:, mode_slicer]
 
-        lambda_0 = 1.2e-7 / (probe.shape[-2] * probe.shape[-1])
         lambda_lsq = 0.1
 
         # Shape of delta_p_o/o_p:     (batch_size, n_probe_modes or 1, h, w)
@@ -785,15 +874,21 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         delta_o_patches_p = delta_o_i[:, None, :, :] * probe
 
         # Shape of aij:               (batch_size,)
-        a11 = torch.sum((pmath.abs2(delta_o_patches_p) + lambda_0), dim=(-1, -2, -3))
+        # Relative diagonal damping scales with the squared field amplitude,
+        # so changing field units preserves the solved step sizes.
+        a11 = torch.sum(pmath.abs2(delta_o_patches_p), dim=(-1, -2, -3))
         a11 = a11 + lambda_lsq * torch.mean(a11, dim=0)
         a12 = torch.sum((delta_o_patches_p * delta_p_o.conj()), dim=(-1, -2, -3))
         a21 = a12.conj()
-        a22 = torch.sum((pmath.abs2(delta_p_o) + lambda_0), dim=(-1, -2, -3))
+        a22 = torch.sum(pmath.abs2(delta_p_o), dim=(-1, -2, -3))
         a22 = a22 + lambda_lsq * torch.mean(a22, dim=0)
         b1 = torch.sum(torch.real(delta_o_patches_p.conj() * chi), dim=(-1, -2, -3))
         b2 = torch.sum(torch.real(delta_p_o.conj() * chi), dim=(-1, -2, -3))
 
+        # An identically zero direction has a zero row, column, and RHS.
+        # Set its diagonal to one to obtain a zero step without a singular solve.
+        a11 = torch.where(a11 > 0, a11, 1)
+        a22 = torch.where(a22 > 0, a22, 1)
         a_mat = torch.stack([a11, a12, a21, a22], dim=1).view(-1, 2, 2)
         b_vec = torch.stack([b1, b2], dim=1).view(-1, 2).type(a_mat.dtype)
         alpha_vec = torch.linalg.solve(a_mat, b_vec)
@@ -833,7 +928,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         numerator = 0.5 * torch.sum(torch.real(delta_o_patches_p.conj() * chi), dim=(-1, -2, -3))
         denominator = torch.sum(pmath.abs2(delta_o_patches_p), dim=(-1, -2, -3))
 
-        alpha_o_i = numerator / denominator
+        # A zero-energy direction contributes no update.
+        alpha_o_i = numerator / torch.where(denominator > 0, denominator, 1)
         alpha_o_i = alpha_o_i * self.parameter_group.object.options.optimal_step_size_scaler
         alpha_o_i = alpha_o_i / self.parameter_group.object.n_slices
         if self.parameter_group.object.options.multimodal_update:
@@ -865,7 +961,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         numerator = 0.5 * torch.sum(torch.real(delta_p_o.conj() * chi), dim=(-1, -2, -3))
         denominator = torch.sum(pmath.abs2(delta_p_o), dim=(-1, -2, -3))
 
-        alpha_p_i = numerator / denominator
+        alpha_p_i = numerator / torch.where(denominator > 0, denominator, 1)
         alpha_p_i = alpha_p_i * self.parameter_group.probe.options.optimal_step_size_scaler
 
         alpha_p_i = alpha_p_i.clamp(0, None)
@@ -1579,16 +1675,38 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
     @timer()
     def update_accumulated_intensities(self, y_true, y_pred):
+        """Accumulate scalable signal, subtracting fixed background on valid pixels."""
+        model = self.forward_model
+        mask = get_constrained_pixel_mask(
+            valid_pixel_mask=self.dataset.valid_pixel_mask,
+            exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+            y_true=y_true,
+        )
+        offset = 0 if model.detector_response.is_identity else model.detector_response.offset
+        y_true = torch.where(mask, y_true - offset, 0)
+        y_pred = torch.where(mask, y_pred - offset, 0)
         self.reconstructor_buffers.accumulated_true_intensity = self.reconstructor_buffers.accumulated_true_intensity + torch.sum(y_true)
         self.reconstructor_buffers.accumulated_pred_intensity = self.reconstructor_buffers.accumulated_pred_intensity + torch.sum(y_pred)
 
     @timer()
     def _apply_probe_intensity_scaling_correction(self):
-        corr = math.sqrt(self.reconstructor_buffers.accumulated_true_intensity / self.reconstructor_buffers.accumulated_pred_intensity)
+        signal = self.reconstructor_buffers.accumulated_pred_intensity
+        if signal <= 0:
+            return
+        target = max(self.reconstructor_buffers.accumulated_true_intensity, 0)
+        corr = math.sqrt(target / signal)
         self.parameter_group.probe.set_data(self.parameter_group.probe.data * corr)
 
     @timer()
     def update_fourier_error(self, y_pred, y_true):
+        mask = get_constrained_pixel_mask(
+            valid_pixel_mask=self.dataset.valid_pixel_mask,
+            exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+            y_true=y_true,
+        )
+        validate_predicted_intensity(y_pred[mask])
+        y_pred = torch.where(mask, y_pred, 0)
+        y_true = torch.where(mask, y_true, 0)
         self.accumulated_fourier_error += torch.mean(
             (torch.sqrt(y_pred) - torch.sqrt(y_true)) ** 2, dim=(-2, -1)
         ).sum()
@@ -1652,7 +1770,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             self.compute_reconstruction_parameter_updates(y_pred, y_true, indices)
             self.apply_reconstruction_parameter_updates(indices)
 
-        self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
+        self.update_batch_loss(y_pred, y_true)
 
 
 class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
@@ -1708,7 +1826,7 @@ class MultiprocessLSQMLReconstructor(LSQMLReconstructor, MultiprocessMixin):
             
             self.apply_reconstruction_parameter_updates(indices)
 
-        self.loss_tracker.update_batch_loss_with_metric_function(y_pred, y_true)
+        self.update_batch_loss(y_pred, y_true)
         self.loss_tracker.synchronize_accumulated_losses()
 
     def _combine_object_patch_update_directions(

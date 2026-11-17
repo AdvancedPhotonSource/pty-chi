@@ -82,6 +82,16 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
     
     def check(self, options: "LSQMLOptions"):
         super().check(options)
+        if options.object_options.optimizable:
+            # TODO: Remove this warning in 2.8.0 (two releases after 2.6.0).
+            logger.warning(
+                "Pty-Chi 2.6.0 initializes the LSQML object preconditioner with the "
+                "probe illumination map and uses relative damping in the joint "
+                "step-size solve. Existing `preconditioning_damping_factor` and SGD "
+                "step sizes generally need no conversion, but iteration histories "
+                "can change for all geometries, including angular-spectrum runs. "
+                "See https://github.com/AdvancedPhotonSource/pty-chi/discussions/90"
+            )
         if self.rescale_probe_intensity_in_first_epoch:
             if options.probe_options.power_constraint.enabled:
                 logger.warning(

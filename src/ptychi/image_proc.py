@@ -603,7 +603,8 @@ def shift_images(
     Parameters
     ----------
     images : Tensor
-        A [N, H, W] tensor of images.
+        A [N, H, W] tensor of images, or [N, ..., H, W] where all images under
+        one leading index share its shift (e.g. the probe modes at a position).
     shifts : Tensor
         A [N, 2] tensor of shifts in pixels. Use the same shift values as the
         forward shift operation even if `adjoint` is True; do not flip the sign.
@@ -1132,12 +1133,31 @@ def convolve1d(
 
 
 @timer()
-def gaussian_filter(image, sigma=1, size=3):
+def gaussian_filter(image, sigma=1, size=3, adjoint=False):
+    """Gaussian convolution with replicated edges, or its exact adjoint.
+
+    The adjoint folds contributions from the padded border into the edge pixels;
+    applying the forward filter again would give a different boundary operator.
+    """
     x = torch.arange(-((size - 1) / 2), -((size - 1) / 2) + size, 1, device=image.device)
     gauss_1d = torch.exp(-0.5 * (x / sigma) ** 2)
     kernel = gauss_1d[:, None] * gauss_1d[None, :]
     kernel = kernel / torch.sum(kernel)
-    return convolve2d(image, kernel, padding="same")
+    if not adjoint:
+        return convolve2d(image, kernel, padding="same")
+    shape = image.shape
+    pad = size // 2
+    expanded = torch.nn.functional.conv_transpose2d(
+        image.reshape(-1, 1, *shape[-2:]), kernel[None, None].to(image.dtype)
+    )
+    # Transpose of replicate padding, first along x and then along y.
+    x = (torch.arange(expanded.shape[-1], device=image.device) - pad).clamp(0, shape[-1] - 1)
+    folded_x = expanded.new_zeros((*expanded.shape[:-1], shape[-1]))
+    folded_x.index_add_(-1, x, expanded)
+    y = (torch.arange(expanded.shape[-2], device=image.device) - pad).clamp(0, shape[-2] - 1)
+    result = expanded.new_zeros((*expanded.shape[:-2], *shape[-2:]))
+    result.index_add_(-2, y, folded_x)
+    return result.reshape(shape)
 
 
 @timer()
@@ -1256,16 +1276,18 @@ def total_variation_2d_chambolle(
         grad_y, grad_x = nearest_neighbor_gradient(div(xi) - image / lmbda, "forward")
         gdv = torch.stack([grad_y, grad_x], dim=-1)
 
-        # Isotropic
-        d = torch.sqrt(torch.sum(gdv**2, dim=-1, keepdim=True))
+        # Isotropic. Use |g|^2 so that d is the real Euclidean norm of the
+        # gradient also for complex images (treated as 2-channel real images).
+        d = torch.sqrt(torch.sum(gdv.abs() ** 2, dim=-1, keepdim=True))
 
         xi = (xi + tau * gdv) / (1 + tau * d)
 
         # Reconstruct
         image = image - lmbda * div(xi)
 
-    # Prevent pushing values to 0
-    image = torch.sum(x0 * image) / torch.sum(image**2) * image
+    # Prevent pushing values to 0: rescale by the least-squares optimal
+    # factor argmin_c ||x0 - c * image||^2 (conjugate is a no-op for real images).
+    image = torch.sum(image.conj() * x0) / torch.sum(image.abs() ** 2) * image
     return image
 
 

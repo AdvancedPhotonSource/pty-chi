@@ -16,11 +16,11 @@ from ptychi.propagate import (
     FourierPropagator,
     FresnelTransformPropagator
 )
-from ptychi.metrics import MSELossOfSqrt
+from ptychi.metrics import MSELossOfSqrt, validate_predicted_intensity
 import ptychi.image_proc as ip
 from ptychi.api.enums import ShiftOperators
 from ptychi.timing.timer_utils import timer
-from ptychi.utils import move_nested_tensors_to_device
+from ptychi.utils import move_nested_tensors_to_device, get_constrained_pixel_mask
 
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group
@@ -131,6 +131,9 @@ class ForwardModel(torch.nn.Module):
 class PlanarPtychographyForwardModel(ForwardModel):
     @dataclasses.dataclass
     class PlanarPtychographyIntermediateVariables(IntermediateVariables):
+        detector_intensity: Tensor = None
+        """Detector-grid intensity after crop/blur and before gain/offset."""
+
         positions: Tensor = None
         """Tensor of shape `[batch_size, 2]`, probe positions in the 
         current batch.
@@ -223,6 +226,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
             *args, **kwargs
         )
         self.low_mem_mode = low_memory_mode
+        self.detector_response = parameter_group.detector_response
 
         # This step is essential as it sets the variables to be attributes of
         # the forward modelobject. Only with this can these buffers be copied
@@ -789,14 +793,13 @@ class PlanarPtychographyForwardModel(ForwardModel):
             return unique_probes
         if first_mode_only is None:
             first_mode_only = not self.subpixel_shift_all_probe_modes
-        orig_shape = unique_probes.shape
         fractional_shifts = self.get_probe_grid_position_data()[2][indices]
         
         if first_mode_only:
             unique_probe_to_shift = unique_probes[..., 0, :, :]
         else:
-            unique_probe_to_shift = unique_probes.reshape(unique_probes.shape[0] * unique_probes.shape[1], *unique_probes.shape[2:])
-            fractional_shifts = fractional_shifts.repeat_interleave(unique_probes.shape[1], dim=0)
+            # The modes share their position's shift, which shift_images broadcasts.
+            unique_probe_to_shift = unique_probes
 
         unique_probe_shifted = ip.shift_images(
             unique_probe_to_shift, 
@@ -809,7 +812,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         if first_mode_only:
             unique_probes = torch.cat([unique_probe_shifted[..., None, :, :], unique_probes[..., 1:, :, :]], dim=-3)
         else:
-            unique_probes = unique_probe_shifted.reshape(orig_shape)
+            unique_probes = unique_probe_shifted
         return unique_probes
         
     @timer()
@@ -970,7 +973,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         elif isinstance(self.probe, ptychi.data_structures.probe.SynthesisDictLearnProbe):
             self.probe.generate()
             
-    def blur_diffraction_patterns(self, y: Tensor) -> Tensor:
+    def blur_diffraction_patterns(self, y: Tensor, adjoint: bool = False) -> Tensor:
         """
         Blur the diffraction patterns.
         """
@@ -979,9 +982,60 @@ class PlanarPtychographyForwardModel(ForwardModel):
         y = ip.gaussian_filter(
             y, 
             sigma=self.diffraction_pattern_blur_sigma,
-            size=round(self.diffraction_pattern_blur_sigma * 10) + 1
+            size=round(self.diffraction_pattern_blur_sigma * 10) + 1,
+            adjoint=adjoint,
         )
         return y
+
+    def apply_detector_response(self, y: Tensor) -> Tensor:
+        """Apply the shared affine detector response to detector-sized intensities."""
+        if self.detector_response.optimizable:
+            self.intermediate_variables.detector_intensity = y.detach()
+        if self.detector_response.is_identity:
+            return y
+        return y * self.detector_response.gain + self.detector_response.offset
+
+    def map_intensity_to_detector(self, intensity: Tensor, include_offset: bool = True) -> Tensor:
+        """Map wave-grid intensity to detector pixels: crop, blur, gain, offset.
+
+        Both grids use internal FFT ordering. With include_offset=False this
+        applies only the linear part, also used for intensity perturbations.
+        """
+        y = self.blur_diffraction_patterns(self.conform_to_detector_size(intensity))
+        if include_offset:
+            return self.apply_detector_response(y)
+        if not self.detector_response.is_identity:
+            y = y * self.detector_response.gain
+        return y
+
+    def detector_crop_adjoint(self, y: Tensor, wave_shape: tuple[int, int]) -> Tensor:
+        """Zero-insert detector pixels into the wave grid in internal FFT ordering.
+
+        This is the exact transpose of conform_to_detector_size, including
+        mixed odd/even dimensions. Pixels outside the detector receive zero.
+        """
+        if tuple(y.shape[-2:]) == tuple(wave_shape):
+            return y
+        h, w = y.shape[-2:]
+        top, left = wave_shape[0] // 2 - h // 2, wave_shape[1] // 2 - w // 2
+        result = torch.nn.functional.pad(
+            torch.fft.fftshift(y, dim=(-2, -1)),
+            (left, wave_shape[1] - w - left, top, wave_shape[0] - h - top),
+        )
+        return torch.fft.ifftshift(result, dim=(-2, -1))
+
+    def intensity_to_detector_adjoint(self, gradient: Tensor, wave_shape: tuple[int, int]) -> Tensor:
+        """Pull a real detector-intensity gradient back to the wave intensity.
+
+        For y = m * B(C(I)) + b this is C* B* (m * gradient).
+        The offset has zero derivative with respect to wave intensity. B* includes
+        the transpose of replicated-edge padding, differing from forward blur at
+        the boundaries.
+        """
+        if not self.detector_response.is_identity:
+            gradient = gradient * self.detector_response.gain
+        gradient = self.blur_diffraction_patterns(gradient, adjoint=True)
+        return self.detector_crop_adjoint(gradient, wave_shape)
 
     @timer()
     def forward(self, indices: Tensor, return_object_patches: bool = False) -> Tensor:
@@ -1018,8 +1072,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         # Sum along probe modes
         y = y.sum(1)
         
-        y = self.conform_to_detector_size(y)
-        y = self.blur_diffraction_patterns(y)
+        y = self.map_intensity_to_detector(y)
 
         returns = [y]
         if return_object_patches:
@@ -1087,8 +1140,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
             
             y = y + psi_far[..., 0, :, :].abs() ** 2
 
-        y = self.conform_to_detector_size(y)
-        y = self.blur_diffraction_patterns(y)
+        y = self.map_intensity_to_detector(y)
 
         # `self.intermediate_variables.shifted_unique_probes` is now a list of `n_modes * n_slices`
         # tensors. We concatenate the modes for each slice so that it becomes a list of `n_slices`
@@ -1108,28 +1160,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
 
     @timer()
     def post_differentiation_hook(self, indices, y_true, **kwargs):
-        self.compensate_for_fft_scaler()
         self.scale_gradients(y_true)
-
-    @timer()        
-    def compensate_for_fft_scaler(self):
-        """
-        Compensate for the scaling of the FFT. If the normalization of FFT is "ortho",
-        nothing is done. If the normalization is "backward" (default in `torch.fft`),
-        all gradients are scaled by 1 / sqrt(N).
-        """
-        if (
-            isinstance(self.object, ptychi.data_structures.object.DIPObject) or 
-            isinstance(self.probe, ptychi.data_structures.probe.DIPProbe)
-        ):
-            return
-        if not isinstance(self.free_space_propagator, FourierPropagator):
-            return
-        if self.free_space_propagator.norm == "backward" or self.free_space_propagator.norm is None:
-            factor = self.probe.shape[-2] * self.probe.shape[-1]
-            for var in self.optimizable_parameters:
-                if var.get_grad() is not None:
-                    var.set_grad(var.get_grad() / factor)
 
     @timer()
     def scale_gradients(self, patterns):
@@ -1172,30 +1203,38 @@ class PlanarPtychographyForwardModel(ForwardModel):
         ):
             return
         # Directly modify the gradients here. Tensor.register_hook has memory leak issue.
-        if self.object.optimizable:
+        object_grad = self.object.get_grad() if self.object.optimizable else None
+        if object_grad is not None:
             self.object.set_grad(
-                self.object.get_grad()
+                object_grad
                 / self.probe.get_all_mode_intensity().max()
                 * patterns.numel()
             )
         # Assuming (obj_patches.abs() ** 2).max() == 1.0
-        if self.probe.optimizable:
+        probe_grad = self.probe.get_grad() if self.probe.optimizable else None
+        if probe_grad is not None:
             self.probe.set_grad(
-                self.probe.get_grad() * (
+                probe_grad * (
                     patterns.numel() / len(patterns)
                 )
             )
             
-        if self.probe_positions.optimizable:
+        probe_positions_grad = (
+            self.probe_positions.get_grad() if self.probe_positions.optimizable else None
+        )
+        if probe_positions_grad is not None:
             self.probe_positions.set_grad(
-                self.probe_positions.get_grad() * (
+                probe_positions_grad * (
                     patterns.numel() / len(patterns)
                 )
             )
             
-        if self.opr_mode_weights.optimizable:
+        opr_mode_weights_grad = (
+            self.opr_mode_weights.get_grad() if self.opr_mode_weights.optimizable else None
+        )
+        if opr_mode_weights_grad is not None:
             self.opr_mode_weights.set_grad(
-                self.opr_mode_weights.get_grad() * (
+                opr_mode_weights_grad * (
                     patterns.numel() / len(patterns)
                 )
             )
@@ -1214,7 +1253,7 @@ class NoiseModel(torch.nn.Module):
         self.valid_pixel_mask = valid_pixel_mask
         self.exclude_measured_pixels_below = exclude_measured_pixels_below
         
-    def nll(self, y_pred: Tensor, y_true: Tensor) -> Tensor:
+    def nll(self, y_pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
         """
         Calculate the negative log-likelihood.
         """
@@ -1223,45 +1262,43 @@ class NoiseModel(torch.nn.Module):
     def backward(self, *args, **kwargs):
         raise NotImplementedError
 
-    @staticmethod
-    def get_constrained_pixel_mask(
-        valid_pixel_mask: Optional[Tensor],
-        exclude_measured_pixels_below: Optional[float],
-        y_true: Tensor,
-    ) -> Tensor:
-        constrained_pixel_mask = torch.ones_like(y_true, dtype=torch.bool)
-        if valid_pixel_mask is not None:
-            constrained_pixel_mask = valid_pixel_mask.to(y_true.device)
-            constrained_pixel_mask = constrained_pixel_mask.unsqueeze(0).expand(
-                y_true.shape[0], -1, -1
-            )
-        if exclude_measured_pixels_below is not None:
-            constrained_pixel_mask = torch.logical_and(
-                constrained_pixel_mask,
-                y_true > exclude_measured_pixels_below,
-            )
-        return constrained_pixel_mask
+    def backward_to_intensity(self, y_pred: Tensor, y_true: Tensor) -> Tensor:
+        """Return the masked, unnormalized NLL derivative on the detector grid."""
+        raise NotImplementedError
 
     @timer()
-    def conform_to_exit_wave_size(
-        self, 
-        y_pred: Tensor, 
-        y_true: Tensor, 
-        valid_pixel_mask: Tensor,
-        psi_shape: tuple[int, int], 
-    ) -> tuple[Tensor, Tensor, Tensor]:
-        if psi_shape[-2] != y_pred.shape[-2] or psi_shape[-1] != y_pred.shape[-1]:
-            y_pred = torch.fft.fftshift(y_pred, dim=(-2, -1))
-            y_true = torch.fft.fftshift(y_true, dim=(-2, -1))
-            y_pred = ip.central_crop_or_pad(y_pred, psi_shape[-2:])
-            y_true = ip.central_crop_or_pad(y_true, psi_shape[-2:])
-            y_pred = torch.fft.ifftshift(y_pred, dim=(-2, -1))
-            y_true = torch.fft.ifftshift(y_true, dim=(-2, -1))
-            if valid_pixel_mask is not None:
-                valid_pixel_mask = torch.fft.fftshift(valid_pixel_mask, dim=(-2, -1))
-                valid_pixel_mask = ip.central_crop_or_pad(valid_pixel_mask, psi_shape[-2:])
-                valid_pixel_mask = torch.fft.ifftshift(valid_pixel_mask, dim=(-2, -1))
-        return y_pred, y_true, valid_pixel_mask
+    def backward_to_psi_far(
+        self,
+        y_pred: Tensor,
+        y_true: Tensor,
+        psi_far: Tensor,
+        *,
+        forward_model: Optional[PlanarPtychographyForwardModel] = None,
+    ) -> Tensor:
+        """Return the unnormalized Wirtinger NLL gradient of the detector wave.
+
+        For I=sum_j|psi_j|^2 and y=m*B(C(I))+b, compose the masked likelihood
+        derivative with the detector Jacobian adjoint:
+        dL/dpsi_j* = psi_j * C* B* (m * dL/dy).
+        The offset enters through y_pred and has zero derivative with respect to psi.
+        Crop, blur, gain and their coordinate conventions are supplied by
+        forward_model. The noise model owns this complete chain-rule calculation.
+
+        Omitting forward_model assumes an identity detector on the wave grid.
+        Pass it whenever prediction includes cropping, blur or a response map.
+        The return value has the shape of psi_far, including its probe-mode
+        dimension, and uses the noise model's usual denominator stabilization.
+        """
+        gradient = self.backward_to_intensity(y_pred, y_true)
+        if forward_model is not None:
+            gradient = forward_model.intensity_to_detector_adjoint(
+                gradient, psi_far.shape[-2:]
+            )
+        elif tuple(gradient.shape[-2:]) != tuple(psi_far.shape[-2:]):
+            raise ValueError(
+                "Pass forward_model to backward_to_psi_far when detector and wave grids differ."
+            )
+        return gradient[:, None] * psi_far
 
 
 class GaussianNoiseModel(NoiseModel):
@@ -1271,10 +1308,15 @@ class GaussianNoiseModel(NoiseModel):
         self.sigma = sigma
         self.loss_function = MSELossOfSqrt()
 
-    def nll(self, y_pred: Tensor, y_true: Tensor) -> Tensor:
+    def nll(self, y_pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
         # This is averaged over all pixels, so it differs from Eq. 11a in Odstrcil (2018)
         # by a factor of 1 / y_pred.numel().
-        loss = self.loss_function(y_pred, y_true) / self.sigma**2 * 0.5
+        validate_predicted_intensity(y_pred)
+        loss = torch.nn.functional.mse_loss(
+            torch.sqrt(y_pred + self.loss_function.eps),
+            torch.sqrt(y_true + self.loss_function.eps),
+            reduction=reduction,
+        ) / self.sigma**2 * 0.5
         return loss
 
 
@@ -1282,34 +1324,17 @@ class PtychographyGaussianNoiseModel(GaussianNoiseModel):
     def __init__(self, sigma: float = 0.5, eps: float = 1e-9, *args, **kwargs) -> None:
         super().__init__(sigma=sigma, eps=eps, *args, **kwargs)
 
-    @timer()
-    def backward_to_psi_far(self, y_pred, y_true, psi_far):
-        """
-        Compute the gradient of the NLL with respect to far field wavefront:
-        $g = \frac{\partial L}{\partial \psi_{far}}$.
-        
-        When `self.valid_pixel_mask` is not None, pixels of the gradient `g` where the
-        mask is False are set to 0. When `self.exclude_measured_pixels_below` is not
-        None, gradients at pixels with measured intensities less than or equal to that
-        threshold are also set to 0.
-        """
-        # Shape of g:       (batch_size, h, w)
-        # Shape of psi_far: (batch_size, n_probe_modes, h, w)
-        y_pred, y_true, valid_pixel_mask = self.conform_to_exit_wave_size(
-            y_pred, y_true, self.valid_pixel_mask, psi_far.shape[-2:]
+    def backward_to_intensity(self, y_pred, y_true):
+        """Unnormalized NLL derivative on the measured detector-intensity grid."""
+        mask = get_constrained_pixel_mask(
+            self.valid_pixel_mask,
+            self.exclude_measured_pixels_below, y_true,
         )
-        constrained_pixel_mask = self.get_constrained_pixel_mask(
-            valid_pixel_mask,
-            self.exclude_measured_pixels_below,
-            y_true,
-        )
-        g = 1 - torch.sqrt(y_true) / (torch.sqrt(y_pred) + self.eps)  # Eq. 12b
-
-        g[torch.logical_not(constrained_pixel_mask)] = 0
-            
+        validate_predicted_intensity(y_pred[mask])
+        g = 1 - torch.sqrt(y_true) / (torch.sqrt(y_pred) + self.eps)
+        g = torch.where(mask, g, 0)
         w = 1 / (2 * self.sigma) ** 2
-        g = 2 * w * g[:, None, :, :] * psi_far
-        return g
+        return 2 * w * g
 
 
 class PoissonNoiseModel(NoiseModel):
@@ -1318,10 +1343,13 @@ class PoissonNoiseModel(NoiseModel):
         self.noise_statistics = "poisson"
         self.loss_function = torch.nn.PoissonNLLLoss(log_input=False)
 
-    def nll(self, y_pred: Tensor, y_true: Tensor) -> Tensor:
+    def nll(self, y_pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
         # This is averaged over all pixels, so it differs from Eq. 11a in Odstrcil (2018)
         # by a factor of 1 / y_pred.numel().
-        loss = self.loss_function(y_pred, y_true)
+        validate_predicted_intensity(y_pred)
+        loss = torch.nn.functional.poisson_nll_loss(
+            y_pred, y_true, log_input=False, eps=self.loss_function.eps, reduction=reduction
+        )
         return loss
 
 
@@ -1329,20 +1357,12 @@ class PtychographyPoissonNoiseModel(PoissonNoiseModel):
     def __init__(self, eps: float = 1e-6, *args, **kwargs) -> None:
         super().__init__(eps=eps, *args, **kwargs)
 
-    @timer()
-    def backward_to_psi_far(self, y_pred: Tensor, y_true: Tensor, psi_far: Tensor):
-        """
-        Compute the gradient of the NLL with respect to far field wavefront.
-        """
-        y_pred, y_true, valid_pixel_mask = self.conform_to_exit_wave_size(
-            y_pred, y_true, self.valid_pixel_mask, psi_far.shape[-2:]
+    def backward_to_intensity(self, y_pred, y_true):
+        """Unnormalized NLL derivative on the measured detector-intensity grid."""
+        mask = get_constrained_pixel_mask(
+            self.valid_pixel_mask,
+            self.exclude_measured_pixels_below, y_true,
         )
-        constrained_pixel_mask = self.get_constrained_pixel_mask(
-            valid_pixel_mask,
-            self.exclude_measured_pixels_below,
-            y_true,
-        )
-        g = 1 - y_true / (y_pred + self.eps)  # Eq. 12b
-        g[torch.logical_not(constrained_pixel_mask)] = 0
-        g = g[:, None, :, :] * psi_far
-        return g
+        validate_predicted_intensity(y_pred[mask])
+        g = 1 - y_true / (y_pred + self.eps)
+        return torch.where(mask, g, 0)

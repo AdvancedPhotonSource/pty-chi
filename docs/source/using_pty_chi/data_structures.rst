@@ -43,6 +43,10 @@ parameters.
    * - Diffraction data
      - ``(n_positions, height, width)``
      -
+   * - Detector response
+     - ``(2, height, width)``
+     - Gain, then offset, in the internal diffraction-data ordering.
+       The task accepts initial maps as a ``(gain, offset)`` tuple.
    * - OPR mode weights
      - ``(n_positions, n_opr_modes)``
      -

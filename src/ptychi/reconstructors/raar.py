@@ -8,6 +8,7 @@ import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
+from ptychi.utils import get_constrained_pixel_mask
 import ptychi.api as api
 from ptychi.api.options.raar import RAARReconstructorOptions
 from ptychi.reconstructors.base import (
@@ -192,7 +193,11 @@ class RAARReconstructor(AnalyticalIterativePtychographyReconstructor):
         propagated_exit_wave = self.replace_propagated_exit_wave_magnitude(
             propagated_exit_wave,
             y_true,
-            constrained_pixel_mask=self.get_constrained_pixel_mask(y_true),
+            constrained_pixel_mask=get_constrained_pixel_mask(
+                valid_pixel_mask=self.dataset.valid_pixel_mask,
+                exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+                y_true=y_true,
+            ),
         )
         return self.forward_model.free_space_propagator.propagate_backward(propagated_exit_wave)
 

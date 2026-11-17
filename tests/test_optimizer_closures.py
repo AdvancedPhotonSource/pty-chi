@@ -6,7 +6,7 @@ import ptychi.maps as maps
 from ptychi.api.options.base import ParameterOptions
 from ptychi.api.task import PtychographyTask
 from ptychi.data_structures.base import ReconstructParameter
-from ptychi.utils import get_default_complex_dtype, set_default_complex_dtype
+from ptychi.utils import get_default_complex_dtype, set_default_complex_dtype, get_constrained_pixel_mask
 
 
 class RequiredClosureOptimizer(torch.optim.SGD):
@@ -387,7 +387,11 @@ def test_autodiff_closure_includes_regularization_and_preserves_other_gradients(
     reconstructor.prepare_optimizer_closures(inputs, target)
     actual = task.object._automatic_optimizer_closure()
     prediction = reconstructor.forward_model(*inputs)
-    mask = reconstructor.get_constrained_pixel_mask(target)
+    mask = get_constrained_pixel_mask(
+        valid_pixel_mask=reconstructor.dataset.valid_pixel_mask,
+        exclude_measured_pixels_below=reconstructor.options.exclude_measured_pixels_below,
+        y_true=target,
+    )
     expected = reconstructor.loss_function(prediction[mask], target[mask])
     expected = expected + 0.3 * task.object.data.abs().square().mean()
     expected_grad, = torch.autograd.grad(expected, task.object.tensor.data)
@@ -488,3 +492,13 @@ def test_legacy_step_arguments_build_a_closure():
             loss_function=torch.nn.MSELoss(),
         )
     torch.testing.assert_close(parameter.data, torch.tensor([1.6]))
+
+
+@pytest.mark.parametrize("optimizer", [RequiredClosureOptimizer, LossOnlyClosureOptimizer])
+def test_unused_distributed_batch_closure_is_rejected_only_when_stepped(optimizer, monkeypatch):
+    task = make_task(parameter_name="object", optimizer=optimizer)
+    rec = task.reconstructor
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    rec.prepare_optimizer_closures([torch.arange(len(task.dataset))], task.dataset.patterns)
+    with pytest.raises(NotImplementedError, match="require a single process"):
+        task.object.step_optimizer()

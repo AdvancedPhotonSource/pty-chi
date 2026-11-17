@@ -24,6 +24,7 @@ def pytest_addoption(parser):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "local: mark test as local-only")
+    config.addinivalue_line("markers", "e2e: complete reconstruction regression")
     # Save timestamps for timing file metadata
     timestamp, date_string, time_string = get_timestamp_for_timing_files()
     os.environ["TIMESTAMP"] = timestamp
@@ -32,6 +33,9 @@ def pytest_configure(config):
 
 
 def pytest_collection_modifyitems(config, items):
+    for item in items:
+        if item.path.name.endswith("_e2e.py"):
+            item.add_marker(pytest.mark.e2e)
     if config.getoption("--all"):
         return
     skip_local = pytest.mark.skip(reason="need --all option to run")
@@ -41,3 +45,41 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_local)
         elif "local" not in item.keywords and config.getoption("--local-only"):
             item.add_marker(skip_non_local)
+
+
+@pytest.fixture
+def numerical_cpu():
+    """Isolate global tensor defaults changed by task construction."""
+    import random
+
+    import numpy as np
+    import torch
+
+    import ptychi.maths as pmath
+    from ptychi.utils import get_default_complex_dtype, set_default_complex_dtype
+
+    device = torch.get_default_device()
+    dtype = torch.get_default_dtype()
+    complex_dtype = get_default_complex_dtype()
+
+    numpy_state = np.random.get_state()
+    python_state = random.getstate()
+    nondeterministic = pmath.get_allow_nondeterministic_algorithms()
+    fft_precision = pmath.get_use_double_precision_for_fft()
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    rng_state = torch.random.get_rng_state()
+    torch.set_default_device("cpu")
+    torch.set_default_dtype(torch.float64)
+    set_default_complex_dtype(torch.complex128)
+    try:
+        yield
+    finally:
+        torch.set_default_device(device)
+        torch.set_default_dtype(dtype)
+        set_default_complex_dtype(complex_dtype)
+        np.random.set_state(numpy_state)
+        random.setstate(python_state)
+        pmath.set_allow_nondeterministic_algorithms(nondeterministic)
+        pmath.set_use_double_precision_for_fft(fft_precision)
+        torch.use_deterministic_algorithms(deterministic)
+        torch.random.set_rng_state(rng_state)

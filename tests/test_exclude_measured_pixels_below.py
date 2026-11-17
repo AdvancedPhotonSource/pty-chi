@@ -3,18 +3,22 @@ from types import SimpleNamespace
 
 import torch
 
+from ptychi.utils import get_constrained_pixel_mask
 from ptychi.api.options.base import ReconstructorOptions
 from ptychi.api.options.data import PtychographyDataOptions
 from ptychi.forward_models import PtychographyGaussianNoiseModel, PtychographyPoissonNoiseModel
 from ptychi.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
-    IterativePtychographyReconstructor,
 )
 from ptychi.reconstructors.bh import BHReconstructor
 
 
 class _DummyAnalyticalPtychographyReconstructor:
-    get_constrained_pixel_mask = IterativePtychographyReconstructor.get_constrained_pixel_mask
+    forward_model = SimpleNamespace(
+        detector_response=SimpleNamespace(is_identity=True),
+        diffraction_pattern_blur_sigma=None,
+        detector_crop_adjoint=lambda value, shape: value,
+    )
     replace_propagated_exit_wave_magnitude = (
         AnalyticalIterativePtychographyReconstructor.replace_propagated_exit_wave_magnitude
     )
@@ -30,7 +34,11 @@ class _DummyBHReconstructor:
     def __init__(self, constrained_pixel_mask):
         self.eps = 1e-8
         self.current_constrained_pixel_mask = constrained_pixel_mask[:, None]
-        self.forward_model = SimpleNamespace(free_space_propagator=_IdentityPropagator())
+        self.forward_model = SimpleNamespace(
+            free_space_propagator=_IdentityPropagator(),
+            map_intensity_to_detector=lambda value, include_offset=True: value,
+            intensity_to_detector_adjoint=lambda value, shape: value,
+        )
 
 
 def _compute_gradient(
@@ -111,7 +119,11 @@ def test_constrained_pixel_mask_combines_valid_mask_and_threshold():
     reconstructor.options = SimpleNamespace(exclude_measured_pixels_below=1.0)
     y_true = torch.tensor([[[0.0, 2.0], [3.0, 1.0]]])
 
-    constrained_pixel_mask = reconstructor.get_constrained_pixel_mask(y_true)
+    constrained_pixel_mask = get_constrained_pixel_mask(
+        valid_pixel_mask=reconstructor.dataset.valid_pixel_mask,
+        exclude_measured_pixels_below=reconstructor.options.exclude_measured_pixels_below,
+        y_true=y_true,
+    )
 
     expected = torch.tensor([[[False, True], [False, False]]])
     assert torch.equal(constrained_pixel_mask, expected)
@@ -124,7 +136,11 @@ def test_projection_helper_leaves_excluded_pixels_unconstrained():
     psi_far = torch.full((1, 1, 2, 2), 2 + 0j, dtype=torch.complex64)
     y_true = torch.tensor([[[0.0, 4.0], [9.0, 1.0]]])
 
-    constrained_pixel_mask = reconstructor.get_constrained_pixel_mask(y_true)
+    constrained_pixel_mask = get_constrained_pixel_mask(
+        valid_pixel_mask=reconstructor.dataset.valid_pixel_mask,
+        exclude_measured_pixels_below=reconstructor.options.exclude_measured_pixels_below,
+        y_true=y_true,
+    )
     constrained_projection = reconstructor.replace_propagated_exit_wave_magnitude(
         psi_far,
         y_true,

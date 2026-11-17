@@ -3,6 +3,7 @@
 
 # ruff: noqa: F403
 
+from .base import DetectorResponseOptions as DetectorResponseOptions
 from .data import *
 from .ad_ptychography import *
 from .lsqml import *

@@ -11,6 +11,7 @@ import ptychi.data_structures.object as object
 import ptychi.data_structures.opr_mode_weights as oprweights
 import ptychi.data_structures.probe as probe
 import ptychi.data_structures.probe_positions as probepos
+from ptychi.data_structures.detector_response import DetectorResponse
 from ptychi.parallel import MultiprocessMixin
 
 
@@ -97,7 +98,11 @@ class PtychographyParameterGroup(ParameterGroup):
 
     opr_mode_weights: "oprweights.OPRModeWeights"
 
+    detector_response: Optional[DetectorResponse] = None
+
     def __post_init__(self):
+        if self.detector_response is None:
+            self.detector_response = DetectorResponse(shape=self.probe.get_spatial_shape())
         if self.probe.has_multiple_opr_modes and self.opr_mode_weights is None:
             raise ValueError(
                 "OPRModeWeights must be provided when the probe has multiple OPR modes."

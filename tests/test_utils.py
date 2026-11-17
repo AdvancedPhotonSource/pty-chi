@@ -3,6 +3,7 @@ import os
 import datetime
 import logging
 import configparser
+import warnings
 from typing import Union
 
 import torch
@@ -12,9 +13,37 @@ import pytest
 import subprocess
 import socket
 
+import ptychi.api as api
+from ptychi.api.task import PtychographyTask
 from ptychi.utils import rescale_probe, add_additional_opr_probe_modes_to_probe, set_default_complex_dtype, to_tensor
 import ptychi.timing.timer_utils as timer_utils
 from ptychi.timing.io import save_timing_data_to_unique_file_path
+
+
+def make_task(options=None, *, n_slices=1, n_modes=1):
+    """Build a small deterministic CPU task for numerical tests."""
+    if options is None:
+        options = api.LSQMLOptions()
+    options.reconstructor_options.default_device = api.Devices.CPU
+    options.reconstructor_options.default_dtype = api.Dtypes.FLOAT64
+    options.reconstructor_options.batch_size = 2
+    options.reconstructor_options.allow_nondeterministic_algorithms = False
+    options.data_options.fft_shift = False
+    options.object_options.pixel_size_m = 1e-6
+    if n_slices > 1:
+        options.object_options.slice_spacings_m = [1e-5] * (n_slices - 1)
+    options.probe_position_options.optimizable = False
+    options.probe_options.orthogonalize_incoherent_modes.enabled = False
+    return PtychographyTask(
+        options,
+        diffraction_data=torch.ones((2, 2, 2), dtype=torch.float64, device="cpu"),
+        object_data=torch.ones((n_slices, 6, 6), dtype=torch.complex128, device="cpu"),
+        probe_data=torch.tensor(
+            [[[[1, 2j], [3, 4j]]]], dtype=torch.complex128, device="cpu"
+        ).repeat(1, n_modes, 1, 1),
+        probe_position_x_px=torch.tensor([-1.0, 0.0], device="cpu"),
+        probe_position_y_px=torch.tensor([0.0, 0.0], device="cpu"),
+    )
 
 
 class BaseTester:
@@ -82,11 +111,17 @@ class BaseTester:
     
     @staticmethod
     def get_ci_data_dir():
-        try:
-            dir = os.environ['PTYCHO_CI_DATA_DIR']
-        except KeyError:
-            raise KeyError('PTYCHO_CI_DATA_DIR not set. Please set it to the path to the data folder.')
-        return dir
+        """Return the test data root, defaulting to this checkout's DVC data."""
+        if "PTYCHO_CI_DATA_DIR" in os.environ:
+            warnings.warn(
+                "PTYCHO_CI_DATA_DIR overrides the versioned test data location. "
+                "Unset it and run 'dvc pull' from the repository root to switch to "
+                "DVC-managed data. See tests/README.rst for setup instructions.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return os.environ["PTYCHO_CI_DATA_DIR"]
+        return os.path.join(os.path.dirname(__file__), "reference")
 
     def get_ci_input_data_dir(self):
         return os.path.join(self.get_ci_data_dir(), 'data')
