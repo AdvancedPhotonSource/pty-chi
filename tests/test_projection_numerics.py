@@ -18,6 +18,7 @@ pytestmark = pytest.mark.usefixtures("numerical_cpu")
 def projection_reconstructor():
     recon = make_task(api.EPIEOptions()).reconstructor
     recon.dataset = SimpleNamespace(valid_pixel_mask=torch.ones((1, 2), dtype=torch.bool))
+    recon.noise_model.valid_pixel_mask = recon.dataset.valid_pixel_mask
     return recon
 
 
@@ -27,20 +28,25 @@ def test_reciprocal_magnitude_replacement_preserves_mode_ratio_and_phase(masked,
     psi = torch.tensor([[[[3j, 4]], [[4, -3j]]]])
     target = torch.tensor([[[100.0, 6.25]]])
     mask = torch.tensor([[[True, False]]]) if masked else None
-    projected = projection_reconstructor.replace_propagated_exit_wave_magnitude(
-        psi, target, mask
+    projected = projection_reconstructor.noise_model.project_to_propagated_magnitude_constraint(
+        psi, target, mask, forward_model=projection_reconstructor.forward_model
     )
     expected = torch.tensor([[[[6j, 2]], [[8, -1.5j]]]])
     if masked:
         expected[..., 1] = psi[..., 1]
     torch.testing.assert_close(projected, expected, atol=2e-7, rtol=1e-7)
+    implicit = projection_reconstructor.noise_model.project_to_propagated_magnitude_constraint(
+        psi, target, mask
+    )
+    torch.testing.assert_close(implicit, projected, atol=0, rtol=0)
     torch.testing.assert_close(psi, torch.tensor([[[[3j, 4]], [[4, -3j]]]]))
 
 
 def test_reciprocal_projection_zero_field_remains_finite(projection_reconstructor):
     psi = torch.zeros((2, 2, 1, 2), dtype=torch.complex128)
-    actual = projection_reconstructor.replace_propagated_exit_wave_magnitude(
-        psi, torch.tensor([[[0.0, 4.0]], [[9.0, 0.0]]])
+    actual = projection_reconstructor.noise_model.project_to_propagated_magnitude_constraint(
+        psi, torch.tensor([[[0.0, 4.0]], [[9.0, 0.0]]]),
+        forward_model=projection_reconstructor.forward_model,
     )
     torch.testing.assert_close(actual, psi)
 
@@ -113,6 +119,7 @@ def test_dm_exit_wave_reflection_and_error_accumulation(relaxation, projection_r
         exit_wave_update_relaxation=relaxation, exclude_measured_pixels_below=None
     )
     recon.dataset = projection_reconstructor.dataset
+    recon.noise_model = projection_reconstructor.noise_model
     recon.psi = torch.tensor([[[[99 + 0j, 99]]], [[[1 + 0j, 1j]]], [[[77 + 0j, 77]]]])
     new_psi = torch.tensor([[[[2 + 0j, 2j]]]])
     recon.calculate_exit_wave_chunk = Mock(return_value=(new_psi, torch.tensor([5.0])))

@@ -82,16 +82,22 @@ def test_inverse_response_projection_with_crop_and_mask(response):
     measured = torch.full((2, 3, 5), 11.0)
     mask = torch.ones_like(measured, dtype=torch.bool)
     mask[0, 1, 2] = False
-    projected = rec.replace_propagated_exit_wave_magnitude(psi, measured, mask)
+    projected = rec.noise_model.project_to_propagated_magnitude_constraint(
+        psi, measured, mask, forward_model=model
+    )
     constrained = mask
     prediction = model.map_intensity_to_detector(projected.abs().square().sum(1))
     torch.testing.assert_close(prediction[constrained], measured[constrained])
     full_mask = model.detector_crop_adjoint(constrained, psi.shape[-2:])[:, None].expand_as(psi)
     torch.testing.assert_close(projected[~full_mask], psi[~full_mask], rtol=0, atol=0)
-    repeated = rec.replace_propagated_exit_wave_magnitude(projected, measured, mask)
+    repeated = rec.noise_model.project_to_propagated_magnitude_constraint(
+        projected, measured, mask, forward_model=model
+    )
     torch.testing.assert_close(repeated, projected, rtol=1e-12, atol=1e-12)
     below_offset = model.detector_response.offset[None].expand_as(measured) - 1
-    zeroed = rec.replace_propagated_exit_wave_magnitude(psi, below_offset, mask)
+    zeroed = rec.noise_model.project_to_propagated_magnitude_constraint(
+        psi, below_offset, mask, forward_model=model
+    )
     torch.testing.assert_close(zeroed[full_mask], torch.zeros_like(zeroed[full_mask]))
 
 
@@ -99,8 +105,9 @@ def test_inverse_response_projection_with_crop_and_mask(response):
 def test_response_projection_rejects_blur(response):
     task = make_task(api.EPIEOptions, blur=0.4, response=response)
     with pytest.raises(ValueError, match="Magnitude projection.*requires"):
-        task.reconstructor.replace_propagated_exit_wave_magnitude(
-            torch.ones((2, 2, 6, 6), dtype=torch.complex128), task.dataset.patterns
+        task.reconstructor.noise_model.project_to_propagated_magnitude_constraint(
+            torch.ones((2, 2, 6, 6), dtype=torch.complex128), task.dataset.patterns,
+            forward_model=task.reconstructor.forward_model,
         )
 
 

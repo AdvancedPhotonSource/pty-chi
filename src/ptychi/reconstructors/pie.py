@@ -11,7 +11,6 @@ from ptychi.utils import get_constrained_pixel_mask
 from ptychi.reconstructors.base import (
     AnalyticalIterativePtychographyReconstructor,
 )
-from ptychi.metrics import MSELossOfSqrt
 from ptychi.timing.timer_utils import timer
 
 if TYPE_CHECKING:
@@ -51,11 +50,6 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
             **kwargs,
         )
 
-    def build_loss_tracker(self):
-        if self.displayed_loss_function is None:
-            self.displayed_loss_function = MSELossOfSqrt()
-        return super().build_loss_tracker()
-
     def check_inputs(self, *args, **kwargs):
         for var in self.parameter_group.get_optimizable_parameters():
             if "lr" not in var.optimizer_params.keys():
@@ -93,7 +87,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
         psi_far = self.forward_model.intermediate_variables["psi_far"]
         unique_probes = self.forward_model.intermediate_variables.shifted_unique_probes
         
-        psi_prime = self.replace_propagated_exit_wave_magnitude(
+        psi_prime = self.noise_model.project_to_propagated_magnitude_constraint(
             psi_far,
             y_true,
             constrained_pixel_mask=get_constrained_pixel_mask(
@@ -101,6 +95,7 @@ class PIEReconstructor(AnalyticalIterativePtychographyReconstructor):
                 exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
                 y_true=y_true,
             ),
+            forward_model=self.forward_model,
         )
         psi_prime = self.forward_model.free_space_propagator.propagate_backward(psi_prime)
 
