@@ -912,7 +912,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
             # Levenberg-Marquardt-style damping: add lambda_lsq times the minibatch mean of each
             # diagonal entry to that entry (dim 0 is the scan-position dimension).
-            # - The object and probe update vectors u and v are often strongly correlated, so the
+            # - The object and probe update vectors u and v can be strongly correlated, so the
             #   undamped A can be nearly singular and return large steps of opposite sign. The
             #   damping keeps A positive definite and bounds the steps. Smaller steps also keep
             #   the linearized cost accurate, since it drops the second-order term
@@ -921,12 +921,15 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             #   step sizes do not change when the field units change.
             # - When u and v are uncorrelated (a12 = 0), each step is scaled down from its
             #   undamped value by a_ii / (a_ii + lambda_lsq * mean(a_ii)). A position with a
-            #   typical a_ii is scaled by 1 / (1 + lambda_lsq), i.e. 2/3 for lambda_lsq = 0.5.
+            #   typical a_ii is scaled by 1 / (1 + lambda_lsq), i.e. 0.98 for lambda_lsq = 0.02.
             #   Positions with a small a_ii (weak illumination or a small update) are pushed
             #   toward zero step, and positions with a large a_ii are barely damped.
             # - Because of the mean, each position's step also depends on the other positions
             #   in the minibatch.
-            lambda_lsq = 0.5
+            # - lambda_lsq = 0.02 is lighter than the 0.1 of PTYCHOSHELVES. In simulated
+            #   reconstructions the damping mainly slowed convergence: 0.02 converged faster than
+            #   PTYCHOSHELVES while still guarding against nearly collinear directions.
+            lambda_lsq = 0.02
             a11 = a11 + lambda_lsq * torch.mean(a11, dim=0)
             a22 = a22 + lambda_lsq * torch.mean(a22, dim=0)
 
@@ -944,11 +947,13 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
             a22 = torch.where(a22 > 0, a22, 1)
 
             # a_mat is (batch_size, 2, 2) and b_vec is (batch_size, 2), so torch.linalg.solve
-            # treats b_vec as one right-hand-side vector per position. Negative steps are kept,
-            # because they can be the true minimizer of the real least-squares cost.
+            # treats b_vec as one right-hand-side vector per position. Negative steps, which
+            # reverse a descent direction, are clipped to zero as in PTYCHOSHELVES. In simulated
+            # reconstructions this converged slightly faster than keeping them.
             a_mat = torch.stack([a11, a12, a21, a22], dim=1).view(-1, 2, 2)
             b_vec = torch.stack([b1, b2], dim=1).view(-1, 2)
             alpha_vec = torch.linalg.solve(a_mat, b_vec)
+            alpha_vec = alpha_vec.clip(0, None)
         else:
             raise ValueError(f"Unknown object/probe joint step size method: {method}")
 

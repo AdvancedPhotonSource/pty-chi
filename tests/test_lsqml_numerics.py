@@ -115,7 +115,7 @@ def test_joint_least_squares_solves_coupled_system(reconstructor, sign):
 @pytest.mark.parametrize("method", list(api.ObjProbeJointStepSizeMethods))
 def test_joint_steps_with_complex_cross_term(reconstructor, method, sign):
     # Directions u=[1,0] and v=[i,i] give sum(u conj(v))=-i, whose real part is 0, and b=[3,3].
-    # REAL_LSQ: A=1.5*diag(1,2), so alpha=[2,1], and steps are not clipped.
+    # REAL_LSQ: A=1.02*diag(1,2), so alpha=[3/1.02,3/2.04], clipped at 0.
     # PTYCHOSHELVES: A=[[1.1,-i],[i,2.2]], so Re(inv(A) b)=[6.6,3.3]/1.42, clipped at 0.
     reconstructor.options.obj_prb_joint_step_size_method = method
     ao, ap = reconstructor.calculate_object_and_probe_update_step_sizes(
@@ -126,7 +126,7 @@ def test_joint_steps_with_complex_cross_term(reconstructor, method, sign):
         probe=torch.ones((1, 1, 1, 2), dtype=torch.complex128),
     )
     if method == api.ObjProbeJointStepSizeMethods.REAL_LSQ:
-        expected = [sign * 2.0, sign * 1.0]
+        expected = [3 / 1.02, 3 / 2.04] if sign > 0 else [0.0, 0.0]
     else:
         expected = [6.6 / 1.42, 3.3 / 1.42] if sign > 0 else [0.0, 0.0]
     torch.testing.assert_close(ao, torch.tensor([expected[0]]))

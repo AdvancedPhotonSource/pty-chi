@@ -52,8 +52,8 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
       the diagonal is damped by 0.1 times its batch mean, the real part of the complex solution
       is taken, and negative step sizes are clipped to 0.
     - `REAL_LSQ`: least squares over real step sizes, so every matrix entry is real and the
-      off-diagonal terms are the real parts of the cross terms. The diagonal is damped by 0.5
-      times its batch mean, and step sizes are not clipped.
+      off-diagonal terms are the real parts of the cross terms. The diagonal is damped by 0.02
+      times its batch mean, and negative step sizes are clipped to 0.
     """
 
     solve_step_sizes_only_using_first_probe_mode: bool = True
