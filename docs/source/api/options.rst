@@ -126,6 +126,11 @@ Base Options
    :undoc-members:
    :show-inheritance:
 
+.. autoclass:: ptychi.api.options.base.ProbeSmoothingConstraintOptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. autoclass:: ptychi.api.options.base.ProbeCenterConstraintOptions
    :members:
    :undoc-members:

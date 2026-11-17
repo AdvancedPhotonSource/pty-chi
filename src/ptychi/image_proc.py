@@ -1398,6 +1398,34 @@ def median_filter_1d(x: Tensor, window_size: int = 5):
 
 
 @timer()
+def median_filter_2d(image: Tensor, window_size: int = 3) -> Tensor:
+    """
+    Apply a square median filter to 2D images with reflected edges.
+
+    Parameters
+    ----------
+    image : Tensor
+        A (..., H, W) real tensor of images.
+    window_size : int
+        The side length of the window. Must be odd.
+
+    Returns
+    -------
+    Tensor
+        A (..., H, W) tensor of filtered images.
+    """
+    if window_size % 2 != 1:
+        raise ValueError("Window size must be odd.")
+    orig_shape = image.shape
+    image = image.reshape(-1, 1, *orig_shape[-2:])
+    rad = window_size // 2
+    image = torch.nn.functional.pad(image, (rad, rad, rad, rad), mode="reflect")
+    # (N, window_size ** 2, H * W)
+    patches = torch.nn.functional.unfold(image, kernel_size=window_size)
+    return torch.median(patches, dim=1).values.reshape(orig_shape)
+
+
+@timer()
 def generate_vignette_mask(
     shape: tuple[int, int], 
     margin: int = 20, 
