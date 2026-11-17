@@ -111,6 +111,28 @@ def test_joint_least_squares_solves_coupled_system(reconstructor, sign):
     torch.testing.assert_close(ap, torch.tensor([expected_p]))
 
 
+@pytest.mark.parametrize("sign", [1, -1])
+@pytest.mark.parametrize("method", list(api.ObjProbeJointStepSizeMethods))
+def test_joint_steps_with_complex_cross_term(reconstructor, method, sign):
+    # Directions u=[1,0] and v=[i,i] give sum(u conj(v))=-i, whose real part is 0, and b=[3,3].
+    # REAL_LSQ: A=1.5*diag(1,2), so alpha=[2,1], and steps are not clipped.
+    # PTYCHOSHELVES: A=[[1.1,-i],[i,2.2]], so Re(inv(A) b)=[6.6,3.3]/1.42, clipped at 0.
+    reconstructor.options.obj_prb_joint_step_size_method = method
+    ao, ap = reconstructor.calculate_object_and_probe_update_step_sizes(
+        sign * torch.tensor([[[[3 + 1j, 2j]]]]),
+        torch.ones((1, 1, 1, 2), dtype=torch.complex128),
+        torch.tensor([[[[1 + 0j, 0]]]]),
+        torch.tensor([[[1j, 1j]]]),
+        probe=torch.ones((1, 1, 1, 2), dtype=torch.complex128),
+    )
+    if method == api.ObjProbeJointStepSizeMethods.REAL_LSQ:
+        expected = [sign * 2.0, sign * 1.0]
+    else:
+        expected = [6.6 / 1.42, 3.3 / 1.42] if sign > 0 else [0.0, 0.0]
+    torch.testing.assert_close(ao, torch.tensor([expected[0]]))
+    torch.testing.assert_close(ap, torch.tensor([expected[1]]))
+
+
 @pytest.mark.parametrize("batching", list(api.BatchingModes))
 @pytest.mark.parametrize("resampling", [False, True])
 def test_gradient_reset_respects_compact_minibatches(reconstructor, batching, resampling):

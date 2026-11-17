@@ -39,7 +39,23 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
     Slices other than the first are always solved independently. For single-slice objects, use
     `single_slice_solve_obj_prb_step_size_jointly` instead.
     """
-    
+
+    obj_prb_joint_step_size_method: enums.ObjProbeJointStepSizeMethods = (
+        enums.ObjProbeJointStepSizeMethods.PTYCHOSHELVES
+    )
+    """
+    How the 2x2 linear system is built when the object/probe step sizes are solved jointly
+    (see `single_slice_solve_obj_prb_step_size_jointly` and
+    `multislice_solve_obj_prb_step_size_jointly`):
+
+    - `PTYCHOSHELVES`: Eq. 22 of Odstrcil (2018) as printed. The off-diagonal terms are complex,
+      the diagonal is damped by 0.1 times its batch mean, the real part of the complex solution
+      is taken, and negative step sizes are clipped to 0.
+    - `REAL_LSQ`: least squares over real step sizes, so every matrix entry is real and the
+      off-diagonal terms are the real parts of the cross terms. The diagonal is damped by 0.5
+      times its batch mean, and step sizes are not clipped.
+    """
+
     solve_step_sizes_only_using_first_probe_mode: bool = True
     """
     If True, object and probe step sizes will only be calculated using the first probe mode.
