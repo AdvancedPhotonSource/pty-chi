@@ -829,6 +829,8 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         """
         Jointly calculate the update step sizes for object and probe according to Eq. 22 of Odstrcil (2018).
         This routine builds a (batch_size, 2, 2) batch matrix, batch-invert them to get the update step sizes.
+        `options.obj_prb_joint_step_size_method` selects between Eq. 22 as printed (`PTYCHOSHELVES`)
+        and the least-squares system for real step sizes, whose entries are all real (`REAL_LSQ`).
         """
         mode_slicer = self.parameter_group.probe._get_probe_mode_slicer(probe_mode_index)
 
@@ -848,32 +850,93 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
         if delta_p_hat.shape[1] > 1:
             delta_p_hat = delta_p_hat[:, mode_slicer]
 
-        lambda_lsq = 0.1
-
         # Shape of delta_p_o/o_p:     (batch_size, n_probe_modes or 1, h, w)
         delta_p_o = delta_p_hat * obj_patches[:, None, :, :]
         delta_o_patches_p = delta_o_i[:, None, :, :] * probe
 
-        # Shape of aij:               (batch_size,)
-        # Relative diagonal damping scales with the squared field amplitude,
-        # so changing field units preserves the solved step sizes.
-        a11 = torch.sum(pmath.abs2(delta_o_patches_p), dim=(-1, -2, -3))
-        a11 = a11 + lambda_lsq * torch.mean(a11, dim=0)
-        a12 = torch.sum((delta_o_patches_p * delta_p_o.conj()), dim=(-1, -2, -3))
-        a21 = a12.conj()
-        a22 = torch.sum(pmath.abs2(delta_p_o), dim=(-1, -2, -3))
-        a22 = a22 + lambda_lsq * torch.mean(a22, dim=0)
+        # Shape of aij, bi:           (batch_size,)
         b1 = torch.sum(torch.real(delta_o_patches_p.conj() * chi), dim=(-1, -2, -3))
         b2 = torch.sum(torch.real(delta_p_o.conj() * chi), dim=(-1, -2, -3))
 
-        # An identically zero direction has a zero row, column, and RHS.
-        # Set its diagonal to one to obtain a zero step without a singular solve.
-        a11 = torch.where(a11 > 0, a11, 1)
-        a22 = torch.where(a22 > 0, a22, 1)
-        a_mat = torch.stack([a11, a12, a21, a22], dim=1).view(-1, 2, 2)
-        b_vec = torch.stack([b1, b2], dim=1).view(-1, 2).type(a_mat.dtype)
-        alpha_vec = torch.linalg.solve(a_mat, b_vec)
-        alpha_vec = alpha_vec.real.clip(0, None)
+        method = self.options.obj_prb_joint_step_size_method
+        if method == enums.ObjProbeJointStepSizeMethods.PTYCHOSHELVES:
+            # Eq. 22 as printed: complex off-diagonal terms with a real RHS.
+            lambda_lsq = 0.1
+            # Relative diagonal damping scales with the squared field amplitude,
+            # so changing field units preserves the solved step sizes.
+            a11 = torch.sum(pmath.abs2(delta_o_patches_p), dim=(-1, -2, -3))
+            a11 = a11 + lambda_lsq * torch.mean(a11, dim=0)
+            a12 = torch.sum((delta_o_patches_p * delta_p_o.conj()), dim=(-1, -2, -3))
+            a21 = a12.conj()
+            a22 = torch.sum(pmath.abs2(delta_p_o), dim=(-1, -2, -3))
+            a22 = a22 + lambda_lsq * torch.mean(a22, dim=0)
+
+            # An identically zero direction has a zero row, column, and RHS.
+            # Set its diagonal to one to obtain a zero step without a singular solve.
+            a11 = torch.where(a11 > 0, a11, 1)
+            a22 = torch.where(a22 > 0, a22, 1)
+            a_mat = torch.stack([a11, a12, a21, a22], dim=1).view(-1, 2, 2)
+            b_vec = torch.stack([b1, b2], dim=1).view(-1, 2).type(a_mat.dtype)
+            alpha_vec = torch.linalg.solve(a_mat, b_vec)
+            alpha_vec = alpha_vec.real.clip(0, None)
+        elif method == enums.ObjProbeJointStepSizeMethods.REAL_LSQ:
+            # Minimize sum_{r,p} |chi - alpha_o * u - alpha_p * v|^2 over real alpha_o, alpha_p
+            # for each scan position, where u = delta_o_patches_p and v = delta_p_o. The normal
+            # equations are A alpha = b with a11 = sum |u|^2, a22 = sum |v|^2,
+            # a12 = a21 = sum Re(u conj(v)), b1 = sum Re(conj(u) chi), b2 = sum Re(conj(v) chi).
+            # Because the step sizes are real, every entry of A is real, and A is a symmetric
+            # positive semidefinite Gram matrix.
+            a11 = torch.sum(pmath.abs2(delta_o_patches_p), dim=(-1, -2, -3))
+            a22 = torch.sum(pmath.abs2(delta_p_o), dim=(-1, -2, -3))
+            a12 = torch.sum(torch.real(delta_o_patches_p * delta_p_o.conj()), dim=(-1, -2, -3))
+            a21 = a12
+
+            # Levenberg-Marquardt-style damping: add lambda_lsq times the minibatch mean of each
+            # diagonal entry to that entry (dim 0 is the scan-position dimension).
+            # - The object and probe update vectors u and v can be strongly correlated, so the
+            #   undamped A can be nearly singular and return large steps of opposite sign. The
+            #   damping keeps A positive definite and bounds the steps. Smaller steps also keep
+            #   the linearized cost accurate, since it drops the second-order term
+            #   alpha_o * alpha_p * delta_o * delta_p of the exit-wave update.
+            # - The mean has the same units as a_ii (squared field amplitude), so the solved
+            #   step sizes do not change when the field units change.
+            # - When u and v are uncorrelated (a12 = 0), each step is scaled down from its
+            #   undamped value by a_ii / (a_ii + lambda_lsq * mean(a_ii)). A position with a
+            #   typical a_ii is scaled by 1 / (1 + lambda_lsq), i.e. 0.98 for lambda_lsq = 0.02.
+            #   Positions with a small a_ii (weak illumination or a small update) are pushed
+            #   toward zero step, and positions with a large a_ii are barely damped.
+            # - Because of the mean, each position's step also depends on the other positions
+            #   in the minibatch.
+            # - lambda_lsq = 0.02 is lighter than the 0.1 of PTYCHOSHELVES. In simulated
+            #   reconstructions the damping mainly slowed convergence: 0.02 converged faster than
+            #   PTYCHOSHELVES while still guarding against nearly collinear directions.
+            lambda_lsq = 0.02
+            a11 = a11 + lambda_lsq * torch.mean(a11, dim=0)
+            a22 = a22 + lambda_lsq * torch.mean(a22, dim=0)
+
+            # After damping, a_ii can only be zero if its direction is zero at every position in
+            # the minibatch, because the minibatch mean is then zero as well. In that case the
+            # corresponding row and column of A and the entry of b are all zero, so A is
+            # singular. Setting that diagonal entry to 1 makes the solve well posed: the step
+            # for that direction comes out exactly zero, and the other step reduces to the
+            # one-dimensional solve b_j / a_jj. A direction that is zero at only some positions
+            # needs no guard: there a_ii = lambda_lsq * mean(a_ii) > 0 and b_i = 0, which also
+            # gives a zero step. Replacing exact zeros, rather than adding a small constant to
+            # every diagonal entry, leaves all other step sizes, and their independence of the
+            # field units, unchanged.
+            a11 = torch.where(a11 > 0, a11, 1)
+            a22 = torch.where(a22 > 0, a22, 1)
+
+            # a_mat is (batch_size, 2, 2) and b_vec is (batch_size, 2), so torch.linalg.solve
+            # treats b_vec as one right-hand-side vector per position. Negative steps, which
+            # reverse a descent direction, are clipped to zero as in PTYCHOSHELVES. In simulated
+            # reconstructions this converged slightly faster than keeping them.
+            a_mat = torch.stack([a11, a12, a21, a22], dim=1).view(-1, 2, 2)
+            b_vec = torch.stack([b1, b2], dim=1).view(-1, 2)
+            alpha_vec = torch.linalg.solve(a_mat, b_vec)
+            alpha_vec = alpha_vec.clip(0, None)
+        else:
+            raise ValueError(f"Unknown object/probe joint step size method: {method}")
 
         alpha_o_i = alpha_vec[:, 0]
         alpha_p_i = alpha_vec[:, 1]

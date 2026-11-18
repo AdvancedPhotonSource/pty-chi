@@ -38,7 +38,12 @@ class FieldUnitsPropagator(torch.nn.Module):
         return self.propagator.propagate_backward(field) * self.scale
 
 
-def make_task(scale=1.0, jointly=True, propagator_type=propagation.FourierPropagator):
+def make_task(
+    scale=1.0,
+    jointly=True,
+    propagator_type=propagation.FourierPropagator,
+    method=api.ObjProbeJointStepSizeMethods.PTYCHOSHELVES,
+):
     generator = torch.Generator().manual_seed(71)
     probe = 1 + 0.2 * torch.randn(1, 2, 8, 12, dtype=torch.complex128, generator=generator)
     options = api.LSQMLOptions()
@@ -47,6 +52,7 @@ def make_task(scale=1.0, jointly=True, propagator_type=propagation.FourierPropag
     options.reconstructor_options.use_double_precision_for_fft = True
     options.reconstructor_options.rescale_probe_intensity_in_first_epoch = False
     options.reconstructor_options.single_slice_solve_obj_prb_step_size_jointly = jointly
+    options.reconstructor_options.obj_prb_joint_step_size_method = method
     options.reconstructor_options.batch_size = 4
     options.data_options.fft_shift = False
     options.object_options.pixel_size_m = 2e-8
@@ -80,9 +86,10 @@ def make_task(scale=1.0, jointly=True, propagator_type=propagation.FourierPropag
     propagation.FourierPropagator, propagation.AngularSpectrumPropagator,
     propagation.FresnelTransformPropagator, propagation.FraunhoferPropagator,
 ])
+@pytest.mark.parametrize("method", list(api.ObjProbeJointStepSizeMethods))
 @torch.no_grad()
-def test_lsqml_updates_preserve_field_units(scale, jointly, propagator_type):
-    tasks = [make_task(s, jointly, propagator_type) for s in (1.0, scale)]
+def test_lsqml_updates_preserve_field_units(scale, jointly, propagator_type, method):
+    tasks = [make_task(s, jointly, propagator_type, method) for s in (1.0, scale)]
     indices = torch.arange(4)
     model = tasks[0].reconstructor.forward_model
     # Spatially varying synthetic data exercise changes in the probe profile.
@@ -119,11 +126,12 @@ def test_lsqml_updates_preserve_field_units(scale, jointly, propagator_type):
             )
 
 
+@pytest.mark.parametrize("method", list(api.ObjProbeJointStepSizeMethods))
 @pytest.mark.parametrize("jointly", [False, True])
 @pytest.mark.parametrize("case", ["zero_object", "zero_probe", "zero_both", "collinear"])
 @torch.no_grad()
-def test_step_sizes_handle_degenerate_directions(jointly, case):
-    recon = make_task(jointly=jointly).reconstructor
+def test_step_sizes_handle_degenerate_directions(method, jointly, case):
+    recon = make_task(jointly=jointly, method=method).reconstructor
     patches = torch.ones(4, 1, 8, 12, dtype=torch.complex128)
     probe = torch.ones(1, 2, 8, 12, dtype=torch.complex128)
     delta_o, delta_p = patches.clone(), probe[0].clone()
