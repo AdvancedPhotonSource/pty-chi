@@ -19,7 +19,6 @@ import ptychi.forward_models as fm
 import ptychi.api.enums as enums
 import ptychi.io_handles as io
 import ptychi.image_proc as ip
-from ptychi.metrics import MSELossOfSqrt
 from ptychi.parallel import MultiprocessMixin
 if TYPE_CHECKING:
     import ptychi.data_structures.parameter_group as pg
@@ -593,7 +592,11 @@ class IterativePtychographyReconstructor(IterativeReconstructor, PtychographyRec
             # Apply probe support constraint.
             if probe.options.support_constraint.is_enabled_on_this_epoch(self.current_epoch):
                 probe.constrain_support()
-                
+
+            # Apply probe smoothing constraint.
+            if probe.options.smoothing_constraint.is_enabled_on_this_epoch(self.current_epoch):
+                probe.smooth_probe()
+
             # Apply probe center constraint.
             if probe.options.center_constraint.is_enabled_on_this_epoch(self.current_epoch):
                 probe.center_probe()
@@ -733,6 +736,10 @@ class AnalyticalIterativePtychographyReconstructor(
         )
         self.forward_model = None
         self.build_forward_model()
+        self.noise_model = fm.MagnitudeMeanSquaredNoiseModel(
+            valid_pixel_mask=self.dataset.valid_pixel_mask,
+            exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
+        )
 
     def build_forward_model(self):
         self.forward_model = fm.PlanarPtychographyForwardModel(
@@ -748,15 +755,23 @@ class AnalyticalIterativePtychographyReconstructor(
             diffraction_pattern_blur_sigma=self.options.forward_model_options.diffraction_pattern_blur_sigma,
         )
 
+    def build_loss_tracker(self):
+        f = (
+            self.noise_model.nll
+            if self.displayed_loss_function is None
+            else self.displayed_loss_function
+        )
+        self.loss_tracker = LossTracker(metric_function=f)
+
     def compute_optimizer_loss(self, input_data, y_true):
-        """Use the masked mean squared amplitude residual for projection algorithms."""
+        """Evaluate the masked likelihood of the configured noise model."""
         y_pred = self.forward_model(*input_data)
         mask = get_constrained_pixel_mask(
             valid_pixel_mask=self.dataset.valid_pixel_mask,
             exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
             y_true=y_true,
         )
-        return MSELossOfSqrt()(y_pred[mask], y_true[mask])
+        return self.noise_model.nll(y_pred[mask], y_true[mask])
 
     def stabilize_object_projection_denominator(self, denominator: Tensor) -> Tensor:
         """Floor full-object projection weights at 5% of their maximum.
@@ -823,74 +838,6 @@ class AnalyticalIterativePtychographyReconstructor(
         self.parameter_group.probe.normalize_eigenmodes()
         logger.info("Probe eigenmodes normalized.")
 
-    def replace_propagated_exit_wave_magnitude(
-        self,
-        psi: Tensor,
-        actual_pattern_intensity: Tensor,
-        constrained_pixel_mask: Optional[Tensor] = None,
-    ) -> Tensor:
-        """
-        Project the propagated exit wave onto the measured intensity constraint.
-
-        With no blur, the target wave intensity is
-        max((data - offset) / gain, 0). Phase and relative mode amplitudes
-        are preserved. Masked and unmeasured pixels remain unchanged.
-        Data below the offset project to zero intensity. Both grids use internal
-        FFT ordering; detector pixels are zero-inserted by the crop adjoint.
-        A fixed identity response on a matching grid retains the historical 1e-7
-        amplitude stabilization, including its zero-wave behavior. Other
-        cases use exact norm replacement, choosing the first mode's phase
-        as zero when the input wave vanishes. Blur requires LSQML or autodiff.
-
-        Parameters
-        ----------
-        psi : Tensor
-            Predicted exit wave propagated to the detector plane.
-        actual_pattern_intensity : Tensor
-            The measured diffraction pattern at the detector.
-        constrained_pixel_mask : Tensor, optional
-            If given, only pixels where this mask is True are constrained. Other pixels
-            are left unchanged from `psi`.
-
-        Returns
-        -------
-        Tensor
-            Exit wave with the measured total intensity, or the inverse-response
-            intensity when a response map is present, on constrained detector pixels.
-        """
-
-        model = self.forward_model
-        if model.diffraction_pattern_blur_sigma is not None:
-            raise ValueError(
-                "Magnitude projection requires diffraction_pattern_blur_sigma=None. "
-                "Use LSQML or autodiff for blur."
-            )
-        target = actual_pattern_intensity
-        if not model.detector_response.is_identity:
-            target = (target - model.detector_response.offset) / model.detector_response.gain
-        target = target.clamp_min(0)
-        mask = (
-            self.dataset.valid_pixel_mask
-            if constrained_pixel_mask is None else constrained_pixel_mask
-        )
-        target = model.detector_crop_adjoint(target, psi.shape[-2:])
-        mask = model.detector_crop_adjoint(mask, psi.shape[-2:])
-        intensity = psi.abs().square().sum(1)
-        if (
-            model.detector_response.is_identity
-            and psi.shape[-2:] == actual_pattern_intensity.shape[-2:]
-        ):
-            # Preserve the original same-grid amplitude stabilization.
-            psi_prime = (
-                psi / (intensity.sqrt()[:, None] + 1e-7) * (target + 1e-7).sqrt()[:, None]
-            )
-        else:
-            scale = (target / torch.where(intensity > 0, intensity, 1)).sqrt()
-            psi_prime = psi * scale[:, None]
-            # A zero wave has no phase; choose the first mode to satisfy the norm.
-            psi_prime[:, 0] = torch.where(intensity > 0, psi_prime[:, 0], target.sqrt())
-        return torch.where(mask[:, None] if mask.ndim == 3 else mask, psi_prime, psi)
-        
     @timer()
     def adjoint_shift_probe_update_direction(self, indices, delta_p, first_mode_only=None):
         """

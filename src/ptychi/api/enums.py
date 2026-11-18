@@ -62,6 +62,11 @@ class NoiseModels(StrEnum):
     POISSON = auto()
 
 
+class ObjProbeJointStepSizeMethods(StrEnum):
+    PTYCHOSHELVES = auto()
+    REAL_LSQ = auto()
+
+
 class OrthogonalizationMethods(StrEnum):
     GS = auto()
     SVD = auto()
@@ -148,3 +153,8 @@ class ProbeSupportMethods(StrEnum):
     NONE = auto()
     ELLIPSE = auto()
     RECTANGLE = auto()
+
+
+class ProbeSmoothingMethods(StrEnum):
+    GAUSSIAN = auto()
+    MEDIAN = auto()

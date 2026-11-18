@@ -10,6 +10,7 @@ import numpy as np
 import tifffile
 import torch
 from torch import Tensor
+from torchvision.transforms.functional import gaussian_blur
 
 import ptychi.image_proc as ip
 import ptychi.maths as pmath
@@ -441,6 +442,24 @@ class Probe(dsbase.ReconstructParameter):
         mask = ip.gaussian_filter(mask, sigma=2, size=3).abs()
         data = data * mask
         self.set_data(data)
+
+    def smooth_probe(self):
+        """
+        Smooth the magnitude of the first OPR mode of every incoherent mode, keeping
+        its phase.
+        """
+        smoothing_constraint = self.options.smoothing_constraint
+        kernel_size = smoothing_constraint.kernel_size
+        probe = self.data.clone()
+        mag = torch.abs(probe[0])
+        if smoothing_constraint.method == enums.ProbeSmoothingMethods.GAUSSIAN:
+            mag = gaussian_blur(mag, kernel_size=kernel_size, sigma=smoothing_constraint.sigma)
+        elif smoothing_constraint.method == enums.ProbeSmoothingMethods.MEDIAN:
+            mag = ip.median_filter_2d(mag, window_size=kernel_size)
+        else:
+            raise ValueError(f"Unknown probe smoothing method: {smoothing_constraint.method}")
+        probe[0] = mag * torch.exp(1j * torch.angle(probe[0]))
+        self.set_data(probe)
 
     def center_probe(self):
         """

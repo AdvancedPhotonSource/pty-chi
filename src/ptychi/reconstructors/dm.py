@@ -244,7 +244,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
             2 * new_psi - self.psi[start_pt:end_pt]
         )
         # Replace intensities
-        revised_psi = self.replace_propagated_exit_wave_magnitude(
+        revised_psi = self.noise_model.project_to_propagated_magnitude_constraint(
             revised_psi,
             y_true[start_pt:end_pt],
             constrained_pixel_mask=get_constrained_pixel_mask(
@@ -252,6 +252,7 @@ class DMReconstructor(AnalyticalIterativePtychographyReconstructor):
                 exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
                 y_true=y_true[start_pt:end_pt],
             ),
+            forward_model=self.forward_model,
         )
         # Propagate back to sample plane
         revised_psi = self.forward_model.free_space_propagator.propagate_backward(revised_psi)

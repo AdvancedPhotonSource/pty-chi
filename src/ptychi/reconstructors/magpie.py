@@ -387,7 +387,7 @@ class MAGPIEReconstructor(PIEReconstructor):
         variables = self.forward_model.intermediate_variables
         object_old = variables["obj_patches"][:, :1]
         probe_old = variables.shifted_unique_probes[0]
-        psi_prime = self.replace_propagated_exit_wave_magnitude(
+        psi_prime = self.noise_model.project_to_propagated_magnitude_constraint(
             variables["psi_far"],
             y_true,
             constrained_pixel_mask=get_constrained_pixel_mask(
@@ -395,6 +395,7 @@ class MAGPIEReconstructor(PIEReconstructor):
                 exclude_measured_pixels_below=self.options.exclude_measured_pixels_below,
                 y_true=y_true,
             ),
+            forward_model=self.forward_model,
         )
         psi_prime = self.forward_model.free_space_propagator.propagate_backward(psi_prime)
         delta_psi = psi_prime - variables["psi"]

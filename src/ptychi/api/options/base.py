@@ -665,6 +665,45 @@ class ProbeSupportConstraintOptions(FeatureOptions):
 
 
 @dataclass
+class ProbeSmoothingConstraintOptions(FeatureOptions):
+    """
+    Settings for smoothing the magnitude of the probe. The filter is applied to the
+    first OPR mode of every incoherent mode; the phase and the eigenmodes are left
+    unchanged.
+    """
+
+    enabled: bool = False
+
+    optimization_plan: OptimizationPlan = dataclasses.field(default_factory=OptimizationPlan)
+
+    method: enums.ProbeSmoothingMethods = enums.ProbeSmoothingMethods.MEDIAN
+    """
+    The filter applied to the probe magnitude.
+
+    GAUSSIAN: Gaussian blur with reflected edges
+    (`torchvision.transforms.functional.gaussian_blur`).
+
+    MEDIAN: median filter with reflected edges.
+    """
+
+    kernel_size: int = PydanticField(default=3, ge=1)
+    """The side length of the square filter window. Must be odd."""
+
+    sigma: Optional[float] = PydanticField(default=None, gt=0)
+    """
+    The standard deviation of the Gaussian kernel in pixels; only used by `GAUSSIAN`.
+    If None, torchvision's default `0.3 * ((kernel_size - 1) / 2 - 1) + 0.8` is used.
+    """
+
+    @field_validator("kernel_size")
+    @classmethod
+    def _validate_kernel_size_is_odd(cls, value: int) -> int:
+        if value % 2 != 1:
+            raise ValueError("`probe_options.smoothing_constraint.kernel_size` must be odd.")
+        return value
+
+
+@dataclass
 class ProbeCenterConstraintOptions(FeatureOptions):
     """
     Settings for constraining the probe's center of mass to the center of the probe array.
@@ -776,6 +815,10 @@ class ProbeOptions(ParameterOptions):
 
     support_constraint: ProbeSupportConstraintOptions = field(
         default_factory=ProbeSupportConstraintOptions
+    )
+
+    smoothing_constraint: ProbeSmoothingConstraintOptions = field(
+        default_factory=ProbeSmoothingConstraintOptions
     )
 
     center_constraint: ProbeCenterConstraintOptions = field(
