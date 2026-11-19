@@ -40,6 +40,7 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
     `single_slice_solve_obj_prb_step_size_jointly` instead.
     """
 
+    # TODO: Change the default to REAL_LSQ in 2.7.0 and remove the announcement warning.
     obj_prb_joint_step_size_method: enums.ObjProbeJointStepSizeMethods = (
         enums.ObjProbeJointStepSizeMethods.PTYCHOSHELVES
     )
@@ -98,6 +99,12 @@ class LSQMLReconstructorOptions(base.ReconstructorOptions):
     
     def check(self, options: "LSQMLOptions"):
         super().check(options)
+        if self.obj_prb_joint_step_size_method == enums.ObjProbeJointStepSizeMethods.PTYCHOSHELVES:
+            logger.warning(
+                "The default LSQML joint object/probe step-size method "
+                "(`obj_prb_joint_step_size_method`) will change from PTYCHOSHELVES to REAL_LSQ "
+                "in Pty-Chi 2.7.0. See https://github.com/AdvancedPhotonSource/pty-chi/discussions/115"
+            )
         if options.object_options.optimizable:
             # TODO: Remove this warning in 2.8.0 (two releases after 2.6.0).
             logger.warning(
