@@ -427,7 +427,7 @@ class PtychographyTask(Task):
                 "`opr_mode_weights_data.shape[0]` must match the number of probe positions "
                 f"({weights_shape[0]} != {n_positions})."
             )
-        if self.opr_mode_weight_options.optimizable:
+        if not self.opr_mode_weight_options.optimizable:
             logging.warning(
                 "The default value of OPRModeWeightsOptions has been changed to False. "
                 "You have provided initial OPR weights, but optimizable is set to False. "
