@@ -53,6 +53,7 @@ class Test2dPtychoOptPlan(tutils.TungstenDataTester):
         options.opr_mode_weight_options.optimizable = True
         
         options.reconstructor_options.num_epochs = 4
+        options.reconstructor_options.random_seed = 123
         options.reconstructor_options.batch_size = 40
         options.reconstructor_options.default_device = api.Devices.GPU
         options.reconstructor_options.displayed_loss_function = api.LossFunctions.MSE_SQRT

@@ -76,6 +76,7 @@ def test_split_probe_modes_reconstruct_like_single_mode(options_class):
     results = []
     for initial_probe in (0.8 * probe, split_into_two_modes(0.8 * probe)):
         options = options_class()
+        options.reconstructor_options.random_seed = 0
         options.reconstructor_options.num_epochs = 3
         options.reconstructor_options.batch_size = 2
         options.object_options.optimizable = True

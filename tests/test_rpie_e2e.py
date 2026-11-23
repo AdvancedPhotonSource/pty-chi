@@ -77,6 +77,7 @@ class TestMultislicePtychoRPIESDL(tutils.TungstenDataTester):
 
         options.reconstructor_options.batch_size = round(data.shape[0] * 0.1)
         options.reconstructor_options.num_epochs = 8
+        options.reconstructor_options.random_seed = 123
         options.reconstructor_options.allow_nondeterministic_algorithms = False
 
         task = PtychographyTask(
