@@ -1018,10 +1018,10 @@ class PlanarPtychographyForwardModel(ForwardModel):
             return y
         h, w = y.shape[-2:]
         top, left = wave_shape[0] // 2 - h // 2, wave_shape[1] // 2 - w // 2
-        result = torch.nn.functional.pad(
-            torch.fft.fftshift(y, dim=(-2, -1)),
-            (left, wave_shape[1] - w - left, top, wave_shape[0] - h - top),
-        )
+        padding = (left, wave_shape[1] - w - left, top, wave_shape[0] - h - top)
+        if not self.free_space_propagator.is_coordinate_shifted:
+            return torch.nn.functional.pad(y, padding)
+        result = torch.nn.functional.pad(torch.fft.fftshift(y, dim=(-2, -1)), padding)
         return torch.fft.ifftshift(result, dim=(-2, -1))
 
     def intensity_to_detector_adjoint(self, gradient: Tensor, wave_shape: tuple[int, int]) -> Tensor:
@@ -1084,6 +1084,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
 
     @timer()        
     def conform_to_detector_size(self, y: Tensor) -> Tensor:
+        """Crop about the coordinate origin in the propagator's output ordering."""
         if (
             self.detector_size is None
         ) or (
@@ -1094,6 +1095,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
             raise ValueError(
                 f"Detector size ({self.detector_size}) should not be larger than the probe size ({y.shape[-2:]})."
             )
+        if not self.free_space_propagator.is_coordinate_shifted:
+            return ip.central_crop(y, self.detector_size)
         y = torch.fft.fftshift(y, dim=(-2, -1))
         y = ip.central_crop(y, self.detector_size)
         y = torch.fft.ifftshift(y, dim=(-2, -1))
@@ -1273,8 +1276,8 @@ class NoiseModel(torch.nn.Module):
         With no blur, the target wave intensity is
         max((data - offset) / gain, 0). Phase and relative mode amplitudes
         are preserved. Masked and unmeasured pixels remain unchanged.
-        Data below the offset project to zero intensity. Both grids use internal
-        FFT ordering; detector pixels are zero-inserted by the crop adjoint.
+        Data below the offset project to zero intensity. The crop adjoint embeds
+        detector pixels in the wave grid using the propagator's output ordering.
         A fixed identity response on a matching grid retains the historical 1e-7
         amplitude stabilization, including its zero-wave behavior. Other
         cases use exact norm replacement, choosing the first mode's phase
