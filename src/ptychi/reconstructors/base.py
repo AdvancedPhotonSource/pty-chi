@@ -302,18 +302,28 @@ class IterativeReconstructor(Reconstructor):
         self.build_counter()
 
     def build_dataloader(self, batch_sampler=None):
+        device = torch.get_default_device()
+        generator = torch.Generator(device=device)
         data_loader_kwargs = {
             "dataset": self.dataset,
-            "generator": torch.Generator(device=torch.get_default_device()),
+            "generator": generator,
         }
         if batch_sampler is not None:
             data_loader_kwargs["batch_sampler"] = batch_sampler
         else:
+            seed = self.options.random_seed
+            if seed is None:
+                batch_seed = torch.empty((), dtype=torch.int64, device=device).random_()
+                if dist.is_initialized():
+                    # Each rank takes its own chunk of the same shuffled batch.
+                    dist.broadcast(batch_seed, src=0)
+                seed = batch_seed.item()
+            generator.manual_seed(seed)
             data_loader_kwargs["batch_size"] = self.batch_size
             data_loader_kwargs["shuffle"] = True
 
         self.dataloader = DataLoader(**data_loader_kwargs)
-        self.dataset.move_attributes_to_device(torch.get_default_device())
+        self.dataset.move_attributes_to_device(device)
 
     def build_loss_tracker(self):
         self.loss_tracker = LossTracker(metric_function=self.displayed_loss_function)
