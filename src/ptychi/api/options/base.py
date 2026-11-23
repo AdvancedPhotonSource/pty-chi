@@ -1287,14 +1287,14 @@ class ForwardModelOptions(Options):
     Gradients and magnitude projections use the transposes in reverse order; the transpose
     of binning repeats each detector pixel's value over its U x U block.
 
-    In the far field the object pixel pitch is unchanged and the real-space window grows
-    U times, which removes aliasing when the probe does not fit in the native window
-    (an undersampled detector). In the near field the simulated detector intensity needs
-    a pixel pitch U times finer than the detector's. With angular-spectrum propagation,
-    which keeps the pixel pitch, divide the object pixel size by U. With the Fresnel
-    transform, keep the object pixel size: the U times larger grid already gives the finer
-    pitch. Binning can change which of the two is selected; see the initialization
-    recommendations in the documentation.
+    In the far field the pixel size (``object_options.pixel_size_m``) is unchanged and the
+    real-space window grows U times, which removes aliasing when the probe does not fit in
+    the native window (an undersampled detector). In the near field the simulated detector
+    intensity needs a pixel pitch U times finer than the detector's. With angular-spectrum
+    propagation, which keeps the sampling between planes, divide the pixel size by U. With
+    the Fresnel transform, keep the pixel size: the U times larger grid already gives the
+    finer detector pitch. Binning can change which of the two is selected; see the
+    initialization recommendations in the documentation.
 
     Blocks start at the first pixel of the propagator's output array. In the far field
     that is the zero-frequency pixel of the internal (unshifted) FFT ordering, which
