@@ -21,8 +21,9 @@ def restore_defaults():
 
 def make_task(options_class=api.LSQMLOptions, *, response=True, shape=(3, 5),
               wave_shape=(6, 6), modes=2, blur=None, noise="gaussian", levels=1,
-              valid_pixel_mask=None):
+              valid_pixel_mask=None, random_seed=None):
     options = options_class()
+    options.reconstructor_options.random_seed = random_seed
     options.reconstructor_options.default_device = api.Devices.CPU
     options.reconstructor_options.default_dtype = api.Dtypes.FLOAT64
     options.reconstructor_options.batch_size = 2
@@ -507,7 +508,7 @@ def test_omitted_and_explicit_identity_response_reconstructions_match(options_cl
     mask = np.ones(shape, dtype=bool)
     mask[0, 1] = False
     tasks = [make_task(options_class, response=response, shape=shape, wave_shape=wave_shape,
-                       valid_pixel_mask=mask, noise=noise) for response in (False, "identity")]
+                       valid_pixel_mask=mask, noise=noise, random_seed=427) for response in (False, "identity")]
     with torch.no_grad():
         data = tasks[0].reconstructor.forward_model(torch.arange(2)) * 0.7
         data[:, 0, 1] = 1e6
