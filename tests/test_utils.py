@@ -1,4 +1,3 @@
-import random
 import os
 import datetime
 import logging
@@ -201,9 +200,8 @@ class BaseTester:
         return dp, para
 
     def setup_ptychi(self, cpu_only=False, gpu_indices=(0,)):
+        # Seed random inputs generated before the reconstruction task is built.
         torch.manual_seed(123)
-        random.seed(123)
-        np.random.seed(123)
         
         torch.set_default_device('cpu' if cpu_only else 'cuda')
         torch.set_default_dtype(torch.float32)

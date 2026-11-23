@@ -20,8 +20,9 @@ def restore_defaults():
 
 
 def make_task(response=None, options_class=api.LSQMLOptions, fft_shift=False, blur=None,
-              valid_pixel_mask=None, noise="gaussian"):
+              valid_pixel_mask=None, noise="gaussian", random_seed=None):
     options = options_class()
+    options.reconstructor_options.random_seed = random_seed
     options.reconstructor_options.default_device = api.Devices.CPU
     options.reconstructor_options.batch_size = 2
     if options_class is api.LSQMLOptions:
@@ -234,8 +235,8 @@ def test_masked_measurements_do_not_affect_reconstruction_with_response(options_
     mask = torch.ones((3, 5), dtype=torch.bool, device="cpu")
     mask[0, :3] = False
     offset[0, 2] = 4  # An excluded pixel may have a nonzero background.
-    reference = make_task((gain, offset), options_class, noise=noise, valid_pixel_mask=mask)
-    changed = make_task((gain, offset), options_class, noise=noise, valid_pixel_mask=mask)
+    reference = make_task((gain, offset), options_class, noise=noise, valid_pixel_mask=mask, random_seed=192)
+    changed = make_task((gain, offset), options_class, noise=noise, valid_pixel_mask=mask, random_seed=192)
     with torch.no_grad():
         prediction = reference.reconstructor.forward_model(torch.arange(2))
         scale = torch.linspace(0.7, 1.2, 15).reshape(3, 5)

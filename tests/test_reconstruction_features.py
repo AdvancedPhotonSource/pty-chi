@@ -23,11 +23,28 @@ pytestmark = pytest.mark.usefixtures("numerical_cpu")
     ],
 )
 def test_detector_crop_keeps_unshifted_fourier_coordinates(shape, expected):
-    model = SimpleNamespace(detector_size=shape)
+    model = SimpleNamespace(
+        detector_size=shape, free_space_propagator=SimpleNamespace(is_coordinate_shifted=True)
+    )
     result = PlanarPtychographyForwardModel.conform_to_detector_size(
         model, torch.arange(16.0).reshape(1, 4, 4)
     )
     torch.testing.assert_close(result, torch.tensor(expected))
+
+
+def test_near_field_detector_crop_and_adjoint_use_spatial_center():
+    model = SimpleNamespace(
+        detector_size=(3, 2), free_space_propagator=SimpleNamespace(is_coordinate_shifted=False)
+    )
+    wave = torch.arange(20.0).reshape(1, 4, 5)
+    detector = torch.tensor([[[6., 7.], [11., 12.], [16., 17.]]])
+    cropped = PlanarPtychographyForwardModel.conform_to_detector_size(model, wave)
+    torch.testing.assert_close(cropped, detector)
+
+    padded = PlanarPtychographyForwardModel.detector_crop_adjoint(model, detector, (4, 5))
+    expected = torch.zeros_like(wave)
+    expected[:, 1:4, 1:3] = detector
+    torch.testing.assert_close(padded, expected)
 
 
 @pytest.mark.parametrize("shape", [None, (4, 4)])

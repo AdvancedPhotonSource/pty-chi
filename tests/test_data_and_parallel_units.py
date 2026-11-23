@@ -12,6 +12,7 @@ import ptychi.parallel as parallel
 from ptychi.device import AcceleratorModuleWrapper
 from ptychi.io_handles import PtychographyDataset
 from ptychi.reconstructors.ad_general import AutodiffReconstructor
+from ptychi.reconstructors.base import IterativeReconstructor
 from ptychi.reconstructors.lsqml import MultiprocessLSQMLReconstructor
 
 pytestmark = pytest.mark.usefixtures("numerical_cpu")
@@ -32,6 +33,29 @@ def test_dataset_placement_and_indexing(device, save_on_device, monkeypatch):
         patterns.cpu(), torch.tensor([[[8.0, 9.0], [10.0, 11.0]], [[0.0, 1.0], [2.0, 3.0]]])
     )
     torch.testing.assert_close(data, torch.arange(12.0).reshape(3, 2, 2))
+
+
+def test_random_batch_order_uses_reconstructor_seed():
+    dataset = PtychographyDataset(torch.zeros(12, 2, 2))
+
+    def batch_orders(seed):
+        options = api.EPIEOptions().reconstructor_options
+        options.random_seed = seed
+        options.batch_size = 3
+        recon = IterativeReconstructor(None, dataset, options)
+        recon.build_dataloader()
+        return [[indices.tolist() for indices, _ in recon.dataloader] for _ in range(2)]
+
+    first = batch_orders(0)
+    assert first != batch_orders(1)
+    assert first == batch_orders(0)
+    assert first[0] != first[1]
+
+    torch.random.default_generator.manual_seed(42)
+    unseeded = batch_orders(None)
+    assert unseeded != batch_orders(None)
+    torch.random.default_generator.manual_seed(42)
+    assert unseeded == batch_orders(None)
 
 
 @pytest.mark.parametrize("rank,expected", [(0, [0, 1, 2]), (1, [3, 4])])
