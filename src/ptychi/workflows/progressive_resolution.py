@@ -28,9 +28,10 @@ class ProgressiveResolutionWorkflow(BaseWorkflow):
             )
 
         self._validate_spatial_shapes()
+        self._validate_simulated_intensity_binning()
         self._completed = False
         for i_level in range(self.workflow_options.num_resolution_levels):
-            factor = 2 ** (self.workflow_options.num_resolution_levels - 1 - i_level)
+            factor = self._get_downsampling_factor(i_level)
             level_data = self._build_level_data(i_level=i_level, factor=factor)
             level_options = self._copy_task_options()
             level_options.reconstructor_options.num_epochs = (
@@ -89,6 +90,44 @@ class ProgressiveResolutionWorkflow(BaseWorkflow):
                 raise ValueError(
                     "`valid_pixel_mask.shape` must match the diffraction pattern shape."
                 )
+
+    def _validate_simulated_intensity_binning(self) -> None:
+        """Check that the probe bins onto the diffraction patterns at every level.
+
+        The probe and the diffraction patterns are rounded independently at each level,
+        so a configuration that is valid at full resolution can be invalid at a coarser
+        level. Checking all levels up front fails before any reconstruction runs.
+        """
+        binning = (
+            self.task_options.reconstructor_options.forward_model_options
+            .simulated_intensity_binning_factor
+        )
+        if binning == 1:
+            return
+        num_levels = self.workflow_options.num_resolution_levels
+        for i_level in range(num_levels):
+            factor = self._get_downsampling_factor(i_level)
+            probe_shape = self._target_spatial_shape(self.probe_data, factor)
+            pattern_shape = self._target_spatial_shape(self.diffraction_data, factor)
+            level = (
+                f"At progressive-resolution level {i_level + 1} of {num_levels} (downsampling "
+                f"factor {factor}), the probe shape is {probe_shape} and the diffraction "
+                f"pattern shape is {pattern_shape}"
+            )
+            if probe_shape[0] % binning or probe_shape[1] % binning:
+                raise ValueError(
+                    f"{level}; the probe shape is not divisible by "
+                    f"`simulated_intensity_binning_factor` ({binning})."
+                )
+            binned_shape = (probe_shape[0] // binning, probe_shape[1] // binning)
+            if binned_shape[0] < pattern_shape[0] or binned_shape[1] < pattern_shape[1]:
+                raise ValueError(
+                    f"{level}; with `simulated_intensity_binning_factor` ({binning}) the "
+                    f"probe bins to {binned_shape}, smaller than the diffraction patterns."
+                )
+
+    def _get_downsampling_factor(self, i_level: int) -> int:
+        return 2 ** (self.workflow_options.num_resolution_levels - 1 - i_level)
 
     def _build_level_data(self, i_level: int, factor: int) -> dict[str, Tensor | None]:
         object_target = self._target_spatial_shape(self.object_data, factor)

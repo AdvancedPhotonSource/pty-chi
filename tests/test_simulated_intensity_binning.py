@@ -1,4 +1,4 @@
-"""Unit tests for simulated_intensity_binning_factor: wave-grid intensity binned into detector pixels."""
+"""Unit tests for simulated_intensity_binning_factor: binning wave-grid intensity."""
 import numpy as np
 import pytest
 import torch
@@ -103,9 +103,14 @@ def test_forward_model_bins_then_crops(options_class, distance_m, low_memory):
     indices = torch.arange(2)
     unbinned = make_task(options_class, factor=1, shape=(8, 12), **kwargs)
     binned = ip.sum_bin_2d(unbinned.reconstructor.forward_model(indices), 2)
-    expected = torch.fft.ifftshift(
-        ip.central_crop(torch.fft.fftshift(binned, dim=(-2, -1)), shape), dim=(-2, -1)
-    )
+    if np.isinf(distance_m):
+        # Far-field intensities keep the zero frequency at the array corner.
+        expected = torch.fft.ifftshift(
+            ip.central_crop(torch.fft.fftshift(binned, dim=(-2, -1)), shape), dim=(-2, -1)
+        )
+    else:
+        # Near-field intensities are in spatial order.
+        expected = ip.central_crop(binned, shape)
     model = make_task(options_class, shape=shape, **kwargs).reconstructor.forward_model
     torch.testing.assert_close(model(indices), expected, rtol=1e-12, atol=1e-12)
 
@@ -185,7 +190,8 @@ def test_projection_scales_each_block_to_the_measured_intensity(factor, response
     # The vanishing block receives the target evenly in the first mode.
     target = measured[0, 0, 0]
     if response:
-        target = (target - model.detector_response.offset[0, 0]) / model.detector_response.gain[0, 0]
+        detector_response = model.detector_response
+        target = (target - detector_response.offset[0, 0]) / detector_response.gain[0, 0]
     expected = (target / factor**2).sqrt().expand(factor, factor).to(projected.dtype)
     torch.testing.assert_close(projected[0, 0, :factor, :factor], expected)
     torch.testing.assert_close(projected[0, 1, :factor, :factor], torch.zeros_like(expected))

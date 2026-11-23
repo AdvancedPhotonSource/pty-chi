@@ -1287,14 +1287,21 @@ class ForwardModelOptions(Options):
     Gradients and magnitude projections use the transposes in reverse order; the transpose
     of binning repeats each detector pixel's value over its U x U block.
 
-    In the far field the object pixel size is unchanged and the real-space window grows
+    In the far field the object pixel pitch is unchanged and the real-space window grows
     U times, which removes aliasing when the probe does not fit in the native window
-    (an undersampled detector). In the near field, give the object pixel size divided by U
-    to reconstruct at U times finer resolution. Blocks start at the zero-frequency pixel in
-    the internal (unshifted) FFT ordering, which matches the ``binning_2D`` convention of
-    PtychoShelves and fold_slice, where ``p.detector.upsampling`` is the base-2 logarithm
-    of this factor. Summing rather than averaging conserves the photon count, so
-    ``rescale_probe`` and ``probe_power`` keep their meaning.
+    (an undersampled detector). In the near field the simulated detector intensity needs
+    a pixel pitch U times finer than the detector's. With angular-spectrum propagation,
+    which keeps the pixel pitch, divide the object pixel size by U. With the Fresnel
+    transform, keep the object pixel size: the U times larger grid already gives the finer
+    pitch. Binning can change which of the two is selected; see the initialization
+    recommendations in the documentation.
+
+    Blocks start at the first pixel of the propagator's output array. In the far field
+    that is the zero-frequency pixel of the internal (unshifted) FFT ordering, which
+    matches the ``binning_2D`` convention of PtychoShelves and fold_slice, where
+    ``p.detector.upsampling`` is the base-2 logarithm of this factor. Summing rather than
+    averaging conserves the photon count, so ``rescale_probe`` and ``probe_power`` keep
+    their meaning.
     """
 
 

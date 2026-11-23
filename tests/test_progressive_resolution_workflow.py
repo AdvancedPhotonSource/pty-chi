@@ -1,3 +1,5 @@
+import re
+
 import pytest
 import torch
 from pydantic import ValidationError
@@ -138,6 +140,52 @@ def test_progressive_resolution_options_validate_levels_and_epochs():
         api.ProgressiveResolutionWorkflowOptions(
             num_resolution_levels=2, num_epochs_all_levels=[1, 0]
         )
+
+
+@pytest.mark.parametrize(
+    "probe_shape,message",
+    [
+        # 18 x 22 bins exactly onto 9 x 11 at full resolution, but not at half resolution.
+        (
+            (18, 22),
+            "level 1 of 2 (downsampling factor 2), the probe shape is (9, 11) and the "
+            "diffraction pattern shape is (5, 6); the probe shape is not divisible by "
+            "`simulated_intensity_binning_factor` (2).",
+        ),
+        (
+            (16, 20),
+            "level 1 of 2 (downsampling factor 2), the probe shape is (8, 10) and the "
+            "diffraction pattern shape is (5, 6); with `simulated_intensity_binning_factor` "
+            "(2) the probe bins to (4, 5), smaller than the diffraction patterns.",
+        ),
+        ((20, 24), None),
+    ],
+)
+def test_simulated_intensity_binning_is_validated_at_every_level(
+    monkeypatch, probe_shape, message
+):
+    _reset_fake_task()
+    monkeypatch.setattr(progressive_resolution_module, "PtychographyTask", _FakeTask)
+    options = _task_options()
+    options.reconstructor_options.forward_model_options.simulated_intensity_binning_factor = 2
+    data = _workflow_data()
+    data["probe_data"] = torch.ones((1, 1, *probe_shape), dtype=torch.complex64, device="cpu")
+    workflow = ProgressiveResolutionWorkflow(
+        options,
+        workflow_options=api.ProgressiveResolutionWorkflowOptions(
+            num_resolution_levels=2, num_epochs_all_levels=[1, 1]
+        ),
+        **data,
+    )
+
+    if message is None:
+        workflow.run()
+        assert len(_FakeTask.instances) == 2
+        return
+    with pytest.raises(ValueError, match=re.escape(message)):
+        workflow.run()
+    # The check runs before the first level starts.
+    assert _FakeTask.instances == []
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA device required")

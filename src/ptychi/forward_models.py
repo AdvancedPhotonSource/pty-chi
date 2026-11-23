@@ -1033,7 +1033,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
     def map_intensity_to_detector(self, intensity: Tensor, include_offset: bool = True) -> Tensor:
         """Map wave-grid intensity to detector pixels: bin, crop, blur, gain, offset.
 
-        Both grids use internal FFT ordering. Binning sums each F x F block of
+        Both grids use the propagator's output ordering. Binning sums each F x F block of
         wave-grid pixels, where F is ``simulated_intensity_binning_factor``.
         With include_offset=False this applies only the linear part, also used
         for intensity perturbations.
@@ -1047,7 +1047,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         return y
 
     def detector_crop_adjoint(self, y: Tensor, wave_shape: tuple[int, int]) -> Tensor:
-        """Zero-insert detector pixels into a larger grid in internal FFT ordering.
+        """Zero-insert detector pixels into a larger grid in the propagator's output ordering.
 
         This is the exact transpose of conform_to_detector_size, including
         mixed odd/even dimensions. Pixels outside the detector receive zero.
