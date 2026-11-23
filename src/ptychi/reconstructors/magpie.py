@@ -172,9 +172,12 @@ class MAGPIEReconstructor(PIEReconstructor):
                 "GM-rPIE/GM-MAGPIE does not support object/probe resampling. "
                 "Use matching object and probe pixel sizes and aspect ratios, or select PIE."
             )
-        if tuple(self.dataset.patterns.shape[-2:]) != tuple(probe_data.shape[-2:]):
+        factor = self.forward_model.simulated_intensity_binning_factor
+        binned_probe_shape = self.forward_model.binned_wave_shape(tuple(probe_data.shape[-2:]))
+        if tuple(self.dataset.patterns.shape[-2:]) != binned_probe_shape:
             raise MAGPIECapabilityError(
-                "GM-rPIE/GM-MAGPIE requires matching detector and probe shapes; received "
+                "GM-rPIE/GM-MAGPIE requires matching detector and probe shapes, after dividing "
+                f"the probe shape by simulated_intensity_binning_factor ({factor}); received "
                 f"{tuple(self.dataset.patterns.shape[-2:])} and {tuple(probe_data.shape[-2:])}. "
                 "Supply matching shapes or select a reconstructor supporting detector cropping."
             )

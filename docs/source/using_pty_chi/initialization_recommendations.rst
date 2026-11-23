@@ -75,6 +75,36 @@ counts per unit area. Fresnel and Fraunhofer output pixel pitches are
 ``lambda * abs(z) / (W * dx)`` and ``lambda * abs(z) / (H * dy)``.
 
 
+Reconstruction grids finer than the detector
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If the probe does not fit in the real-space window of a far-field reconstruction,
+``lambda * z / (N * detector_pixel_size)`` for an ``N``-pixel detector, the
+reconstruction aliases. Setting
+``reconstructor_options.forward_model_options.simulated_intensity_binning_factor = U``
+puts the probe, object patches and exit waves on a grid ``U`` times finer than the
+detector. The forward model sums each ``U x U`` block of the simulated intensity into
+one pixel before any detector cropping; PtychoShelves and fold_slice call this
+detector upsampling. Supply a probe of ``U * N`` pixels per side and leave the
+diffraction data at their measured size:
+
+- In the far field, keep the object pixel size. The real-space window grows ``U``
+  times. When starting from a probe reconstructed without binning, zero-pad it to
+  ``U * N`` (``ptychi.image_proc.central_pad``) rather than interpolating it, which
+  would magnify it.
+- In the near field, divide the object pixel size by ``U`` to reconstruct at ``U``
+  times finer resolution, and interpolate a coarser probe onto the finer grid.
+
+The blocks start at the first pixel in the internal FFT ordering, as in the
+``binning_2D`` convention of PtychoShelves and fold_slice, whose
+``p.detector.upsampling`` is ``log2(U)``. Summing conserves the photon count, so
+``rescale_probe`` and ``probe_power`` keep the meaning described above.
+fold_slice averages each block instead of summing it, so to reuse a probe from an
+upsampled fold_slice reconstruction, divide it by ``U`` in addition to the
+conversion in `Migrating saved probes`_, or apply ``rescale_probe``. Cost and
+memory grow as ``U ** 2``.
+
+
 Incoherent probe modes
 ~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -77,6 +77,9 @@ class BHReconstructor(AnalyticalIterativePtychographyReconstructor):
             shift_operator=self.options.forward_model_options.shift_operator,
             apply_subpixel_shifts_on_probe=False,
             diffraction_pattern_blur_sigma=self.options.forward_model_options.diffraction_pattern_blur_sigma,
+            simulated_intensity_binning_factor=(
+                self.options.forward_model_options.simulated_intensity_binning_factor
+            ),
         )
 
     def build_loss_tracker(self):
