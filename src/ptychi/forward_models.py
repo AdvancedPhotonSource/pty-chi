@@ -132,7 +132,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
     @dataclasses.dataclass
     class PlanarPtychographyIntermediateVariables(IntermediateVariables):
         detector_intensity: Tensor = None
-        """Detector-grid intensity after crop/blur and before gain/offset."""
+        """Detector-grid intensity after binning/crop/blur and before gain/offset."""
 
         positions: Tensor = None
         """Tensor of shape `[batch_size, 2]`, probe positions in the 
@@ -175,6 +175,7 @@ class PlanarPtychographyForwardModel(ForwardModel):
         diffraction_pattern_blur_sigma: Optional[float] = None,
         low_memory_mode: bool = False,
         shift_operator: ShiftOperators = ShiftOperators.AUTO,
+        simulated_intensity_binning_factor: int = 1,
         *args,
         **kwargs,
     ) -> None:
@@ -220,11 +221,17 @@ class PlanarPtychographyForwardModel(ForwardModel):
         shift_operator : ShiftOperators
             AUTO selects full-object periodic sampling for near-field illumination
             exceeding 80% of both object dimensions on the probe grid.
+        simulated_intensity_binning_factor : int
+            The binning factor of the simulated intensity: the number of wave-grid
+            pixels per detector pixel along each axis. Each factor x factor block of
+            the propagated intensity is summed into one pixel, before any detector
+            cropping.
         """
         super().__init__(
             parameter_group, retain_intermediates=retain_intermediates, detector_size=detector_size, 
             *args, **kwargs
         )
+        self.simulated_intensity_binning_factor = int(simulated_intensity_binning_factor)
         self.low_mem_mode = low_memory_mode
         self.detector_response = parameter_group.detector_response
 
@@ -684,6 +691,29 @@ class PlanarPtychographyForwardModel(ForwardModel):
             if self.wavelength_m is None:
                 raise ValueError("Wavelength must be given when the object is multislice.")
             
+        factor = self.simulated_intensity_binning_factor
+        if factor < 1:
+            raise ValueError(
+                f"`simulated_intensity_binning_factor` must be at least 1, got {factor}."
+            )
+        if factor > 1:
+            probe_shape = tuple(self.probe.get_spatial_shape())
+            if probe_shape[0] % factor or probe_shape[1] % factor:
+                raise ValueError(
+                    f"The probe shape {probe_shape} must be divisible by "
+                    f"`simulated_intensity_binning_factor` ({factor})."
+                )
+            binned_shape = self.binned_wave_shape(probe_shape)
+            if self.detector_size is not None and (
+                self.detector_size[0] > binned_shape[0] or self.detector_size[1] > binned_shape[1]
+            ):
+                raise ValueError(
+                    f"With `simulated_intensity_binning_factor` = {factor}, the probe shape "
+                    f"{probe_shape} bins to {binned_shape}, smaller than the detector "
+                    f"{tuple(self.detector_size)}. Supply a probe of at least {factor} times "
+                    "the detector size."
+                )
+
         if (self.resolved_shift_operator == ShiftOperators.PATCH
                 and self.free_space_propagation_distance_m < torch.inf and not self.pad_for_shift):
             logger.warning(
@@ -995,13 +1025,21 @@ class PlanarPtychographyForwardModel(ForwardModel):
             return y
         return y * self.detector_response.gain + self.detector_response.offset
 
-    def map_intensity_to_detector(self, intensity: Tensor, include_offset: bool = True) -> Tensor:
-        """Map wave-grid intensity to detector pixels: crop, blur, gain, offset.
+    def binned_wave_shape(self, wave_shape: tuple[int, int]) -> tuple[int, int]:
+        """Shape of a wave-grid image after binning the simulated intensity, before cropping."""
+        factor = self.simulated_intensity_binning_factor
+        return wave_shape[0] // factor, wave_shape[1] // factor
 
-        Both grids use internal FFT ordering. With include_offset=False this
-        applies only the linear part, also used for intensity perturbations.
+    def map_intensity_to_detector(self, intensity: Tensor, include_offset: bool = True) -> Tensor:
+        """Map wave-grid intensity to detector pixels: bin, crop, blur, gain, offset.
+
+        Both grids use the propagator's output ordering. Binning sums each F x F block of
+        wave-grid pixels, where F is ``simulated_intensity_binning_factor``.
+        With include_offset=False this applies only the linear part, also used
+        for intensity perturbations.
         """
-        y = self.blur_diffraction_patterns(self.conform_to_detector_size(intensity))
+        y = ip.sum_bin_2d(intensity, self.simulated_intensity_binning_factor)
+        y = self.blur_diffraction_patterns(self.conform_to_detector_size(y))
         if include_offset:
             return self.apply_detector_response(y)
         if not self.detector_response.is_identity:
@@ -1009,10 +1047,12 @@ class PlanarPtychographyForwardModel(ForwardModel):
         return y
 
     def detector_crop_adjoint(self, y: Tensor, wave_shape: tuple[int, int]) -> Tensor:
-        """Zero-insert detector pixels into the wave grid in internal FFT ordering.
+        """Zero-insert detector pixels into a larger grid in the propagator's output ordering.
 
         This is the exact transpose of conform_to_detector_size, including
         mixed odd/even dimensions. Pixels outside the detector receive zero.
+        With simulated-intensity binning, pass the binned wave shape
+        (see binned_wave_shape), which conform_to_detector_size crops from.
         """
         if tuple(y.shape[-2:]) == tuple(wave_shape):
             return y
@@ -1027,7 +1067,9 @@ class PlanarPtychographyForwardModel(ForwardModel):
     def intensity_to_detector_adjoint(self, gradient: Tensor, wave_shape: tuple[int, int]) -> Tensor:
         """Pull a real detector-intensity gradient back to the wave intensity.
 
-        For y = m * B(C(I)) + b this is C* B* (m * gradient).
+        For y = m * B(C(S(I))) + b this is S* C* B* (m * gradient), where S sums
+        the blocks of simulated-intensity binning and S* repeats each value over
+        its block.
         The offset has zero derivative with respect to wave intensity. B* includes
         the transpose of replicated-edge padding, differing from forward blur at
         the boundaries.
@@ -1035,7 +1077,8 @@ class PlanarPtychographyForwardModel(ForwardModel):
         if not self.detector_response.is_identity:
             gradient = gradient * self.detector_response.gain
         gradient = self.blur_diffraction_patterns(gradient, adjoint=True)
-        return self.detector_crop_adjoint(gradient, wave_shape)
+        gradient = self.detector_crop_adjoint(gradient, self.binned_wave_shape(wave_shape))
+        return ip.sum_bin_2d(gradient, self.simulated_intensity_binning_factor, adjoint=True)
 
     @timer()
     def forward(self, indices: Tensor, return_object_patches: bool = False) -> Tensor:
@@ -1281,7 +1324,10 @@ class NoiseModel(torch.nn.Module):
         A fixed identity response on a matching grid retains the historical 1e-7
         amplitude stabilization, including its zero-wave behavior. Other
         cases use exact norm replacement, choosing the first mode's phase
-        as zero when the input wave vanishes. Blur requires LSQML or autodiff.
+        as zero when the input wave vanishes. With simulated-intensity binning, every
+        wave pixel of a detector pixel's block is scaled by the same factor, so
+        the summed block intensity matches the target; a vanishing block puts
+        the target evenly into the first mode. Blur requires LSQML or autodiff.
 
         Parameters
         ----------
@@ -1309,6 +1355,7 @@ class NoiseModel(torch.nn.Module):
         same_grid = wave_shape == actual_pattern_intensity.shape[-2:]
         target = actual_pattern_intensity
         identity_response = True
+        factor = getattr(forward_model, "simulated_intensity_binning_factor", 1)
         if forward_model is not None:
             if forward_model.diffraction_pattern_blur_sigma is not None:
                 raise ValueError(
@@ -1332,9 +1379,10 @@ class NoiseModel(torch.nn.Module):
             if constrained_pixel_mask is None else constrained_pixel_mask
         )
         if forward_model is not None:
-            target = forward_model.detector_crop_adjoint(target, wave_shape)
-            mask = forward_model.detector_crop_adjoint(mask, wave_shape)
-        intensity = psi.abs().square().sum(1)
+            binned_shape = (wave_shape[0] // factor, wave_shape[1] // factor)
+            target = forward_model.detector_crop_adjoint(target, binned_shape)
+            mask = forward_model.detector_crop_adjoint(mask, binned_shape)
+        intensity = ip.sum_bin_2d(psi.abs().square().sum(1), factor)
         if identity_response and same_grid:
             # Preserve the original same-grid amplitude stabilization.
             psi_prime = (
@@ -1342,9 +1390,14 @@ class NoiseModel(torch.nn.Module):
             )
         else:
             scale = (target / torch.where(intensity > 0, intensity, 1)).sqrt()
-            psi_prime = psi * scale[:, None]
+            psi_prime = psi * ip.sum_bin_2d(scale, factor, adjoint=True)[:, None]
             # A zero wave has no phase; choose the first mode to satisfy the norm.
-            psi_prime[:, 0] = torch.where(intensity > 0, psi_prime[:, 0], target.sqrt())
+            psi_prime[:, 0] = torch.where(
+                ip.sum_bin_2d(intensity > 0, factor, adjoint=True),
+                psi_prime[:, 0],
+                ip.sum_bin_2d((target / factor**2).sqrt(), factor, adjoint=True),
+            )
+        mask = ip.sum_bin_2d(mask, factor, adjoint=True)
         return torch.where(mask[:, None] if mask.ndim == 3 else mask, psi_prime, psi)
 
     def backward(self, *args, **kwargs):
@@ -1365,15 +1418,15 @@ class NoiseModel(torch.nn.Module):
     ) -> Tensor:
         """Return the unnormalized Wirtinger NLL gradient of the detector wave.
 
-        For I=sum_j|psi_j|^2 and y=m*B(C(I))+b, compose the masked likelihood
+        For I=sum_j|psi_j|^2 and y=m*B(C(S(I)))+b, compose the masked likelihood
         derivative with the detector Jacobian adjoint:
-        dL/dpsi_j* = psi_j * C* B* (m * dL/dy).
+        dL/dpsi_j* = psi_j * S* C* B* (m * dL/dy).
         The offset enters through y_pred and has zero derivative with respect to psi.
-        Crop, blur, gain and their coordinate conventions are supplied by
+        Binning, crop, blur, gain and their coordinate conventions are supplied by
         forward_model. The noise model owns this complete chain-rule calculation.
 
         Omitting forward_model assumes an identity detector on the wave grid.
-        Pass it whenever prediction includes cropping, blur or a response map.
+        Pass it whenever prediction includes binning, cropping, blur or a response map.
         The return value has the shape of psi_far, including its probe-mode
         dimension, and uses the noise model's usual denominator stabilization.
         """

@@ -321,7 +321,7 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
     def _get_detector_model_step_size(self, y_pred, y_true, indices, gradient, eps=1e-5):
         """Approximate the reciprocal-space likelihood search with two fixed-point passes.
 
-        For the linear detector operator A (crop, blur, gain), precompute
+        For the linear detector operator A (binning, crop, blur, gain), precompute
         s = A Re(sum(conj(psi) * g)) and t = A sum(|g|^2). The trial prediction
         is exactly y(alpha) = y_pred - 2*alpha*s + alpha^2*t, with the detector
         offset already included in y_pred. All detector arrays use unshifted
@@ -378,7 +378,9 @@ class LSQMLReconstructor(AnalyticalIterativePtychographyReconstructor):
 
         Response maps or blur use two fixed-point passes on the detector
         intensity polynomial along the supplied gradient. The original steps are
-        retained for an ideal detector, optionally cropped. Object/probe steps
+        retained for an ideal detector, optionally binned or cropped. They stay
+        exact under binning because the gradient scales every wave pixel of a
+        detector pixel's block by that pixel's factor. Object/probe steps
         fitting the updated wavefield are solved by calculate_optimal_step_sizes.
         """
         model = self.forward_model

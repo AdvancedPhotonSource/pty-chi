@@ -47,6 +47,10 @@ class AutodiffPtychographyReconstructor(AutodiffReconstructor, IterativePtychogr
         )
         self.forward_model_params["shift_operator"] = self.options.forward_model_options.shift_operator
         self.forward_model_params["low_memory_mode"] = self.options.forward_model_options.low_memory_mode
+        factor = self.options.forward_model_options.simulated_intensity_binning_factor
+        if factor != 1:
+            # Passed only when used, so custom forward models need not accept it.
+            self.forward_model_params["simulated_intensity_binning_factor"] = factor
         return super().build_forward_model()
     
     def run_pre_epoch_hooks(self) -> None:

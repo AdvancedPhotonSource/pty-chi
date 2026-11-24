@@ -75,6 +75,57 @@ counts per unit area. Fresnel and Fraunhofer output pixel pitches are
 ``lambda * abs(z) / (W * dx)`` and ``lambda * abs(z) / (H * dy)``.
 
 
+Reconstruction grids finer than the detector
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Setting
+``reconstructor_options.forward_model_options.simulated_intensity_binning_factor = U``
+simulates the detector-plane intensity at a ``U`` times finer pixel pitch than the
+detector's: the forward model sums each ``U x U`` block of the simulated intensity
+into one pixel before any detector cropping. PtychoShelves and fold_slice call this
+detector upsampling. For a detector with ``N`` pixels of pitch ``p`` along an axis,
+supply a probe of ``U * N`` pixels along that axis and leave the diffraction data at
+their measured size. The pixel size (``object_options.pixel_size_m``) depends on the
+propagator:
+
+- **Far field.** The pixel size is ``dx = lambda * abs(z) / (N * p)`` and the
+  real-space window is ``N * dx = lambda * abs(z) / p``. A probe that does not fit in
+  this window aliases. Binning keeps the pixel size ``dx`` and enlarges the
+  window ``U`` times, to ``U * N * dx``. When starting from a probe reconstructed
+  without binning, zero-pad it to ``U * N`` pixels (``ptychi.image_proc.central_pad``)
+  rather than interpolating it, which would magnify it.
+- **Near field, angular-spectrum propagation.** The angular spectrum keeps the sampling
+  between planes, so the simulated detector pitch equals the pixel size. Divide the
+  pixel size by ``U`` to simulate the detector at pitch ``p / U``. The pixel size is
+  then ``U`` times smaller over the same window; interpolate a probe from the original
+  grid onto the finer grid.
+- **Near field, Fresnel transform.** The simulated detector pitch is
+  ``lambda * abs(z) / (N_wave * dx)`` for a grid of ``N_wave`` pixels of size ``dx``.
+  Keeping the original pixel size on the ``U * N`` grid already gives the pitch
+  ``p / U``, so keep the pixel size. As in the far field, the window grows ``U`` times;
+  zero-pad a probe from the original grid.
+
+At a finite propagation distance, pty-chi uses the Fresnel transform when
+``dx ** 2 / (lambda * abs(z)) < 1 / N_wave`` along either axis, and the angular
+spectrum otherwise. Binning changes ``N_wave``, and with the angular spectrum also
+``dx``, so the binned grid can select a different propagator than the original
+one. Both rules select the propagator they assume only if
+``N * p ** 2 > U * lambda * abs(z)`` along each axis (equality suffices for the angular
+spectrum). Otherwise the binned grid selects the other propagator and simulates the
+wrong detector pitch, even if the same detector works without binning. Check
+``task.reconstructor.forward_model.free_space_propagator`` before reconstructing.
+
+The blocks start at the first pixel of the propagator's output array. In the far
+field, that is the zero-frequency pixel of the internal FFT ordering, as in the
+``binning_2D`` convention of PtychoShelves and fold_slice, whose
+``p.detector.upsampling`` is ``log2(U)``. Summing conserves the photon count, so
+``rescale_probe`` and ``probe_power`` keep the meaning described above.
+fold_slice averages each block instead of summing it, so to reuse a probe from an
+upsampled fold_slice reconstruction, divide it by ``U`` in addition to the
+conversion in `Migrating saved probes`_, or apply ``rescale_probe``. Cost and
+memory grow as ``U ** 2``.
+
+
 Incoherent probe modes
 ~~~~~~~~~~~~~~~~~~~~~~~~
 

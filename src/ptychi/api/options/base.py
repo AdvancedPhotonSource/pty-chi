@@ -1267,6 +1267,43 @@ class ForwardModelOptions(Options):
     this sigma. This is useful to mitigate the effect of the detector's point spread function.
     """
 
+    simulated_intensity_binning_factor: int = PydanticField(default=1, ge=1)
+    """Binning factor U applied to the simulated intensity before it is compared with the
+    data, for reconstructing on a grid finer than the detector: the number of wave-grid
+    pixels per detector pixel along each axis. The probe, object patches and exit waves
+    live on the wave grid, so the probe must be at least U times the detector size in each
+    dimension, and divisible by U. The measured diffraction patterns are not binned and
+    keep their size.
+
+    With U > 1, the forward model maps the propagated wave to the detector in this order:
+
+    1. Sum the intensity over probe modes on the wave grid.
+    2. Bin: sum each U x U block of the intensity into one pixel, so a wave grid of shape
+       (h, w) becomes (h // U, w // U).
+    3. Crop the binned intensity to the detector size if it is larger, the same detector
+       cropping as without binning.
+    4. Apply the diffraction pattern blur, then the detector response (gain and offset).
+
+    Gradients and magnitude projections use the transposes in reverse order; the transpose
+    of binning repeats each detector pixel's value over its U x U block.
+
+    In the far field the pixel size (``object_options.pixel_size_m``) is unchanged and the
+    real-space window grows U times, which removes aliasing when the probe does not fit in
+    the native window (an undersampled detector). In the near field the simulated detector
+    intensity needs a pixel pitch U times finer than the detector's. With angular-spectrum
+    propagation, which keeps the sampling between planes, divide the pixel size by U. With
+    the Fresnel transform, keep the pixel size: the U times larger grid already gives the
+    finer detector pitch. Binning can change which of the two is selected; see the
+    initialization recommendations in the documentation.
+
+    Blocks start at the first pixel of the propagator's output array. In the far field
+    that is the zero-frequency pixel of the internal (unshifted) FFT ordering, which
+    matches the ``binning_2D`` convention of PtychoShelves and fold_slice, where
+    ``p.detector.upsampling`` is the base-2 logarithm of this factor. Summing rather than
+    averaging conserves the photon count, so ``rescale_probe`` and ``probe_power`` keep
+    their meaning.
+    """
+
 
 @dataclass
 class ReconstructorOptions(Options):

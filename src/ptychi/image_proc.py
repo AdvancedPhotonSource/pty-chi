@@ -1819,6 +1819,45 @@ def central_crop_or_pad(img: Tensor, target_size: tuple[int, int]) -> Tensor:
     return img
 
 
+@timer()
+def sum_bin_2d(img: Tensor, factor: int, adjoint: bool = False) -> Tensor:
+    """
+    Sum non-overlapping ``factor`` x ``factor`` blocks of the last two dimensions.
+
+    Output pixel ``(i, j)`` collects input rows ``[i * factor, (i + 1) * factor)`` and
+    the same range of columns, so in unshifted FFT ordering the zero-frequency sample
+    opens the first block. With ``adjoint=True`` this returns the exact transpose, which
+    repeats each pixel into a ``factor`` x ``factor`` block.
+
+    Parameters
+    ----------
+    img : Tensor
+        A (..., H, W) real or complex tensor. Without ``adjoint``, H and W must be
+        divisible by ``factor``.
+    factor : int
+        The positive binning factor. A factor of 1 returns ``img`` unchanged.
+    adjoint : bool
+        Apply the transpose, mapping (..., H, W) to (..., factor * H, factor * W).
+
+    Returns
+    -------
+    Tensor
+        The binned image(s), or with ``adjoint`` the block-replicated image(s).
+    """
+    if factor == 1:
+        return img
+    *lead, h, w = img.shape
+    if adjoint:
+        return img[..., :, None, :, None].expand(*lead, h, factor, w, factor).reshape(
+            *lead, h * factor, w * factor
+        )
+    if h % factor or w % factor:
+        raise ValueError(
+            f"Image shape ({h}, {w}) is not divisible by the binning factor {factor}."
+        )
+    return img.reshape(*lead, h // factor, factor, w // factor, factor).sum((-3, -1))
+
+
 def fourier_resize(
     image: Tensor,
     target_shape: tuple[int, int],

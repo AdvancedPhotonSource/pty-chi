@@ -41,7 +41,9 @@ manually FFT-shifting them. The task applies ``torch.fft.fftshift`` to both maps
 and patterns along the last two axes. With ``fft_shift=False``, the maps are
 used as supplied: align them with the already-shifted patterns when the
 far-field DC pixel is at the top left, or with the unshifted detector images
-for near-field data. After detector cropping and blur, the forward model applies
+for near-field data. After binning (see
+``ForwardModelOptions.simulated_intensity_binning_factor``), detector cropping
+and blur, the forward model applies
 ``intensity * gain + offset``. The gain is dimensionless and the
 offset uses measured-intensity units. Both maps must be real and finite, and
 gain must be strictly positive in the reconstruction dtype, including at masked
